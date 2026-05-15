@@ -44,7 +44,7 @@ def get_ai_answer(user_query):
             f"HERE IS YOUR LIVE KNOWLEDGE BASE (Use this info to answer):\n"
             f"{saved_knowledge}\n"
             f"Rule: Never use placeholders like [insert link]."
-        ))
+        )
         
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
