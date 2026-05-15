@@ -9,7 +9,7 @@ app = Flask(__name__)
 # সরাসরি ভ্যালুগুলো এখানে সেট করুন (অথবা পরিবেশ ভেরিয়েবল ব্যবহার করুন)
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
 PHONE_NUMBER_ID = "1039959469208417"
-GEMINI_KEY = "AIzaSyD-xmtXFAJNtFgfE1ASFTYbvXzyP3qxBRQ"
+GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
 # Gemini AI Setup
