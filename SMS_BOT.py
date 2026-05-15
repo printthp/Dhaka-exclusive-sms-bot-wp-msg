@@ -51,28 +51,28 @@ def send_message(recipient_number, message_body):
     print(f"DEBUG: Meta Status: {response.status_code}")
     print(f"DEBUG: Meta Full Response: {response.text}")
 
-@app.route("/webhook", methods=["GET"])
-def verify():
-    # ফেসবুক থেকে আসা ভেরিফিকেশন রিকোয়েস্ট চেক করা
-    if request.args.get("hub.verify_token") == VERIFY_TOKEN:
-        return request.args.get("hub.challenge"), 200
-    return "Failed", 403
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
     try:
-        # মেসেজ চেক করা
+        # ভ্যালু চেক করা
         if "messages" in data["entry"][0]["changes"][0]["value"]:
             value = data["entry"][0]["changes"][0]["value"]
             msg = value["messages"][0]
             from_number = msg["from"]
-            user_text = msg["text"]["body"]
             
-            print(f"New Message from {from_number}: {user_text}")
-            
-            ai_response = get_ai_answer(user_text)
-            send_message(from_number, ai_response)
+            # চেক করা হচ্ছে মেসেজটি কি টেক্সট নাকি অন্য কিছু (ছবি/ভিডিও)
+            if msg.get("type") == "text":
+                user_text = msg["text"]["body"]
+                print(f"New Message from {from_number}: {user_text}")
+                
+                ai_response = get_ai_answer(user_text)
+                send_message(from_number, ai_response)
+            else:
+                # যদি টেক্সট না হয়ে ছবি বা অন্য কিছু হয়
+                print(f"Received a non-text message ({msg.get('type')}) from {from_number}")
+                send_message(from_number, "দুঃখিত, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি। দয়া করে আপনার প্রশ্নটি লিখে জানান।")
+                
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
         
