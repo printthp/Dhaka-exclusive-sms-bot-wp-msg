@@ -2,7 +2,6 @@ import os
 import requests
 from flask import Flask, request
 import google.generativeai as genai
-
 app = Flask(__name__)
 
 # --- রেন্ডার সেটিংস থেকে তথ্য নেওয়া (সঠিক নিয়ম) ---
