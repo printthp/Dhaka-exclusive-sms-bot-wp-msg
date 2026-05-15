@@ -51,12 +51,11 @@ def get_ai_answer(user_query):
         
         model = genai.GenerativeModel('gemini-2.5-flash')
                     
-                    # --- এখানে সরাসরি আপনার ওয়েবসাইটের লিংক দেওয়া হলো ---
                     context = (
                         "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
                         "NEVER use 'নমস্কার'. ALWAYS use 'প্রিয় গ্রাহক'. Answer politely in Bengali.\n\n"
                         "CRITICAL INSTRUCTION:\n"
-                        "Our official website is: https://dhakaexclusive.org/ \n"
+                        "Our official website is: https://dhakaexclusive.com/ \n"
                         "When a customer sends an image of a product, analyze the image carefully. "
                         "Search or refer to our website (https://dhakaexclusive.com/) to find the exact product name, live price, available sizes, and measurements. "
                         "Then, reply to the 'প্রিয় গ্রাহক' with the exact details in a polite manner.\n\n"
