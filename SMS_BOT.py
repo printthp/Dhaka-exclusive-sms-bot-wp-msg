@@ -14,7 +14,8 @@ VERIFY_TOKEN = "dhakaex0020"
 
 # জেমিনি এআই সেটআপ
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-pro')
+# কোডের এই লাইনটি চেক করে এভাবে পরিবর্তন করুন
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_ai_answer(user_query):
     try:
