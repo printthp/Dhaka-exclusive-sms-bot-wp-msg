@@ -12,20 +12,25 @@ PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
-# Gemini AI Setup
+# --- Gemini AI Setup ---
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-pro')
-
 
 def get_ai_answer(user_query):
     try:
-        # ঢাকা এক্সক্লুসিভ এর জন্য কাস্টম প্রম্পট
+        # v1beta এরর এড়াতে সরাসরি লেটেস্ট মডেল কল করা
+        model = genai.GenerativeModel('gemini-1.5-flash') 
         context = "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. Answer politely in Bengali."
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
     except Exception as e:
-        print(f"AI ERROR: {e}")
-        return "দুঃখিত, আমাদের এআই সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
+        # যদি flash না কাজ করে তবে pro ট্রাই করবে
+        try:
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(user_query)
+            return response.text
+        except:
+            print(f"AI ERROR: {e}")
+            return "দুঃখিত, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
