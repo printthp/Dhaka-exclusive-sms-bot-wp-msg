@@ -12,9 +12,8 @@ PHONE_NUMBER_ID = os.environ.get('1039959469208417')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 VERIFY_TOKEN = "dhakaex0020"
 
-# জেমিনি এআই সেটআপ
-genai.configure(api_key=GEMINI_KEY)
-# কোডের এই লাইনটি চেক করে এভাবে পরিবর্তন করুন
+# জেমিনি এআই কনফিগারেশন (এপিআই ভার্সন ১ নিশ্চিত করা)
+genai.configure(api_key=GEMINI_KEY, client_options={"api_version": "v1"})
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_ai_answer(user_query):
