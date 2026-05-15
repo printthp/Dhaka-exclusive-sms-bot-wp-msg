@@ -1,5 +1,6 @@
 import os
 import requests
+processed_messages = set()
 from flask import Flask, request
 import google.generativeai as genai
 
