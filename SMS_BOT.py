@@ -8,8 +8,8 @@ app = Flask(__name__)
 # Environment Variables
 PERMANENT_TOKEN = os.environ.get('EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD')
 PHONE_NUMBER_ID = os.environ.get('1039959469208417')
-GEMINI_KEY = os.environ.get('AIzaSyDcj0pNDNiCSW4no_8RU_x4bzbvobXwEL0')
-VERIFY_TOKEN = os.environ.get('dhakaex0020')
+GEMINI_KEY = os.environ.get('AIzaSyD-xmtXFAJNtFgfE1ASFTYbvXzyP3qxBRQ')
+VERIFY_TOKEN = os.environ.get( 'dhakaex0020')
 
 # Gemini AI Setup
 genai.configure(api_key=GEMINI_KEY)
