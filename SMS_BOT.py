@@ -2,17 +2,18 @@ import os
 import requests
 from flask import Flask, request
 import google.generativeai as genai
+
 app = Flask(__name__)
 
 # --- রেন্ডার সেটিংস থেকে তথ্য নেওয়া (সঠিক নিয়ম) ---
 # os.environ.get এর ভেতরে আপনার Render ড্যাশবোর্ডের "KEY" এর নাম দিতে হয়, সরাসরি টোকেন নয়।
 PERMANENT_TOKEN = os.environ.get('EAANtSb24BiwBRXK6X68nSEJhQxZAiPCvLdUGYDzuKDYZAZATkEoB3A9MY4HUwUd831wWeuiAeGe1Fkb9k512dQnho5R2oYZCt66DI4hEGfYK8kuUVT4niNsKJHHFP6bWscKBK1HZBcLZCVs7GAVwskp8gbavqxgSWQoQCoK7BQnOhawLLBpcOZCNtUnY4S1CKHJBAZDZD') 
 PHONE_NUMBER_ID = os.environ.get('1039959469208417')
-GEMINI_KEY = os.environ.get('GEMINI_KEY')
+GEMINI_KEY = os.environ.get('AIzaSyDcj0pNDNiCSW4no_8RU_x4bzbvobXwEL0')
 VERIFY_TOKEN = "dhakaex0020"
 
-# জেমিনি এআই কনফিগারেশন (এপিআই ভার্সন ১ নিশ্চিত করা)
-genai.configure(api_key=GEMINI_KEY, client_options={"api_version": "v1"})
+# জেমিনি এআই সেটআপ
+genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_ai_answer(user_query):
