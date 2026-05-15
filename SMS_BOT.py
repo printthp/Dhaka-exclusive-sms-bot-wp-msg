@@ -9,7 +9,7 @@ app = Flask(__name__)
 PERMANENT_TOKEN = os.environ.get('EAANtSb24BiwBRXK6X68nSEJhQxZAiPCvLdUGYDzuKDYZAZATkEoB3A9MY4HUwUd831wWeuiAeGe1Fkb9k512dQnho5R2oYZCt66DI4hEGfYK8kuUVT4niNsKJHHFP6bWscKBK1HZBcLZCVs7GAVwskp8gbavqxgSWQoQCoK7BQnOhawLLBpcOZCNtUnY4S1CKHJBAZDZD')
 PHONE_NUMBER_ID = os.environ.get('1039959469208417')
 GEMINI_KEY = os.environ.get('AIzaSyDcj0pNDNiCSW4no_8RU_x4bzbvobXwEL0')
-VERIFY_TOKEN = os.environ.get('dhakaex0020')
+VERIFY_TOKEN = "dhakaex0020"
 
 # জেমিনি এআই সেটআপ
 genai.configure(api_key=GEMINI_KEY)
