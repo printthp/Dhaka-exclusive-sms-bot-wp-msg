@@ -37,13 +37,14 @@ def get_ai_answer(user_query):
         
         model = genai.GenerativeModel('gemini-2.5-flash-lite') 
         
-        context = (
+    context = (
             f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
+            f"NEVER use the word 'নমস্কার'. ALWAYS address the customer as 'প্রিয় গ্রাহক'. "
             f"Answer politely and naturally in Bengali.\n\n"
             f"HERE IS YOUR LIVE KNOWLEDGE BASE (Use this info to answer):\n"
             f"{saved_knowledge}\n"
-            f"Rule: Never use placeholders like [insert link]. If the answer is not in the knowledge base, answer politely based on what you know."
-        )
+            f"Rule: Never use placeholders like [insert link]."
+        ))
         
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
