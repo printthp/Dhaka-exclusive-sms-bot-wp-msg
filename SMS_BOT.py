@@ -6,7 +6,6 @@ import google.generativeai as genai
 app = Flask(__name__)
 
 # --- কনফিগারেশন ---
-# টোকেন ও কী সুরক্ষিত রাখতে পরিবেশ ভেরিয়েবল ব্যবহার করা ভালো, তবে আপনার দেওয়া ভ্যালুগুলোই এখানে রাখা হলো
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
 PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
@@ -15,44 +14,42 @@ VERIFY_TOKEN = "dhakaex0020"
 # --- Gemini AI Setup ---
 genai.configure(api_key=GEMINI_KEY)
 
+# মেমোরি ফাইল তৈরি বা পড়ার ফাংশন
+MEMORY_FILE = "knowledge.txt"
+
+def read_knowledge():
+    if not os.path.exists(MEMORY_FILE):
+        # ফাইল না থাকলে একটা ডিফল্ট টেক্সট তৈরি হবে
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            f.write("Brand Name: Dhaka Exclusive. Location: Bangladesh. Product: Premium kitchenware.\n")
+    
+    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        return f.read()
+
+def save_knowledge(new_info):
+    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+        f.write(f"- {new_info}\n")
+
 def get_ai_answer(user_query):
     try:
+        # ফাইল থেকে আপনার শিখিয়ে দেওয়া সব তথ্য লোড করা হচ্ছে
+        saved_knowledge = read_knowledge()
+        
         model = genai.GenerativeModel('gemini-2.5-flash-lite') 
         
-        # --- Context-ti ekhane boro ebong nirdishto kora holo ---
         context = (
-            "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
-            "Answer politely and naturally in Bengali. "
-            "CRITICAL KNOWLEDGE FOR YOU:\n"
-            "- Our Website Link: www.dhakaexclusive.org (Always provide this exact link if customers ask for website)\n"
-            "- Our Products: Premium pots, pans, dinner sets, and smart kitchen appliances.\n"
-            "- Facebook Page: https://www.facebook.com/dhakaexclusive\n"
-            "- Location: Mulvibazar Trade Center Dhaka, Bangladesh.\n"
-            "- Rules: NEVER use placeholder brackets like [insert link here] or [Apnar link]. If you don't know something, "
-            "just say you will check and let them know."
+            f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
+            f"Answer politely and naturally in Bengali.\n\n"
+            f"HERE IS YOUR LIVE KNOWLEDGE BASE (Use this info to answer):\n"
+            f"{saved_knowledge}\n"
+            f"Rule: Never use placeholders like [insert link]. If the answer is not in the knowledge base, answer politely based on what you know."
         )
         
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
-        
     except Exception as e:
-        print(f"Primary Model Error: {e}. Trying backup model...")
-        try:
-            model = genai.GenerativeModel('gemini-2.5-pro')
-            # Backup model-er jonnoo eki context set kora holo
-            context = (
-                "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
-                "Answer politely and naturally in Bengali. "
-                "CRITICAL KNOWLEDGE:\n"
-                "- Website: www.dhakaexclusive.com\n"
-                "- Products: Premium kitchenware.\n"
-                "- Rules: NEVER use placeholder brackets like [insert link]."
-            )
-            response = model.generate_content(f"{context}\nCustomer: {user_query}")
-            return response.text
-        except Exception as e2:
-            print(f"AI ERROR: Both models failed. Error: {e2}")
-            return "দুঃখিত, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
+        print(f"Primary Model Error: {e}")
+        return "দুঃখিত, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
@@ -66,32 +63,38 @@ def send_message(recipient_number, message_body):
         "type": "text",
         "text": {"body": message_body}
     }
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"DEBUG: Meta Status: {response.status_code}")
-    print(f"DEBUG: Meta Full Response: {response.text}")
+    requests.post(url, json=payload, headers=headers)
+
+@app.route("/webhook", methods=["GET"])
+def verify():
+    if request.args.get("hub.verify_token") == VERIFY_TOKEN:
+        return request.args.get("hub.challenge"), 200
+    return "Failed", 403
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
     try:
-        # ভ্যালু চেক করা
         if "messages" in data["entry"][0]["changes"][0]["value"]:
             value = data["entry"][0]["changes"][0]["value"]
             msg = value["messages"][0]
             from_number = msg["from"]
             
-            # চেক করা হচ্ছে মেসেজটি কি টেক্সট নাকি অন্য কিছু (ছবি/ভিডিও)
             if msg.get("type") == "text":
-                user_text = msg["text"]["body"]
-                print(f"New Message from {from_number}: {user_text}")
+                user_text = msg["text"]["body"].strip()
                 
-                ai_response = get_ai_answer(user_text)
-                send_message(from_number, ai_response)
+                # --- আপনি নিজে এআই-কে ট্রেইনিং বা নতুন তথ্য শেখানোর অংশ ---
+                if user_text.lower().startswith("update:"):
+                    new_info = user_text[7:].strip() # "update:" লেখাটা বাদ দিয়ে বাকি তথ্যটুকু নেবে
+                    save_knowledge(new_info)
+                    send_message(from_number, "✅ ধন্যবাদ! আপনার দেওয়া নতুন তথ্যটি আমি সফলভাবে মনে রেখেছি।")
+                
+                # --- সাধারণ কাস্টমার সার্ভিস ---
+                else:
+                    ai_response = get_ai_answer(user_text)
+                    send_message(from_number, ai_response)
             else:
-                # যদি টেক্সট না হয়ে ছবি বা অন্য কিছু হয়
-                print(f"Received a non-text message ({msg.get('type')}) from {from_number}")
-                send_message(from_number, "দুঃখিত, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি। দয়া করে আপনার প্রশ্নটি লিখে জানান।")
+                send_message(from_number, "দুঃখিত, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি।")
                 
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
