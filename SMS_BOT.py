@@ -14,10 +14,15 @@ VERIFY_TOKEN = "dhakaex0020"
 
 # Gemini AI Setup
 genai.configure(api_key=GEMINI_KEY)
-# model = genai.GenerativeModel('gemini-1.5-flash')
-# এই লাইনটি আপডেট করুন
-# model = genai.GenerativeModel('gemini-1.5-flash-latest')
-model = genai.GenerativeModel('gemini-pro')
+
+# এটি স্মার্টলি চেক করবে কোন মডেলটি আপনার লাইব্রেরিতে কাজ করবে
+try:
+    model = genai.GenerativeModel('gemini-1.5-flash')
+except:
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+    except Exception as e:
+        print(f"MODEL LOADING ERROR: {e}")
 
 def get_ai_answer(user_query):
     try:
