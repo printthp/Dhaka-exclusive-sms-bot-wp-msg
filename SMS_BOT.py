@@ -13,6 +13,20 @@ VERIFY_TOKEN = "dhakaex0020"
 
 # --- Gemini AI Setup ---
 genai.configure(api_key=GEMINI_KEY)
+#এটি হোয়াটসঅ্যাপ থেকে ছবি ডাউনলোড করার কাজ করবে:
+def download_whatsapp_media(media_id):
+    try:
+        url = f"https://graph.facebook.com/v21.0/{media_id}"
+        headers = {"Authorization": f"Bearer {PERMANENT_TOKEN}"}
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            media_url = res.json().get("url")
+            img_res = requests.get(media_url, headers=headers)
+            if img_res.status_code == 200:
+                return img_res.content
+    except Exception as e:
+        print(f"Media Download Error: {e}")
+    return None
 
 # মেমোরি ফাইল তৈরি বা পড়ার ফাংশন
 MEMORY_FILE = "knowledge.txt"
@@ -82,21 +96,33 @@ def webhook():
             msg = value["messages"][0]
             from_number = msg["from"]
             
+            # কাস্টমার টেক্সট পাঠালে
             if msg.get("type") == "text":
                 user_text = msg["text"]["body"].strip()
+                ai_response = get_ai_answer(user_text)
+                send_message(from_number, ai_response)
                 
-                # --- আপনি নিজে এআই-কে ট্রেইনিং বা নতুন তথ্য শেখানোর অংশ ---
-                if user_text.lower().startswith("update:"):
-                    new_info = user_text[7:].strip() # "update:" লেখাটা বাদ দিয়ে বাকি তথ্যটুকু নেবে
-                    save_knowledge(new_info)
-                    send_message(from_number, "✅ ধন্যবাদ! আপনার দেওয়া নতুন তথ্যটি আমি সফলভাবে মনে রেখেছি।")
+            # কাস্টমার ছবি পাঠালে
+            elif msg.get("type") == "image":
+                media_id = msg["image"]["id"]
+                caption = msg["image"].get("caption", "এটার দাম কত?")
                 
-                # --- সাধারণ কাস্টমার সার্ভিস ---
+                # ছবি ডাউনলোড করা হচ্ছে
+                image_bytes = download_whatsapp_media(media_id)
+                
+                if image_bytes:
+                    # ছবি সহ জেমিনিকে কল করা
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    context = "You are the helpful AI assistant for 'Dhaka Exclusive'. NEVER use 'নমস্কার'. ALWAYS use 'প্রিয় গ্রাহক'. Answer politely in Bengali. Identify the kitchenware product in this image and tell its details or price."
+                    image_parts = [{"mime_type": "image/jpeg", "data": image_bytes}]
+                    response = model.generate_content([context, image_parts[0], caption])
+                    ai_response = response.text
                 else:
-                    ai_response = get_ai_answer(user_text)
-                    send_message(from_number, ai_response)
+                    ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
+                    
+                send_message(from_number, ai_response)
             else:
-                send_message(from_number, "দুঃখিত, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি।")
+                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট এবং ছবি বুঝতে পারি।")
                 
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
