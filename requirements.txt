@@ -1,4 +1,5 @@
 flask
 requests
 google-generativeai==0.5.2
+protobuf==4.25.3
 gunicorn
