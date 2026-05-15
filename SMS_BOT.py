@@ -5,11 +5,12 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# Environment Variables
-PERMANENT_TOKEN = os.environ.get('EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD')
-PHONE_NUMBER_ID = os.environ.get('1039959469208417')
-GEMINI_KEY = os.environ.get('AIzaSyD-xmtXFAJNtFgfE1ASFTYbvXzyP3qxBRQ')
-VERIFY_TOKEN = os.environ.get( 'dhakaex0020')
+# --- কনফিগারেশন ---
+# সরাসরি ভ্যালুগুলো এখানে সেট করুন (অথবা পরিবেশ ভেরিয়েবল ব্যবহার করুন)
+PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
+PHONE_NUMBER_ID = "1039959469208417"
+GEMINI_KEY = "AIzaSyD-xmtXFAJNtFgfE1ASFTYbvXzyP3qxBRQ"
+VERIFY_TOKEN = "dhakaex0020"
 
 # Gemini AI Setup
 genai.configure(api_key=GEMINI_KEY)
@@ -17,6 +18,7 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_ai_answer(user_query):
     try:
+        # ঢাকা এক্সক্লুসিভ এর জন্য কাস্টম প্রম্পট
         context = "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. Answer politely in Bengali."
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
@@ -37,13 +39,13 @@ def send_message(recipient_number, message_body):
         "text": {"body": message_body}
     }
     
-    # এটি আপনার লগে বিস্তারিত এরর দেখাবে
     response = requests.post(url, json=payload, headers=headers)
     print(f"DEBUG: Meta Status: {response.status_code}")
     print(f"DEBUG: Meta Full Response: {response.text}")
 
 @app.route("/webhook", methods=["GET"])
 def verify():
+    # ফেসবুক থেকে আসা ভেরিফিকেশন রিকোয়েস্ট চেক করা
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge"), 200
     return "Failed", 403
@@ -52,9 +54,10 @@ def verify():
 def webhook():
     data = request.get_json()
     try:
-        # মেসেজটি চেক করা
+        # মেসেজ চেক করা
         if "messages" in data["entry"][0]["changes"][0]["value"]:
-            msg = data["entry"][0]["changes"][0]["value"]["messages"][0]
+            value = data["entry"][0]["changes"][0]["value"]
+            msg = value["messages"][0]
             from_number = msg["from"]
             user_text = msg["text"]["body"]
             
