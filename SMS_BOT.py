@@ -6,7 +6,7 @@ import google.generativeai as genai
 app = Flask(__name__)
 
 # --- কনফিগারেশন ---
-# সরাসরি ভ্যালুগুলো এখানে সেট করুন (অথবা পরিবেশ ভেরিয়েবল ব্যবহার করুন)
+# টোকেন ও কী সুরক্ষিত রাখতে পরিবেশ ভেরিয়েবল ব্যবহার করা ভালো, তবে আপনার দেওয়া ভ্যালুগুলোই এখানে রাখা হলো
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
 PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
@@ -17,19 +17,21 @@ genai.configure(api_key=GEMINI_KEY)
 
 def get_ai_answer(user_query):
     try:
-        # v1beta এরর এড়াতে সরাসরি লেটেস্ট মডেল কল করা
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        # জেমিনির নতুন আপডেট করা লাইট মডেল (1.5-flash এর পরিবর্তে)
+        model = genai.GenerativeModel('gemini-2.5-flash-lite') 
         context = "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. Answer politely in Bengali."
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
     except Exception as e:
-        # যদি flash না কাজ করে তবে pro ট্রাই করবে
+        print(f"Primary Model Error: {e}. Trying backup model...")
+        # যদি flash-lite কাজ না করে, তবে নতুন ২.৫ প্রো মডেল ট্রাই করবে (gemini-pro এর পরিবর্তে)
         try:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(user_query)
+            model = genai.GenerativeModel('gemini-2.5-pro')
+            context = "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. Answer politely in Bengali."
+            response = model.generate_content(f"{context}\nCustomer: {user_query}")
             return response.text
-        except:
-            print(f"AI ERROR: {e}")
+        except Exception as e2:
+            print(f"AI ERROR: Both models failed. Error: {e2}")
             return "দুঃখিত, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
 def send_message(recipient_number, message_body):
