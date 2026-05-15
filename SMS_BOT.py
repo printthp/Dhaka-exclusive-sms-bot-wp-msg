@@ -49,16 +49,20 @@ def get_ai_answer(user_query):
         # ফাইল থেকে আপনার শিখিয়ে দেওয়া সব তথ্য লোড করা হচ্ছে
         saved_knowledge = read_knowledge()
         
-        model = genai.GenerativeModel('gemini-2.5-flash-lite') 
-        
-        context = (
-            f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
-            f"NEVER use the word 'নমস্কার'. ALWAYS address the customer as 'প্রিয় গ্রাহক'. "
-            f"Answer politely and naturally in Bengali.\n\n"
-            f"HERE IS YOUR LIVE KNOWLEDGE BASE (Use this info to answer):\n"
-            f"{saved_knowledge}\n"
-            f"Rule: Never use placeholders like [insert link]."
-        )
+        model = genai.GenerativeModel('gemini-2.5-flash')
+                    
+                    # --- এখানে সরাসরি আপনার ওয়েবসাইটের লিংক দেওয়া হলো ---
+                    context = (
+                        "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
+                        "NEVER use 'নমস্কার'. ALWAYS use 'প্রিয় গ্রাহক'. Answer politely in Bengali.\n\n"
+                        "CRITICAL INSTRUCTION:\n"
+                        "Our official website is: https://dhakaexclusive.org/ \n"
+                        "When a customer sends an image of a product, analyze the image carefully. "
+                        "Search or refer to our website (https://dhakaexclusive.com/) to find the exact product name, live price, available sizes, and measurements. "
+                        "Then, reply to the 'প্রিয় গ্রাহক' with the exact details in a polite manner.\n\n"
+                        "If you cannot find the product or its price from the website, identify the item from the image and say: "
+                        "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট, তবে এটার লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে জানিয়ে দিচ্ছেন।'"
+                    )
         
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
