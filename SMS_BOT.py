@@ -17,17 +17,37 @@ genai.configure(api_key=GEMINI_KEY)
 
 def get_ai_answer(user_query):
     try:
-        # জেমিনির নতুন আপডেট করা লাইট মডেল (1.5-flash এর পরিবর্তে)
         model = genai.GenerativeModel('gemini-2.5-flash-lite') 
-        context = "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. Answer politely in Bengali."
+        
+        # --- Context-ti ekhane boro ebong nirdishto kora holo ---
+        context = (
+            "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
+            "Answer politely and naturally in Bengali. "
+            "CRITICAL KNOWLEDGE FOR YOU:\n"
+            "- Our Website Link: www.dhakaexclusive.org (Always provide this exact link if customers ask for website)\n"
+            "- Our Products: Premium pots, pans, dinner sets, and smart kitchen appliances.\n"
+            "- Facebook Page: https://www.facebook.com/dhakaexclusive\n"
+            "- Location: Mulvibazar Trade Center Dhaka, Bangladesh.\n"
+            "- Rules: NEVER use placeholder brackets like [insert link here] or [Apnar link]. If you don't know something, "
+            "just say you will check and let them know."
+        )
+        
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
+        
     except Exception as e:
         print(f"Primary Model Error: {e}. Trying backup model...")
-        # যদি flash-lite কাজ না করে, তবে নতুন ২.৫ প্রো মডেল ট্রাই করবে (gemini-pro এর পরিবর্তে)
         try:
             model = genai.GenerativeModel('gemini-2.5-pro')
-            context = "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. Answer politely in Bengali."
+            # Backup model-er jonnoo eki context set kora holo
+            context = (
+                "You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
+                "Answer politely and naturally in Bengali. "
+                "CRITICAL KNOWLEDGE:\n"
+                "- Website: www.dhakaexclusive.com\n"
+                "- Products: Premium kitchenware.\n"
+                "- Rules: NEVER use placeholder brackets like [insert link]."
+            )
             response = model.generate_content(f"{context}\nCustomer: {user_query}")
             return response.text
         except Exception as e2:
