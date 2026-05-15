@@ -14,7 +14,7 @@ VERIFY_TOKEN = "dhakaex0020"
 
 # Gemini AI Setup
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
 
 def get_ai_answer(user_query):
