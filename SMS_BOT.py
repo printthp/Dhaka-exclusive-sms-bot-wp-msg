@@ -37,7 +37,7 @@ def get_ai_answer(user_query):
         
         model = genai.GenerativeModel('gemini-2.5-flash-lite') 
         
-    context = (
+        context = (
             f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
             f"NEVER use the word 'নমস্কার'. ALWAYS address the customer as 'প্রিয় গ্রাহক'. "
             f"Answer politely and naturally in Bengali.\n\n"
@@ -48,9 +48,10 @@ def get_ai_answer(user_query):
         
         response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
+
     except Exception as e:
         print(f"Primary Model Error: {e}")
-        return "দুঃখিত, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
+        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
