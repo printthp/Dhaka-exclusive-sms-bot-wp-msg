@@ -56,19 +56,11 @@ from PIL import Image
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # জেমিনির পাইথন SDK-তে গুগল সার্চ সচল করার একদম সঠিক ডিকশনারি ফরম্যাট
+        # পুরোনো SDK ভার্সনের জন্য মানানসই গুগল সার্চ কনফিগারেশন
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=[{
-                "google_search_retrieval": {
-                    "dynamic_retrieval_config": {
-                        "mode": "MODE_DYNAMIC",
-                        "dynamic_threshold": 0.3
-                    }
-                }
-            }]
+            tools=[{"google_search": {}}]  # এখানে 'google_search_retrieval' এর বদলে শুধু 'google_search' ব্যবহার করা হয়েছে
         )
-
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
             tools=[search_tool]  # এখানে সরাসরি অবজেক্টটি পাস করা হলো
