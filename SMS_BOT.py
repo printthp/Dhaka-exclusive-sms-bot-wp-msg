@@ -50,9 +50,10 @@ def get_ai_answer(user_query, image_bytes=None):
         # সঠিক ফরম্যাটে গুগলের লাইভ সার্চ (Google Search Grounding) চালু করা হলো
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=['google_search_retrieval']  # সঠিক মেথড নাম
+            tools=['google_search_retrieval']
         ) 
         
+        # নতুন ডোমেইন dhakaexclusive.org আপডেট করা হয়েছে
         context = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             "STRICT RULES:\n"
