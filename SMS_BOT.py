@@ -127,8 +127,20 @@ def webhook():
         if "messages" in data["entry"][0]["changes"][0]["value"]:
             value = data["entry"][0]["changes"][0]["value"]
             msg = value["messages"][0]
+            msg_id = msg["id"] # হোয়াটসঅ্যাপ মেসেজের ইউনিক আইডি
             from_number = msg["from"]
             
+            # ১. যদি এই মেসেজ আইডিটি অলরেডি প্রসেস হয়ে থাকে, তবে নতুন করে এআই-কে কল না করে এখানেই স্কিপ করবে
+            if msg_id in processed_messages:
+                return "ok", 200
+                
+            # নতুন আইডি হলে সেটিকে সেটে যোগ করবে
+            processed_messages.add(msg_id)
+            
+            # মেমোরি ধরে রাখার জন্য সেটের সাইজ লিমিট করে দেওয়া (অপশনাল)
+            if len(processed_messages) > 1000:
+                processed_messages.pop()
+
             # কাস্টমার টেক্সট পাঠালে
             if msg.get("type") == "text":
                 user_text = msg["text"]["body"].strip()
@@ -140,11 +152,8 @@ def webhook():
                 media_id = msg["image"]["id"]
                 caption = msg["image"].get("caption", "").strip()
                 
-                # ছবি ডাউনলোড করা হচ্ছে
                 image_bytes = download_whatsapp_media(media_id)
-                
                 if image_bytes:
-                    # ফিক্সড: আপনার তৈরি করা মূল 'get_ai_answer' ফাংশনটিকেই এখানে ইমেজ বাইটস সহ কল করা হয়েছে
                     ai_response = get_ai_answer(user_query=caption, image_bytes=image_bytes)
                 else:
                     ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
@@ -156,7 +165,7 @@ def webhook():
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
         
-    return "ok", 200
+    return "ok", 200 # মেটা-কে সবসময় দ্রুত ২০soft রেসপন্স ব্যাক করা জরুরি
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
