@@ -56,15 +56,17 @@ from PIL import Image
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # জেমিনির একদম লেটেস্ট ও স্ট্যান্ডার্ড অবজেক্ট ফরম্যাটে গুগল সার্চ সচল করা হলো
-        # এটি ব্যবহার করলে স্ট্রিং সংক্রান্ত (Got a: str, 'g') এররটি আর আসবে না।
-        search_tool = types.Tool(
-            google_search_retrieval=types.GoogleSearchRetrieval(
-                dynamic_retrieval_config=types.DynamicRetrievalConfig(
-                    mode="MODE_DYNAMIC",
-                    dynamic_threshold=0.3
-                )
-            )
+        # জেমিনির পাইথন SDK-তে গুগল সার্চ সচল করার একদম সঠিক ডিকশনারি ফরম্যাট
+        model = genai.GenerativeModel(
+            model_name='gemini-2.5-flash',
+            tools=[{
+                "google_search_retrieval": {
+                    "dynamic_retrieval_config": {
+                        "mode": "MODE_DYNAMIC",
+                        "dynamic_threshold": 0.3
+                    }
+                }
+            }]
         )
 
         model = genai.GenerativeModel(
