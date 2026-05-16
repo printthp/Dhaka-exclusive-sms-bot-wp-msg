@@ -1,14 +1,9 @@
 import os
 import requests
 from flask import Flask, request
-import io
-from PIL import Image
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 app = Flask(__name__)
-
-processed_messages = set()
 
 # --- কনফিগারেশন ---
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
@@ -16,28 +11,18 @@ PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
-# --- হোয়াটসঅ্যাপ থেকে ছবি ডাউনলোড করার ফাংশন ---
-def download_whatsapp_media(media_id):
-    try:
-        url = f"https://graph.facebook.com/v21.0/{media_id}"
-        headers = {"Authorization": f"Bearer {PERMANENT_TOKEN}"}
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            media_url = res.json().get("url")
-            img_res = requests.get(media_url, headers=headers)
-            if img_res.status_code == 200:
-                return img_res.content
-    except Exception as e:
-        print(f"Media Download Error: {e}")
-    return None
+# --- Gemini AI Setup ---
+genai.configure(api_key=GEMINI_KEY)
 
-# --- নলেজ ফাইল রিড/রাইট (ভবিষ্যতের মেমোরির জন্য) ---
+# মেমোরি ফাইল তৈরি বা পড়ার ফাংশন
 MEMORY_FILE = "knowledge.txt"
 
 def read_knowledge():
     if not os.path.exists(MEMORY_FILE):
+        # ফাইল না থাকলে একটা ডিফল্ট টেক্সট তৈরি হবে
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             f.write("Brand Name: Dhaka Exclusive. Location: Bangladesh. Product: Premium kitchenware.\n")
+    
     with open(MEMORY_FILE, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -45,59 +30,29 @@ def save_knowledge(new_info):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"- {new_info}\n")
 
-# --- মূল জেমিনি এআই ফাংশন ---
-def get_ai_answer(user_query, image_bytes=None):
+def get_ai_answer(user_query):
     try:
-        # ক্লায়েন্ট ইনিশিয়ালাইজেশন (সরাসরি API Key পাস করা হয়েছে)
-        client = genai.Client(api_key=GEMINI_KEY)
+        # ফাইল থেকে আপনার শিখিয়ে দেওয়া সব তথ্য লোড করা হচ্ছে
+        saved_knowledge = read_knowledge()
         
-        # গুগল সার্চ টুল কনফিগারেশন
-        search_tool = types.Tool(google_search=types.GoogleSearch())
-        config = types.GenerateContentConfig(
-            tools=[search_tool],
-            temperature=0.2  # নিখুঁত তথ্যের জন্য টেম্পারেচার কম রাখা হয়েছে
-        )
+        model = genai.GenerativeModel('gemini-2.5-flash-lite') 
         
-        model_name = "gemini-2.5-flash" 
-
         context = (
-            "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
-            "STRICT RULES:\n"
-            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার'.\n"
-            "2. KEEP REPLIES EXTREMELY SHORT (Max 2-3 lines). Do not write histories or long essays.\n"
-            "3. Look at the image provided. Use your built-in Google Search tool to search our website: https://dhakaexclusive.org/ \n"
-            "Find the exact product matching the photo, then extract its current Name, Size/Measurement, and Price in BDT.\n"
-            "4. Only state the price if you successfully find it via Google Search on dhakaexclusive.org.\n"
-            "5. CRITICAL: If you cannot find the product or its specific price on dhakaexclusive.org, identify the item and strictly say:\n"
-            "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
+            f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh. "
+            f"NEVER use the word 'নমস্কার'. ALWAYS address the customer as 'প্রিয় গ্রাহক'. "
+            f"Answer politely and naturally in Bengali.\n\n"
+            f"HERE IS YOUR LIVE KNOWLEDGE BASE (Use this info to answer):\n"
+            f"{saved_knowledge}\n"
+            f"Rule: Never use placeholders like [insert link]."
         )
         
-        if image_bytes:
-            image = Image.open(io.BytesIO(image_bytes))
-            prompt_parts = [
-                context, 
-                image, 
-                f"Customer Question: {user_query or 'এটার দাম কত?'}"
-            ]
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt_parts,
-                config=config
-            )
-        else:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=f"{context}\nCustomer: {user_query}",
-                config=config
-            )
-            
+        response = model.generate_content(f"{context}\nCustomer: {user_query}")
         return response.text
 
     except Exception as e:
-        print(f"Gemini Error: {e}")
-        return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
+        print(f"Primary Model Error: {e}")
+        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
-# --- হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন ---
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
@@ -112,14 +67,12 @@ def send_message(recipient_number, message_body):
     }
     requests.post(url, json=payload, headers=headers)
 
-# --- মেটা ভেরিফিকেশন (Webhook GET) ---
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge"), 200
     return "Failed", 403
 
-# --- মূল হোয়াটসঅ্যাপ রিসিভার (Webhook POST) ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -127,45 +80,28 @@ def webhook():
         if "messages" in data["entry"][0]["changes"][0]["value"]:
             value = data["entry"][0]["changes"][0]["value"]
             msg = value["messages"][0]
-            msg_id = msg["id"] # হোয়াটসঅ্যাপ মেসেজের ইউনিক আইডি
             from_number = msg["from"]
             
-            # ১. যদি এই মেসেজ আইডিটি অলরেডি প্রসেস হয়ে থাকে, তবে নতুন করে এআই-কে কল না করে এখানেই স্কিপ করবে
-            if msg_id in processed_messages:
-                return "ok", 200
-                
-            # নতুন আইডি হলে সেটিকে সেটে যোগ করবে
-            processed_messages.add(msg_id)
-            
-            # মেমোরি ধরে রাখার জন্য সেটের সাইজ লিমিট করে দেওয়া (অপশনাল)
-            if len(processed_messages) > 1000:
-                processed_messages.pop()
-
-            # কাস্টমার টেক্সট পাঠালে
             if msg.get("type") == "text":
                 user_text = msg["text"]["body"].strip()
-                ai_response = get_ai_answer(user_text)
-                send_message(from_number, ai_response)
                 
-            # কাস্টমার ছবি পাঠালে
-            elif msg.get("type") == "image":
-                media_id = msg["image"]["id"]
-                caption = msg["image"].get("caption", "").strip()
+                # --- আপনি নিজে এআই-কে ট্রেইনিং বা নতুন তথ্য শেখানোর অংশ ---
+                if user_text.lower().startswith("update:"):
+                    new_info = user_text[7:].strip() # "update:" লেখাটা বাদ দিয়ে বাকি তথ্যটুকু নেবে
+                    save_knowledge(new_info)
+                    send_message(from_number, "✅ ধন্যবাদ! আপনার দেওয়া নতুন তথ্যটি আমি সফলভাবে মনে রেখেছি।")
                 
-                image_bytes = download_whatsapp_media(media_id)
-                if image_bytes:
-                    ai_response = get_ai_answer(user_query=caption, image_bytes=image_bytes)
+                # --- সাধারণ কাস্টমার সার্ভিস ---
                 else:
-                    ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
-                    
-                send_message(from_number, ai_response)
+                    ai_response = get_ai_answer(user_text)
+                    send_message(from_number, ai_response)
             else:
-                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট এবং ছবি বুঝতে পারি।")
+                send_message(from_number, "দুঃখিত, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি।")
                 
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
         
-    return "ok", 200 # মেটা-কে সবসময় দ্রুত ২০soft রেসপন্স ব্যাক করা জরুরি
+    return "ok", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
