@@ -4,8 +4,9 @@ processed_messages = set()
 from flask import Flask, request
 import google.generativeai as genai
 import io
-from google.generativeai import types  # এই নতুন ইমপোর্টটি যোগ করা হয়েছে
 from PIL import Image
+from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 
@@ -50,9 +51,19 @@ def save_knowledge(new_info):
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
+        # ১. ক্লায়েন্ট ইনিশিয়ালাইজ করুন (নিশ্চিত করুন GEMINI_API_KEY এনভায়রনমেন্টে আছে)
         client = genai.Client()
-        search_tool = types.Tool(google_search=types.GoogleSearch())
         
+        # ২. গুগল সার্চ টুল কনফিগার করুন এবং টুলস লিস্টে পাস করুন
+        search_tool = types.Tool(google_search=types.GoogleSearch())
+        config = types.GenerateContentConfig(
+            tools=[search_tool],
+            temperature=0.2  # টেম্পারেচার কম রাখলে এআই বানিয়ে কথা না বলে সঠিক তথ্য দেবে
+        )
+        
+        # টেক্সট ও ইমেজ একসাথে প্রসেস করার জন্য gemini-2.5-flash মডেলটি সেরা
+        model_name = "gemini-2.5-flash" 
+
         context = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             "STRICT RULES:\n"
@@ -72,9 +83,18 @@ def get_ai_answer(user_query, image_bytes=None):
                 image, 
                 f"Customer Question: {user_query or 'এটার দাম কত?'}"
             ]
-            response = model.generate_content(prompt_parts)
+            # এখানে client.models.generate_content ব্যবহার করা হয়েছে এবং config পাস করা হয়েছে
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt_parts,
+                config=config
+            )
         else:
-            response = model.generate_content(f"{context}\nCustomer: {user_query}")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=f"{context}\nCustomer: {user_query}",
+                config=config
+            )
             
         return response.text
 
