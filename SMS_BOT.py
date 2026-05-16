@@ -4,7 +4,7 @@ processed_messages = set()
 from flask import Flask, request
 import google.generativeai as genai
 import io
-import google.generativeai as genai
+from google.generativeai import types  # এই নতুন ইমপোর্টটি যোগ করা হয়েছে
 from PIL import Image
 
 app = Flask(__name__)
@@ -49,12 +49,27 @@ def save_knowledge(new_info):
         f.write(f"- {new_info}\n")
 
 
+import io
+import google.generativeai as genai
+from google.generativeai import types  # এই নতুন ইমপোর্টটি যোগ করা হয়েছে
+from PIL import Image
+
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # ১. জেমিনি SDK-এর একদম সঠিক নিয়মে গুগল লাইভ সার্চ কনফিগার করা হলো
+        # জেমিনির একদম লেটেস্ট ও স্ট্যান্ডার্ড অবজেক্ট ফরম্যাটে গুগল সার্চ সচল করা হলো
+        # এটি ব্যবহার করলে স্ট্রিং সংক্রান্ত (Got a: str, 'g') এররটি আর আসবে না।
+        search_tool = types.Tool(
+            google_search_retrieval=types.GoogleSearchRetrieval(
+                dynamic_retrieval_config=types.DynamicRetrievalConfig(
+                    mode="MODE_DYNAMIC",
+                    dynamic_threshold=0.3
+                )
+            )
+        )
+
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=['google_search_retrieval']  # পাইথন SDK-এর জন্য এটাই সঠিক ফরম্যাট
+            tools=[search_tool]  # এখানে সরাসরি অবজেক্টটি পাস করা হলো
         ) 
         
         context = (
@@ -70,10 +85,7 @@ def get_ai_answer(user_query, image_bytes=None):
         )
         
         if image_bytes:
-            # ২. বাইটস (Bytes) থেকে ইমেজ অবজেক্ট তৈরি করা হলো যেন টাইপ এরর না আসে
             image = Image.open(io.BytesIO(image_bytes))
-            
-            # প্রম্পট পার্টস তৈরি
             prompt_parts = [
                 context, 
                 image, 
@@ -86,7 +98,6 @@ def get_ai_answer(user_query, image_bytes=None):
         return response.text
 
     except Exception as e:
-        # কোনো এরর আসলে তা প্রিন্ট হবে যেন আপনি লগ দেখে বুঝতে পারেন
         print(f"Gemini Error: {e}")
         return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
 
