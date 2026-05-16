@@ -1,8 +1,6 @@
 import os
 import requests
-processed_messages = set()
 from flask import Flask, request
-import google.generativeai as genai
 import io
 from PIL import Image
 from google import genai
@@ -10,16 +8,15 @@ from google.genai import types
 
 app = Flask(__name__)
 
+processed_messages = set()
+
 # --- কনফিগারেশন ---
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
 PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
-# --- Gemini AI Setup ---
-client = genai.Client(api_key=GEMINI_KEY)
-
-#এটি হোয়াটসঅ্যাপ থেকে ছবি ডাউনলোড করার কাজ করবে:
+# --- হোয়াটসঅ্যাপ থেকে ছবি ডাউনলোড করার ফাংশন ---
 def download_whatsapp_media(media_id):
     try:
         url = f"https://graph.facebook.com/v21.0/{media_id}"
@@ -34,15 +31,13 @@ def download_whatsapp_media(media_id):
         print(f"Media Download Error: {e}")
     return None
 
-# মেমোরি ফাইল তৈরি বা পড়ার ফাংশন
+# --- নলেজ ফাইল রিড/রাইট (ভবিষ্যতের মেমোরির জন্য) ---
 MEMORY_FILE = "knowledge.txt"
 
 def read_knowledge():
     if not os.path.exists(MEMORY_FILE):
-        # ফাইল না থাকলে একটা ডিফল্ট টেক্সট তৈরি হবে
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             f.write("Brand Name: Dhaka Exclusive. Location: Bangladesh. Product: Premium kitchenware.\n")
-    
     with open(MEMORY_FILE, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -50,19 +45,19 @@ def save_knowledge(new_info):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"- {new_info}\n")
 
+# --- মূল জেমিনি এআই ফাংশন ---
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # ১. ক্লায়েন্ট ইনিশিয়ালাইজ করুন (নিশ্চিত করুন GEMINI_API_KEY এনভায়রনমেন্টে আছে)
-        client = genai.Client()
+        # ক্লায়েন্ট ইনিশিয়ালাইজেশন (সরাসরি API Key পাস করা হয়েছে)
+        client = genai.Client(api_key=GEMINI_KEY)
         
-        # ২. গুগল সার্চ টুল কনফিগার করুন এবং টুলস লিস্টে পাস করুন
+        # গুগল সার্চ টুল কনফিগারেশন
         search_tool = types.Tool(google_search=types.GoogleSearch())
         config = types.GenerateContentConfig(
             tools=[search_tool],
-            temperature=0.2  # টেম্পারেচার কম রাখলে এআই বানিয়ে কথা না বলে সঠিক তথ্য দেবে
+            temperature=0.2  # নিখুঁত তথ্যের জন্য টেম্পারেচার কম রাখা হয়েছে
         )
         
-        # টেক্সট ও ইমেজ একসাথে প্রসেস করার জন্য gemini-2.5-flash মডেলটি সেরা
         model_name = "gemini-2.5-flash" 
 
         context = (
@@ -84,7 +79,6 @@ def get_ai_answer(user_query, image_bytes=None):
                 image, 
                 f"Customer Question: {user_query or 'এটার দাম কত?'}"
             ]
-            # এখানে client.models.generate_content ব্যবহার করা হয়েছে এবং config পাস করা হয়েছে
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt_parts,
@@ -103,6 +97,7 @@ def get_ai_answer(user_query, image_bytes=None):
         print(f"Gemini Error: {e}")
         return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
 
+# --- হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন ---
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
@@ -117,12 +112,14 @@ def send_message(recipient_number, message_body):
     }
     requests.post(url, json=payload, headers=headers)
 
+# --- মেটা ভেরিফিকেশন (Webhook GET) ---
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge"), 200
     return "Failed", 403
 
+# --- মূল হোয়াটসঅ্যাপ রিসিভার (Webhook POST) ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -141,20 +138,16 @@ def webhook():
             # কাস্টমার ছবি পাঠালে
             elif msg.get("type") == "image":
                 media_id = msg["image"]["id"]
-                caption = msg["image"].get("caption", "এটার দাম কত?")
+                caption = msg["image"].get("caption", "").strip()
                 
                 # ছবি ডাউনলোড করা হচ্ছে
                 image_bytes = download_whatsapp_media(media_id)
                 
                 if image_bytes:
-                    # ছবি সহ জেমিনিকে কল করা
-                    model = genai.GenerativeModel('gemini-2.5-flash')
-                    context = "You are the helpful AI assistant for 'Dhaka Exclusive'. NEVER use 'নমস্কার'. ALWAYS use 'প্রিয় গ্রাহক'. Answer politely in Bengali. Identify the kitchenware product in this image and tell its details or price."
-                    image_parts = [{"mime_type": "image/jpeg", "data": image_bytes}]
-                    response = model.generate_content([context, image_parts[0], caption])
-                    ai_response = response.text
+                    # ফিক্সড: আপনার তৈরি করা মূল 'get_ai_answer' ফাংশনটিকেই এখানে ইমেজ বাইটস সহ কল করা হয়েছে
+                    ai_response = get_ai_answer(user_query=caption, image_bytes=image_bytes)
                 else:
-                    ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
+                    ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
                     
                 send_message(from_number, ai_response)
             else:
