@@ -48,12 +48,6 @@ def save_knowledge(new_info):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"- {new_info}\n")
 
-
-import io
-import google.generativeai as genai
-from google.generativeai import types  # এই নতুন ইমপোর্টটি যোগ করা হয়েছে
-from PIL import Image
-
 def get_ai_answer(user_query, image_bytes=None):
     try:
         # পুরোনো SDK ভার্সনের জন্য মানানসই গুগল সার্চ কনফিগারেশন
