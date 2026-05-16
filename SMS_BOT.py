@@ -47,11 +47,11 @@ def save_knowledge(new_info):
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # সঠিক ফরম্যাটে গুগলের লাইভ সার্চ (Google Search Grounding) চালু করা হলো
+        # সঠিক অবজেক্ট ফরম্যাটে গুগলের লাইভ সার্চ (Google Search Retrieval) কনফিগার করা হলো
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=['google_search_retrieval']
-        ) 
+            tools=[{"google_search_retrieval": {}}] # জেমিনি SDK-এর একদম সঠিক ফরম্যাট
+        )
         
         # নতুন ডোমেইন dhakaexclusive.org আপডেট করা হয়েছে
         context = (
