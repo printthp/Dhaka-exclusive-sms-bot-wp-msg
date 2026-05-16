@@ -3,6 +3,9 @@ import requests
 processed_messages = set()
 from flask import Flask, request
 import google.generativeai as genai
+import io
+import google.generativeai as genai
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -45,38 +48,47 @@ def save_knowledge(new_info):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"- {new_info}\n")
 
+
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # সঠিক অবজেক্ট ফরম্যাটে গুগলের লাইভ সার্চ (Google Search Retrieval) কনফিগার করা হলো
+        # ১. জেমিনি SDK-এর একদম সঠিক নিয়মে গুগল লাইভ সার্চ কনফিগার করা হলো
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=[{"google_search_retrieval": {}}] # জেমিনি SDK-এর একদম সঠিক ফরম্যাট
-        )
+            tools=['google_search_retrieval']  # পাইথন SDK-এর জন্য এটাই সঠিক ফরম্যাট
+        ) 
         
-        # নতুন ডোমেইন dhakaexclusive.org আপডেট করা হয়েছে
         context = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             "STRICT RULES:\n"
-            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার'.\n"
+            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার'.\n"
             "2. KEEP REPLIES EXTREMELY SHORT (Max 2-3 lines). Do not write histories or long essays.\n"
             "3. Look at the image provided. Use your built-in Google Search tool to search our website: https://dhakaexclusive.org/ \n"
             "Find the exact product matching the photo, then extract its current Name, Size/Measurement, and Price in BDT.\n"
             "4. Only state the price if you successfully find it via Google Search on dhakaexclusive.org.\n"
             "5. CRITICAL: If you cannot find the product or its specific price on dhakaexclusive.org, identify the item and strictly say:\n"
-            "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
+            "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
         
         if image_bytes:
-            image_parts = [{"mime_type": "image/jpeg", "data": image_bytes}]
-            prompt_parts = [context, image_parts[0], f"Customer Question: {user_query or 'এটার দাম কত?'}" ]
+            # ২. বাইটস (Bytes) থেকে ইমেজ অবজেক্ট তৈরি করা হলো যেন টাইপ এরর না আসে
+            image = Image.open(io.BytesIO(image_bytes))
+            
+            # প্রম্পট পার্টস তৈরি
+            prompt_parts = [
+                context, 
+                image, 
+                f"Customer Question: {user_query or 'এটার দাম কত?'}"
+            ]
             response = model.generate_content(prompt_parts)
         else:
             response = model.generate_content(f"{context}\nCustomer: {user_query}")
             
         return response.text
+
     except Exception as e:
+        # কোনো এরর আসলে তা প্রিন্ট হবে যেন আপনি লগ দেখে বুঝতে পারেন
         print(f"Gemini Error: {e}")
-        return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
+        return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
 
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
