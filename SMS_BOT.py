@@ -47,10 +47,10 @@ def save_knowledge(new_info):
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # গুগলের লাইভ সার্চ টুল চালু করা হচ্ছে যাতে ওয়েবসাইটের রিয়েল-টাইম ডাটা পড়তে পারে
+        # সঠিক ফরম্যাটে গুগলের লাইভ সার্চ (Google Search Grounding) চালু করা হলো
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=[{"google_search": {}}]  # এই লাইনের মাধ্যমে লাইভ সার্চ একটিভ হলো
+            tools=['google_search_retrieval']  # সঠিক মেথড নাম
         ) 
         
         context = (
@@ -58,7 +58,7 @@ def get_ai_answer(user_query, image_bytes=None):
             "STRICT RULES:\n"
             "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার'.\n"
             "2. KEEP REPLIES EXTREMELY SHORT (Max 2-3 lines). Do not write histories or long essays.\n"
-            "3. Look at the image provided. Use your built-in Google Search tool to search our website: https://dhakaexclusive.org/ "
+            "3. Look at the image provided. Use your built-in Google Search tool to search our website: https://dhakaexclusive.org/ \n"
             "Find the exact product matching the photo, then extract its current Name, Size/Measurement, and Price in BDT.\n"
             "4. Only state the price if you successfully find it via Google Search on dhakaexclusive.org.\n"
             "5. CRITICAL: If you cannot find the product or its specific price on dhakaexclusive.org, identify the item and strictly say:\n"
