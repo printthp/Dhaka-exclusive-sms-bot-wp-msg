@@ -50,7 +50,9 @@ def save_knowledge(new_info):
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-       search_tool = types.Tool(google_search=types.GoogleSearch())
+        client = genai.Client()
+        search_tool = types.Tool(google_search=types.GoogleSearch())
+        
         context = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             "STRICT RULES:\n"
