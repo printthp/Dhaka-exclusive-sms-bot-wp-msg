@@ -50,16 +50,7 @@ def save_knowledge(new_info):
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # পুরোনো SDK ভার্সনের জন্য মানানসই গুগল সার্চ কনফিগারেশন
-        model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
-            tools=[{"google_search": {}}]  # এখানে 'google_search_retrieval' এর বদলে শুধু 'google_search' ব্যবহার করা হয়েছে
-        )
-        model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
-            tools=[search_tool]  # এখানে সরাসরি অবজেক্টটি পাস করা হলো
-        ) 
-        
+       search_tool = types.Tool(google_search=types.GoogleSearch())
         context = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             "STRICT RULES:\n"
