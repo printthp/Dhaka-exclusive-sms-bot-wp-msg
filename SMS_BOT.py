@@ -47,37 +47,35 @@ def save_knowledge(new_info):
 
 def get_ai_answer(user_query, image_bytes=None):
     try:
-        # ছবি দেখার জন্য লেটেস্ট এবং সবচেয়ে বুদ্ধিমান ফ্ল্যাশ মডেল ব্যবহার করা হয়েছে
-        model = genai.GenerativeModel('gemini-2.5-flash') 
+        # গুগলের লাইভ সার্চ টুল চালু করা হচ্ছে যাতে ওয়েবসাইটের রিয়েল-টাইম ডাটা পড়তে পারে
+        model = genai.GenerativeModel(
+            model_name='gemini-2.5-flash',
+            tools=[{"google_search": {}}]  # এই লাইনের মাধ্যমে লাইভ সার্চ একটিভ হলো
+        ) 
         
-        # বটকে দেওয়া একদম কড়া এবং ছোট নির্দেশনাবলী
         context = (
-            "You are the professional AI sales assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh.\n"
-            "CRITICAL RULES:\n"
-            "1. NEVER use the word 'নমস্কার'.\n"
-            "2. ALWAYS address the customer politely as 'প্রিয় গ্রাহক'.\n"
-            "3. KEEP YOUR REPLIES EXTREMELY SHORT, CONCISE, AND TO THE POINT (Maximum 2-3 lines). Do NOT write long paragraphs.\n"
-            "4. Our official website is: https://dhakaexclusive.com/ \n\n"
-            
-            "IMAGE INSTRUCTION:\n"
-            "If an image is provided, carefully look at the kitchenware product in the image. Match it with our website (https://dhakaexclusive.com/) "
-            "and tell the 'প্রিয় গ্রাহক' the exact Product Name, Size/Measurement, and Price in Bengali.\n"
-            "If you cannot find the exact price from the website, just identify the product name from the image and say: "
+            "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
+            "STRICT RULES:\n"
+            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার'.\n"
+            "2. KEEP REPLIES EXTREMELY SHORT (Max 2-3 lines). Do not write histories or long essays.\n"
+            "3. Look at the image provided. Use your built-in Google Search tool to search our website: https://dhakaexclusive.org/ "
+            "Find the exact product matching the photo, then extract its current Name, Size/Measurement, and Price in BDT.\n"
+            "4. Only state the price if you successfully find it via Google Search on dhakaexclusive.org.\n"
+            "5. CRITICAL: If you cannot find the product or its specific price on dhakaexclusive.org, identify the item and strictly say:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
         
-        # যদি ইমেজ বাইটস থাকে তবেই ইমেজ প্রসেস হবে
         if image_bytes:
             image_parts = [{"mime_type": "image/jpeg", "data": image_bytes}]
-            prompt_parts = [context, image_parts[0], f"Customer sent this product image and asked: {user_query or 'এটার দাম কত?'}" ]
+            prompt_parts = [context, image_parts[0], f"Customer Question: {user_query or 'এটার দাম কত?'}" ]
             response = model.generate_content(prompt_parts)
         else:
-            response = model.generate_content(f"{context}\nCustomer Query: {user_query}")
+            response = model.generate_content(f"{context}\nCustomer: {user_query}")
             
         return response.text
     except Exception as e:
         print(f"Gemini Error: {e}")
-        return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে আপনার মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
+        return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
 
 def send_message(recipient_number, message_body):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
