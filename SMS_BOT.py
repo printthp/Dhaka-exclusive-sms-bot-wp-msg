@@ -17,7 +17,8 @@ GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
 # --- Gemini AI Setup ---
-genai.configure(api_key=GEMINI_KEY)
+client = genai.Client(api_key=GEMINI_KEY)
+
 #এটি হোয়াটসঅ্যাপ থেকে ছবি ডাউনলোড করার কাজ করবে:
 def download_whatsapp_media(media_id):
     try:
