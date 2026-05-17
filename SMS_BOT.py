@@ -20,9 +20,8 @@ PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
 GEMINI_KEY = os.environ.get("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
 
-# --- Gemini AI Setup (FIXED: একটি নির্দিষ্ট স্ট্যান্ডার্ডে কনফিগার করা হলো) ---
-
-    genai.configure(api_key=GEMINI_KEY)
+# --- Gemini AI Setup ---
+genai.configure(api_key=GEMINI_KEY)
 
 # আপনার ফেসবুক ক্যাটালগ লিঙ্ক
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
