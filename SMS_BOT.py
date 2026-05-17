@@ -14,17 +14,13 @@ app = Flask(__name__)
 # ডুপ্লিকেট মেসেজ আটকানো এবং মেমোরি ক্লিনআপের জন্য ট্র্যাকিং
 global_processed_messages = {}
 
-# --- কনফিগারেশন (আপনার দেওয়া ডাটা সরাসরি সেট করা হলো) ---
+# --- কনফিগারেশন (আপনার দেওয়া ডাটা সরাসরি নিখুঁতভাবে সেট করা হলো) ---
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
 PHONE_NUMBER_ID = "1039959469208417"
-GEMINI_KEY = os.environ.get("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 VERIFY_TOKEN = "dhakaex0020"
 
-# --- Gemini AI Setup ---
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-else:
-    print("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
+# সরাসরি এপিআই কি কনফিগার করা হলো যাতে কোনো এনভায়রনমেন্ট এরর না আসে
+genai.configure(api_key="AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 
 # ফেসবুক ক্যাটালগ লিঙ্ক
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
@@ -35,7 +31,12 @@ def update_catalog_database():
     while True:
         try:
             print("🔄 Fetching product catalog from XML...")
-            headers = {'User-Agent': 'Mozilla/5.0'}
+            # 403 Error ফিক্স করার জন্য ব্রাউজারের আসল হেডার ব্যবহার করা হলো
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5'
+            }
             response = requests.get(CATALOG_URL, headers=headers, timeout=30)
             
             if response.status_code == 200:
@@ -156,7 +157,7 @@ def send_message(recipient_number, message_body):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-# --- ৬. হোয়াটসঅ্যাপ রিকোয়েস্ট ব্যাকগ্রাউন্ডে প্রসেস করার ফাংশন ---
+# --- ⑥. হোয়াটসঅ্যাপ রিকোয়েস্ট ব্যাকগ্রাউন্ডে প্রসেস করার ফাংশন ---
 def handle_async_message(msg):
     try:
         from_number = msg["from"]
@@ -186,7 +187,6 @@ def handle_async_message(msg):
 # --- ৭. মেমোরি ক্লিনআপ ফাংশন (RAM ফুল হওয়া আটকানোর জন্য) ---
 def cleanup_processed_messages():
     current_time = time.time()
-    # ৬০ সেকেন্ডের বেশি পুরনো মেসেজ আইডিগুলো ডিলিট করবে
     to_delete = [msg_id for msg_id, timestamp in global_processed_messages.items() if (current_time - timestamp) > 60]
     for msg_id in to_delete:
         del global_processed_messages[msg_id]
@@ -208,7 +208,6 @@ def webhook():
             
             current_time = time.time()
             
-            # মেমোরি ক্লিনআপ রান করা
             cleanup_processed_messages()
             
             # ডুপ্লিকেট মেসেজ চেক
