@@ -19,15 +19,13 @@ GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
 # --- Gemini AI Setup ---
-genai.configure(api_key=GEMINI_KEY)
-
+# নতুন SDK অনুযায়ী Client ডিফাইন করা হলো
+client = genai.Client(api_key=GEMINI_KEY)
+MODEL_NAME = "gemini-2.5-flash"  # কমেন্ট আনলক করা হলো
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 
-# --- জেমিনি ক্লায়েন্ট সেটআপ ---
-# MODEL_NAME = "gemini-2.5-flash"
-
-# গুগল লাইভ সার্চ টুল চালু
+# গুগল লাইভ সার্চツール চালু
 search_tool = types.Tool(google_search=types.GoogleSearch())
 ai_config = types.GenerateContentConfig(
     tools=[search_tool],
@@ -50,7 +48,7 @@ def download_whatsapp_media(media_id):
         print(f"Media Download Error: {e}")
     return None
 
-# --- ক্যাটালগ সার্চ ফাংশন (বিল ও টোকেন বাঁচানোর জন্য) ---
+# --- ক্যাটালগ সার্চ ফাংশন ---
 def search_product_in_catalog(user_query):
     try:
         res = requests.get(CATALOG_URL, timeout=10)
@@ -71,7 +69,6 @@ def search_product_in_catalog(user_query):
                 title_text = title.text.strip()
                 price_text = price.text.strip()
                 
-                # কি-ওয়ার্ড ম্যাচিং ব্যাকআপ
                 if not query_words or any(word in title_text.lower() for word in query_words):
                     matched_products += f"- Product: {title_text}, Price: {price_text}\n"
                     count += 1
@@ -110,11 +107,12 @@ def get_ai_answer(user_query, image_bytes=None):
         )
         
         if image_bytes:
-            image = Image.open(io.BytesIO(image_bytes))
-            image.thumbnail((800, 800))
-            
-            # ফিক্সড: 'Black' লেখাটি রিমুভ করা হয়েছে
-            prompt_parts = [context, image, f"Customer Question: {user_query or 'এটার দাম কত?'}\n"]
+            # নতুন SDK-এর জন্য ইমেজ পার্ট তৈরি
+            image_part = types.Part.from_bytes(
+                data=image_bytes,
+                mime_type="image/jpeg",
+            )
+            prompt_parts = [context, image_part, f"Customer Question: {user_query or 'এটার দাম কত?'}\n"]
             response = client.models.generate_content(model=MODEL_NAME, contents=prompt_parts, config=ai_config)
         else:
             prompt_text = f"{context}\nCustomer Question: {user_query}"
