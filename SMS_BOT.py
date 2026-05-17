@@ -12,11 +12,11 @@ app = Flask(__name__)
 # ডুপ্লিকেট মেসেজ আটকানোর জন্য গ্লোবাল মেমোরি ট্র্যাকিং
 global_processed_messages = {}
 
-# --- কনফিগারেশন ---
-PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
-PHONE_NUMBER_ID = "1039959469208417"
-GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
-VERIFY_TOKEN = "dhakaex0020"
+# --- কনফিগারেশন (সুরক্ষার জন্য Environment Variables ব্যবহার করা শ্রেয়) ---
+PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
+GEMINI_KEY = os.environ.get("GEMINI_KEY", "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 
@@ -68,7 +68,7 @@ def search_product_in_catalog(user_query):
                 title_text = title.text.strip()
                 price_text = price.text.strip()
                 
-                # কি-ওয়ার্ড ম্যাচিং ব্যাকআপ
+                # কি-ওয়ার্ড ম্যাচিং ব্যাকআপ
                 if not query_words or any(word in title_text.lower() for word in query_words):
                     matched_products += f"- Product: {title_text}, Price: {price_text}\n"
                     count += 1
@@ -110,7 +110,8 @@ def get_ai_answer(user_query, image_bytes=None):
             image = Image.open(io.BytesIO(image_bytes))
             image.thumbnail((800, 800))
             
-            prompt_parts = [context, image, f"Customer Question: {user_query or 'এটার দাম কত?' Black}"]
+            # ফিক্সড: 'Black' লেখাটি রিমুভ করা হয়েছে
+            prompt_parts = [context, image, f"Customer Question: {user_query or 'এটার দাম কত?'}\n"]
             response = client.models.generate_content(model=MODEL_NAME, contents=prompt_parts, config=ai_config)
         else:
             prompt_text = f"{context}\nCustomer Question: {user_query}"
@@ -155,7 +156,7 @@ def webhook():
             msg_id = msg["id"]
             from_number = msg["from"]
             
-            # মেটা-র ডুপ্লিকেট রিকার্সিভ রিকোয়েস্ট ড্রপ করা
+            # মেটা-র ডুপ্লিকেট রিকার্সিভ রিকোয়েস্ট ড্রপ করা
             if msg_id in global_processed_messages:
                 print(f"Duplicate Message Ignored: {msg_id}")
                 return "ok", 200
