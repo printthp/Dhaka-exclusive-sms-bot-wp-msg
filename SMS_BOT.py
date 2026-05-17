@@ -14,10 +14,9 @@ global_processed_messages = {}
 user_chat_sessions = {}  
 
 # --- কনফিগারেশন ---
-# --- কনফিগারেশন (Strict Bypass) ---
 PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
 PHONE_NUMBER_ID = "1039959469208417"
-GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q" # আপনার দেওয়া আসল কি
+GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
@@ -50,7 +49,6 @@ def search_product_in_catalog(user_query):
         }
         
         res = requests.get(CATALOG_URL, headers=headers, timeout=12)
-        
         if res.status_code != 200:
             print(f"Catalog Fetch Failed. Status Code: {res.status_code}")
             return ""
@@ -77,7 +75,7 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর (Fixed for validation rules) ---
+# --- মূল জেমিনি এআই প্রসেসর ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
         if from_number not in user_chat_sessions:
@@ -90,7 +88,7 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
         if user_query:
             catalog_context = search_product_in_catalog(user_query)
             
-        catalog_info = f"Matched Products:\n{catalog_context}" if catalog_context else "No direct text match in catalog. Use Google Search strictly on site:dhakaexclusive.org to check."
+        catalog_info = f"Matched Products:\n{catalog_context}" if catalog_context else "No direct text match in catalog."
 
         system_instruction = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
@@ -101,22 +99,20 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             "3. If the customer wants to buy/order (অর্ডার করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
             "4. Delivery Charge Rules: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. When they provide the address, calculate the total bill (Product Price + Delivery Charge) and show them the summary to confirm.\n"
             "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
-            "6. CRITICAL: If you cannot find a product or its price anywhere, strictly say this exact sentence and nothing else:\n"
+            "6. CRITICAL: If you cannot find a product or its price anywhere in the provided Matched Products context, strictly say this exact sentence and nothing else:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
 
-        # কনফিগারেশন সেটআপ (সিস্টেম প্রম্পট এবং গুগল সার্চ কনফিগ সহ)
+        # কনফিগারেশন সেটআপ (সার্চ লুপ বন্ধ করার জন্য থিংকিং প্রসেস ০ করা হয়েছে)
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
             temperature=0.2,       
             max_output_tokens=350  
         )
 
-        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি (হিস্ট্রি + কারেন্ট মেসেজ) - STRICT TYPES IMPLEMENTATION
+        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি
         full_contents = []
-        
-        # পূর্ববর্তী চ্যাট হিস্ট্রি প্রিপেয়ার করা
         for hist in history_contents[-6:]:
             full_contents.append(
                 types.Content(
@@ -125,19 +121,14 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
                 )
             )
             
-        # বর্তমান ইউজার ইনপুটের পার্টস তৈরি করা
         current_message_parts = []
-        
         if image_bytes:
             img = Image.open(io.BytesIO(image_bytes))
             img.thumbnail((800, 800))
-            # ইমেজ ডেটা সরাসরি পার্টস লিস্টে যোগ করা হলো
             current_message_parts.append(img)
             
-        # টেক্সট ডেটা পার্টস লিস্টে যোগ করা হলো
         current_message_parts.append(types.Part.from_text(text=user_query or "এটার দাম কত?"))
 
-        # বর্তমান সম্পূর্ণ মেসেজটি হিস্ট্রি লিস্টের শেষে যোগ করা
         full_contents.append(
             types.Content(
                 role="user",
@@ -152,7 +143,7 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             config=ai_config
         )
 
-        # চ্যাট মেমোরি আপডেট (মেমোরি লিক রোধে ১০০০ কাস্টমারের বেশি হলে পুরনো ডাটা ডিলিট হবে)
+        # চ্যাট মেমোরি আপডেট
         if len(user_chat_sessions) > 1000:
             user_chat_sessions.pop(next(iter(user_chat_sessions)))
 
@@ -236,7 +227,6 @@ def webhook():
         
     return "ok", 200
 
-# --- Render-এর জন্য পারফেক্ট পোর্ট বাইন্ডিং ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
