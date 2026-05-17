@@ -14,9 +14,9 @@ global_processed_messages = {}
 user_chat_sessions = {}  
 
 # --- কনফিগারেশন ---
-PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
+PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "YOUR_WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
-GEMINI_KEY = os.environ.get("GEMINI_KEY", "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
+GEMINI_KEY = os.environ.get("GEMINI_KEY", "YOUR_GEMINI_KEY")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
@@ -24,13 +24,6 @@ CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 # --- জেমিনি ক্লায়েন্ট সেটআপ ---
 client = genai.Client(api_key=GEMINI_KEY)
 MODEL_NAME = "gemini-2.5-flash"
-
-search_tool = types.Tool(google_search=types.GoogleSearch())
-ai_config = types.GenerateContentConfig(
-    tools=[search_tool],
-    temperature=0.2,       
-    max_output_tokens=350  
-)
 
 # --- হোয়াটসঅ্যাপ থেকে ছবি ডাউনলোড ---
 def download_whatsapp_media(media_id):
@@ -50,8 +43,14 @@ def download_whatsapp_media(media_id):
 # --- ক্যাটালগ সার্চ ফাংশন ---
 def search_product_in_catalog(user_query):
     try:
-        res = requests.get(CATALOG_URL, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/xml, text/xml, */*"
+        }
+        
+        res = requests.get(CATALOG_URL, headers=headers, timeout=12)
         if res.status_code != 200:
+            print(f"Catalog Fetch Failed. Status Code: {res.status_code}")
             return ""
             
         root = ET.fromstring(res.content)
@@ -76,56 +75,89 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর ---
+# --- মূল জেমিনি এআই প্রসেসর (Fixed for google-genai) ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
-        if from_number not in user_chat_sessions:
-            user_chat_sessions[from_number] = []
-        
-        history = user_chat_sessions[from_number]
-        
+        # মেমোরি ক্লিনিং (১০০০ কাস্টমারের বেশি হলে পুরনো ডাটা ডিলিট হবে)
+        if len(user_chat_sessions) > 1000:
+            user_chat_sessions.pop(next(iter(user_chat_sessions)))
+
+        # ক্যাটালগ কনটেক্সট তৈরি
         catalog_context = ""
         if user_query:
             catalog_context = search_product_in_catalog(user_query)
             
         catalog_info = f"Matched Products:\n{catalog_context}" if catalog_context else "No direct text match in catalog. Use Google Search strictly on site:dhakaexclusive.org to check."
 
-        context = (
+        system_instruction = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             f"{catalog_info}\n\n"
             "STRICT RULES:\n"
             "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার' or 'হ্যালো'.\n"
             "2. Keep replies short, polite, and completely in Bengali.\n"
-            "3. If the customer wants to buy/order (অर्डर করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
+            "3. If the customer wants to buy/order (অর্ডার করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
             "4. Delivery Charge Rules: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. When they provide the address, calculate the total bill (Product Price + Delivery Charge) and show them the summary to confirm.\n"
-            "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
+            "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
             "6. CRITICAL: If you cannot find a product or its price anywhere, strictly say this exact sentence and nothing else:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
 
-        messages_prompt = [{"role": "system", "text": context}]
-        for hist in history[-6:]:  
-            messages_prompt.append({"role": hist["role"], "text": hist["text"]})
+        # ১. চ্যাট হিস্ট্রি ট্র্যাকিং (নতুন SDK-এর Content টাইপ অনুযায়ী স্ট্রাকচার্ড করা)
+        if from_number not in user_chat_sessions:
+            user_chat_sessions[from_number] = []
+        
+        history_contents = user_chat_sessions[from_number]
 
-        current_input = f"Customer Question: {user_query or 'এটার দাম কত?'}"
+        # ২. কনফিগারেশন সেটআপ (সিস্টেম প্রম্পট এবং গুগল সার্চ কনফিগ সহ)
+        ai_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.2,       
+            max_output_tokens=350  
+        )
+
+        # ৩. বর্তমান ইউজার মেসেজের পার্টস বা কনটেন্ট রেডি করা
+        current_message_parts = []
         
         if image_bytes:
-            image = Image.open(io.BytesIO(image_bytes))
-            image.thumbnail((800, 800))
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[context, image, current_input],
-                config=ai_config
-            )
-        else:
-            messages_prompt.append({"role": "user", "text": current_input})
-            prompt_text = "\n".join([f"{m['role']}: {m['text']}" for m in messages_prompt])
-            response = client.models.generate_content(model=MODEL_NAME, contents=prompt_text, config=ai_config)
+            img = Image.open(io.BytesIO(image_bytes))
+            img.thumbnail((800, 800))
+            current_message_parts.append(img)
+            
+        # ইউজার টেক্সট বা ডিফল্ট প্রম্পট যুক্ত করা
+        current_message_parts.append(user_query or "এটার দাম কত?")
 
+        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি (হিস্ট্রি + কারেন্ট মেসেজ)
+        # জেমিনি এপিআই-এর নিয়ম অনুসারে সিস্টেম প্রম্পট বাদে শুধু user এবং model এর ডায়ালগ হিস্ট্রি পাঠাতে হয়
+        full_contents = []
+        for hist in history_contents[-6:]: # সর্বশেষ ৬টি মেসেজ মেমোরিতে রাখা হচ্ছে
+            full_contents.append(
+                types.Content(
+                    role=hist['role'],
+                    parts=[types.Part.from_text(text=hist['text'])]
+                )
+            )
+            
+        # বর্তমান ইনপুটটি হিস্ট্রির শেষে যুক্ত করা
+        full_contents.append(
+            types.Content(role="user", parts=current_message_parts)
+        )
+
+        # ৫. এপিআই কল করা
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=full_contents,
+            config=ai_config
+        )
+
+        # ৬. লোকাল চ্যাট সেশন আপডেট করা
         if user_query:
-            history.append({"role": "user", "text": user_query})
-        history.append({"role": "model", "text": response.text})
-        user_chat_sessions[from_number] = history
+            history_contents.append({"role": "user", "text": user_query})
+        else:
+            history_contents.append({"role": "user", "text": "[Sent an Image]"})
+            
+        history_contents.append({"role": "model", "text": response.text})
+        user_chat_sessions[from_number] = history_contents
 
         return response.text
 
@@ -146,7 +178,10 @@ def send_message(recipient_number, message_body):
         "type": "text",
         "text": {"body": message_body}
     }
-    requests.post(url, json=payload, headers=headers)
+    try:
+        requests.post(url, json=payload, headers=headers, timeout=10)
+    except Exception as e:
+        print(f"Send Message Error: {e}")
 
 # --- মেটা ভেরিফিকেশন (Webhook GET) ---
 @app.route("/webhook", methods=["GET"])
@@ -196,6 +231,7 @@ def webhook():
         
     return "ok", 200
 
+# --- Render-এর জন্য পারফেক্ট পোর্ট বাইন্ডিং ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
