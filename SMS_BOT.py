@@ -6,6 +6,7 @@ from flask import Flask, request
 from PIL import Image
 from google import genai
 from google.genai import types
+from threading import Thread
 
 app = Flask(__name__)
 
@@ -43,12 +44,13 @@ def download_whatsapp_media(media_id):
 # --- ক্যাটালগ সার্চ ফাংশন ---
 def search_product_in_catalog(user_query):
     try:
-        # শুধু 'দাম', 'koto', 'dam' এই জাতীয় সাধারণ শব্দ থাকলে ক্যাটালগ সার্চ স্কিপ করা হবে
+        if not user_query:
+            return ""
         ignored_words = {"dam", "koto", "price", "কত", "দাম", "বলেন", "বলো", "blo", "bolen", "tmi"}
         clean_query = " ".join([w for w in user_query.lower().split() if w not in ignored_words]).strip()
         
         if not clean_query or len(clean_query) < 2:
-            return "GENERAL_INQUIRY" # সাধারণ প্রশ্ন, কোনো নির্দিষ্ট প্রোডাক্টের নাম নেই
+            return ""
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -74,7 +76,7 @@ def search_product_in_catalog(user_query):
                 if any(word in title_text.lower() for word in query_words):
                     matched_products += f"- Product: {title_text}, Price: {price_text}\n"
                     count += 1
-                if count >= 5:
+                if count >= 3:
                     break
         return matched_products
     except Exception as e:
@@ -87,38 +89,35 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
         if len(user_chat_sessions) > 1000:
             user_chat_sessions.pop(next(iter(user_chat_sessions)))
             
-        catalog_context = ""
-        if user_query:
-            catalog_context = search_product_in_catalog(user_query)
-            
-        # ক্যাটালগের কনটেক্সট রুলস হ্যান্ডলিং
-        if catalog_context == "GENERAL_INQUIRY":
-            catalog_info = "Customer is asking a general question or just saying hello/asking price without specifying a clear product name. Ask them politely which product they are looking for."
-        elif catalog_context:
-            catalog_info = f"Matched Products in Catalog:\n{catalog_context}"
-        else:
-            catalog_info = "The specific product requested is not found in the catalog."
+        catalog_context = search_product_in_catalog(user_query) if user_query else ""
+        catalog_info = f"Matched Products in Catalog:\n{catalog_context}" if catalog_context else "No direct match in xml catalog file."
 
         system_instruction = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
-            f"Context: {catalog_info}\n\n"
-            "STRICT RULES:\n"
+            f"XML Catalog Context:\n{catalog_info}\n\n"
+            "CRITICAL INSTRUCTION FOR SEARCHING PRODUCTS:\n"
+            "1. If the customer sends an image or asks for a product, ALWAYS use the Google Search tool to search strictly on site:dhakaexclusive.org or dhakaexclusive.org to find the real live price, size, and availability.\n"
+            "2. If you find the product and price from Google Search or XML catalog, tell the price directly to the customer in a polite manner.\n"
+            "3. Do NOT show or output your internal thinking, search strings, or 'I am searching' messages to the user. Only reply with the final response.\n\n"
+            "STRICT BUSINESS RULES:\n"
             "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার' or 'হ্যালো'.\n"
             "2. Keep replies short, polite, and completely in Bengali.\n"
             "3. If the customer wants to buy/order (অর্ডার করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
             "4. Delivery Charge Rules: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. When they provide the address, calculate the total bill (Product Price + Delivery Charge) and show them the summary to confirm.\n"
             "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
-            "6. If you have already confirmed the order in the chat history, do NOT repeat the confirmation. Respond naturally and politely to their acknowledgment.\n"
-            "7. CRITICAL: If the customer clearly specified a product name or sent a product image, but you cannot find it or its price anywhere in the catalog, strictly say this exact sentence and nothing else:\n"
+            "6. If you have already confirmed the order in the chat history, do NOT repeat the confirmation.\n"
+            "7. IF AND ONLY IF you cannot find the product or its price anywhere in the XML catalog AND Google Search fails to find it on site:dhakaexclusive.org, strictly say this exact sentence and nothing else:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'\n"
-            "8. If the customer's message is generic (e.g., 'tmi blo dam', 'hi', 'dam koto' without a product name), do NOT use the premium product sentence. Instead, politely ask them to provide the product name or photo."
+            "8. If the customer's message is just a generic greeting (e.g., 'hi', 'hello', 'dam koto' without any product name or photo), do NOT use the premium product sentence. Ask them politely to share the product name or photo."
         )
 
+        # কনফিগারেশন সেটআপ (লাইভ গুগল সার্চ টুল যুক্ত করা হয়েছে)
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            tools=[types.Tool(google_search=types.GoogleSearch())], # আপনার ওয়েবসাইট সার্চ করার জন্য চালু করা হলো
+            thinking_config=types.ThinkingConfig(thinking_budget=0), # সার্চ করার টেক্সট চ্যাটে দেখানো বন্ধ করবে
             temperature=0.3,       
-            max_output_tokens=350  
+            max_output_tokens=400  
         )
 
         if from_number not in user_chat_sessions:
@@ -131,8 +130,13 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             img = Image.open(io.BytesIO(image_bytes))
             img.thumbnail((800, 800))
             message_parts.append(img)
+            # ইমেজ ইনপুট থাকলে জেমিনিকে মনে করিয়ে দেওয়া যে এটি দেখে সাইটে সার্চ করতে হবে
+            message_parts.append("Look at this product image carefully, identify what it is, and search its price on site:dhakaexclusive.org.")
             
-        message_parts.append(user_query or "এটার দাম কত?")
+        if user_query:
+            message_parts.append(user_query)
+        elif not image_bytes:
+            message_parts.append("এটার দাম কত?")
 
         response = chat_session.send_message(message_parts)
         return response.text
@@ -161,6 +165,26 @@ def send_message(recipient_number, message_body):
     except Exception as e:
         print(f"Send Message Error: {e}")
 
+# --- ব্যাকগ্রাউন্ড প্রসেসিং টাস্ক ---
+def process_async_webhook(msg, from_number):
+    if msg.get("type") == "text":
+        user_text = msg["text"]["body"].strip()
+        ai_response = get_ai_answer(from_number, user_text)
+        send_message(from_number, ai_response)
+        
+    elif msg.get("type") == "image":
+        media_id = msg["image"]["id"]
+        caption = msg["image"].get("caption", "").strip()
+        
+        image_bytes = download_whatsapp_media(media_id)
+        if image_bytes:
+            ai_response = get_ai_answer(from_number, user_query=caption, image_bytes=image_bytes)
+        else:
+            ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
+        send_message(from_number, ai_response)
+    else:
+        send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট এবং ছবি বুঝতে পারি।")
+
 # --- মেটা ভেরিফিকেশন (Webhook GET) ---
 @app.route("/webhook", methods=["GET"])
 def verify():
@@ -186,23 +210,8 @@ def webhook():
             if len(global_processed_messages) > 1000:
                 global_processed_messages.pop(next(iter(global_processed_messages)))
 
-            if msg.get("type") == "text":
-                user_text = msg["text"]["body"].strip()
-                ai_response = get_ai_answer(from_number, user_text)
-                send_message(from_number, ai_response)
-                
-            elif msg.get("type") == "image":
-                media_id = msg["image"]["id"]
-                caption = msg["image"].get("caption", "").strip()
-                
-                image_bytes = download_whatsapp_media(media_id)
-                if image_bytes:
-                    ai_response = get_ai_answer(from_number, user_query=caption, image_bytes=image_bytes)
-                else:
-                    ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
-                send_message(from_number, ai_response)
-            else:
-                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট এবং ছবি বুঝতে পারি।")
+            thread = Thread(target=process_async_webhook, args=(msg, from_number))
+            thread.start()
                 
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
