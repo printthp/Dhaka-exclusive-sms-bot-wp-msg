@@ -9,7 +9,7 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# ডুপ্লিকেট মেসেজ এবং কাস্টমারের চ্যাট মেমোরি ট্র্যাকিং
+# ডুপ্লিকেট মেসেজ এবং কাস্টমারের চ্যাট সেশন ট্র্যাকিং (এআই চ্যাট অবজেক্ট স্টোর করবে)
 global_processed_messages = {}
 user_chat_sessions = {}  
 
@@ -50,7 +50,6 @@ def search_product_in_catalog(user_query):
         
         res = requests.get(CATALOG_URL, headers=headers, timeout=12)
         if res.status_code != 200:
-            print(f"Catalog Fetch Failed. Status Code: {res.status_code}")
             return ""
             
         root = ET.fromstring(res.content)
@@ -75,14 +74,13 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর ---
+# --- মূল জেমিনি এআই প্রসেসর (স্মার্ট চ্যাট সেশন ম্যানেজমেন্ট) ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
-        if from_number not in user_chat_sessions:
-            user_chat_sessions[from_number] = []
-        
-        history_contents = user_chat_sessions[from_number]
-        
+        # মেমোরি লিক রোধে সেশন ক্লিনিং
+        if len(user_chat_sessions) > 1000:
+            user_chat_sessions.pop(next(iter(user_chat_sessions)))
+            
         # ক্যাটালগ কনটেক্সট তৈরি
         catalog_context = ""
         if user_query:
@@ -99,66 +97,44 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             "3. If the customer wants to buy/order (অর্ডার করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
             "4. Delivery Charge Rules: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. When they provide the address, calculate the total bill (Product Price + Delivery Charge) and show them the summary to confirm.\n"
             "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
-            "6. CRITICAL: If you cannot find a product or its price anywhere in the provided Matched Products context, strictly say this exact sentence and nothing else:\n"
+            "6. CRITICAL: If you have already confirmed/noted the order in the chat history, do NOT repeat the order confirmation message. Respond naturally to the customer's acknowledgment (e.g., if they say 'Okay' or 'Thik ace', reply with a polite closing like 'ধন্যবাদ প্রিয় গ্রাহক, আমাদের সাথেই থাকুন।').\n"
+            "7. If you cannot find a product or its price anywhere in the context, strictly say this exact sentence and nothing else:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
 
-        # কনফিগারেশন সেটআপ (সার্চ লুপ বন্ধ করার জন্য থিংকিং প্রসেস ০ করা হয়েছে)
+        # কনফিগারেশন সেটআপ
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=types.ThinkingConfig(thinking_budget=0),
-            temperature=0.2,       
+            temperature=0.3,       
             max_output_tokens=350  
         )
 
-        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি
-        full_contents = []
-        for hist in history_contents[-6:]:
-            full_contents.append(
-                types.Content(
-                    role=hist['role'],
-                    parts=[types.Part.from_text(text=hist['text'])]
-                )
-            )
+        # কাস্টমারের জন্য চ্যাট সেশন অবজেক্ট না থাকলে নতুন চ্যাট তৈরি করা
+        if from_number not in user_chat_sessions:
+            user_chat_sessions[from_number] = client.chats.create(model=MODEL_NAME, config=ai_config)
             
-        current_message_parts = []
+        chat_session = user_chat_sessions[from_number]
+
+        # ইনপুট পার্টস প্রিপেয়ার করা
+        message_parts = []
         if image_bytes:
             img = Image.open(io.BytesIO(image_bytes))
             img.thumbnail((800, 800))
-            current_message_parts.append(img)
+            message_parts.append(img)
             
-        current_message_parts.append(types.Part.from_text(text=user_query or "এটার দাম কত?"))
+        message_parts.append(user_query or "এটার দাম কত?")
 
-        full_contents.append(
-            types.Content(
-                role="user",
-                parts=current_message_parts
-            )
-        )
-
-        # জেমিনি জেনারেট কল
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=full_contents,
-            config=ai_config
-        )
-
-        # চ্যাট মেমোরি আপডেট
-        if len(user_chat_sessions) > 1000:
-            user_chat_sessions.pop(next(iter(user_chat_sessions)))
-
-        if user_query:
-            history_contents.append({"role": "user", "text": user_query})
-        else:
-            history_contents.append({"role": "user", "text": "[Sent an Image]"})
-            
-        history_contents.append({"role": "model", "text": response.text})
-        user_chat_sessions[from_number] = history_contents
+        # চ্যাট সেশনের মাধ্যমে মেসেজ পাঠানো (এটি অটোমেটিক নিখুঁত হিস্ট্রি মেনটেইন করে)
+        response = chat_session.send_message(message_parts)
 
         return response.text
 
     except Exception as e:
         print(f"Gemini Error: {e}")
+        # সেশনে কোনো বড় এরর হলে সেশন রিসেট করে দেওয়া নিরাপদ
+        if from_number in user_chat_sessions:
+            del user_chat_sessions[from_number]
         return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
 
 # --- হোয়াটসঅ্যাপে মেসেজ পাঠানো ---
