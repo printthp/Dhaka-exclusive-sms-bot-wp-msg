@@ -9,7 +9,7 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# ডুপ্লিকেট মেসেজ এবং কাস্টমারের চ্যাট সেশন ট্র্যাকিং (এআই চ্যাট অবজেক্ট স্টোর করবে)
+# ডুপ্লিকেট মেসেজ এবং কাস্টমারের চ্যাট সেশন ট্র্যাকিং
 global_processed_messages = {}
 user_chat_sessions = {}  
 
@@ -74,49 +74,47 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর (স্মার্ট চ্যাট সেশন ম্যানেজমেন্ট) ---
+# --- মূল জেমিনি এআই প্রসেসর (Gemini Personality Engine) ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
-        # মেমোরি লিক রোধে সেশন ক্লিনিং
         if len(user_chat_sessions) > 1000:
             user_chat_sessions.pop(next(iter(user_chat_sessions)))
             
-        # ক্যাটালগ কনটেক্সট তৈরি
         catalog_context = ""
         if user_query:
             catalog_context = search_product_in_catalog(user_query)
             
         catalog_info = f"Matched Products:\n{catalog_context}" if catalog_context else "No direct text match in catalog."
 
+        # --- জেমিনির আসল কোর পার্সোনালিটি প্রম্পট ---
         system_instruction = (
-            "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
+            "You are Gemini, operating as an authentic, adaptive AI collaborator with a touch of wit, serving as the premium sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/). "
+            "Your guiding principle is to balance empathy with candor: validate the user's feelings authentically as a supportive, grounded AI, while gently directing them toward business goals. "
+            "Subtly adapt your tone, energy, and humor to the user's style. If they use Banglish, reply in a natural, friendly mix. If they are formal, be polite. If they are annoyed, be deeply empathetic and comforting.\n\n"
             f"{catalog_info}\n\n"
-            "STRICT RULES:\n"
-            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার' or 'হ্যালো'.\n"
-            "2. Keep replies short, polite, and completely in Bengali.\n"
-            "3. If the customer wants to buy/order (অর্ডার করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
-            "4. Delivery Charge Rules: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. When they provide the address, calculate the total bill (Product Price + Delivery Charge) and show them the summary to confirm.\n"
-            "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
-            "6. CRITICAL: If you have already confirmed/noted the order in the chat history, do NOT repeat the order confirmation message. Respond naturally to the customer's acknowledgment (e.g., if they say 'Okay' or 'Thik ace', reply with a polite closing like 'ধন্যবাদ প্রিয় গ্রাহক, আমাদের সাথেই থাকুন।').\n"
-            "7. If you cannot find a product or its price anywhere in the context, strictly say this exact sentence and nothing else:\n"
+            "STRICT BUSINESS RULES:\n"
+            "1. ALWAYS address the customer respectfully as 'প্রিয় গ্রাহক'. NEVER use formal or robotic greetings like 'নমস্কার' or 'হ্যালো'.\n"
+            "2. Keep responses short, scannable, insightful, and clear. Avoid dense walls of text.\n"
+            "3. If the customer wants to order ('অর্ডার করতে চাই', 'নিব'), politely ask for: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
+            "4. Delivery Charges: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. Calculate the total bill (Product Price + Delivery Charge) and present a clean summary for confirmation.\n"
+            "5. Order Confirmation: If they provide Name, Phone, and Address, say exactly: 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
+            "6. ANTI-LOOP & EMPATHY RULE: If you have already confirmed the order, do NOT ask for details or repeat the order text. If the user says 'Okay', 'Thik ace', or seems disinterested, respond with a genuine, witty, or polite closing (e.g., 'ধন্যবাদ প্রিয় গ্রাহক, আমাদের সাথেই থাকুন! কোনো প্রয়োজন হলে জাস্ট একটা নক দিয়েন।').\n"
+            "7. CRITICAL FALLBACK: If you cannot find the requested product or price in the context, strictly reply with this exact sentence and nothing else:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
 
-        # কনফিগারেশন সেটআপ
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=types.ThinkingConfig(thinking_budget=0),
-            temperature=0.3,       
+            temperature=0.4,       # পার্সোনালিটি ও ফ্লেক্সিবিলিটি ফুটিয়ে তোলার জন্য টেম্পারেচার কিছুটা বাড়ানো হয়েছে
             max_output_tokens=350  
         )
 
-        # কাস্টমারের জন্য চ্যাট সেশন অবজেক্ট না থাকলে নতুন চ্যাট তৈরি করা
         if from_number not in user_chat_sessions:
             user_chat_sessions[from_number] = client.chats.create(model=MODEL_NAME, config=ai_config)
             
         chat_session = user_chat_sessions[from_number]
 
-        # ইনপুট পার্টস প্রিপেয়ার করা
         message_parts = []
         if image_bytes:
             img = Image.open(io.BytesIO(image_bytes))
@@ -125,14 +123,11 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             
         message_parts.append(user_query or "এটার দাম কত?")
 
-        # চ্যাট সেশনের মাধ্যমে মেসেজ পাঠানো (এটি অটোমেটিক নিখুঁত হিস্ট্রি মেনটেইন করে)
         response = chat_session.send_message(message_parts)
-
         return response.text
 
     except Exception as e:
         print(f"Gemini Error: {e}")
-        # সেশনে কোনো বড় এরর হলে সেশন রিসেট করে দেওয়া নিরাপদ
         if from_number in user_chat_sessions:
             del user_chat_sessions[from_number]
         return "প্রিয় গ্রাহক, কারিগরি সমস্যার কারণে আমি এই মুহূর্তে মেসেজটি বুঝতে পারছি না। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
@@ -155,14 +150,14 @@ def send_message(recipient_number, message_body):
     except Exception as e:
         print(f"Send Message Error: {e}")
 
-# --- মেটা ভেরিফিকেশন (Webhook GET) ---
+# --- মেটা Webhook ভেরিফিকেশন (GET) ---
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge"), 200
     return "Failed", 403
 
-# --- মূল হোয়াটসঅ্যাপ রিসিভার (Webhook POST) ---
+# --- মূল হোয়াটসঅ্যাপ রিসিভার (POST) ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
