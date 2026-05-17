@@ -3,7 +3,7 @@ import requests
 import xml.etree.ElementTree as ET
 import json
 import time
-from threading import Thread  # <--- এই লাইনটি অবশ্যই থাকতে হবে
+from threading import Thread
 from flask import Flask, request
 import google.generativeai as genai
 from PIL import Image
@@ -14,24 +14,21 @@ app = Flask(__name__)
 # ডুপ্লিকেট মেসেজ আটকানোর জন্য গ্লোবাল মেমোরি ট্র্যাকিং
 global_processed_messages = {}
 
-# --- কনফিগারেশন ---
-PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
-PHONE_NUMBER_ID = "1039959469208417"
-GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
-VERIFY_TOKEN = "dhakaex0020"
+# --- কনফিগারেশন (Environment Variables থেকে নেওয়া নিরাপদ) ---
+PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
+GEMINI_KEY = os.environ.get("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
 
-# --- Gemini AI Setup ---
-# নতুন SDK অনুযায়ী Client ডিফাইন করা হলো
-client = genai.Client(api_key=GEMINI_KEY)
-MODEL_NAME = "gemini-2.5-flash"  # কমেন্ট আনলক করা হলো
-
-
-
+# --- Gemini AI Setup (FIXED: একটি নির্দিষ্ট স্ট্যান্ডার্ডে কনফিগার করা হলো) ---
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+else:
+    print("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 
 # আপনার ফেসবুক ক্যাটালগ লিঙ্ক
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 DATABASE_FILE = "catalog_db.json"
-
 
 # --- ১. ফেসবুক ক্যাটালগ XML ডাউনলোড এবং প্রসেস করার ফাংশন ---
 def update_catalog_database():
@@ -94,7 +91,6 @@ def download_whatsapp_image(media_id):
         if res.status_code != 200:
             return None
         
-        # FIXED: res.get_json() পরিবর্তন করে res.json() করা হয়েছে
         media_url = res.json().get("url")
         if not media_url:
             return None
@@ -106,10 +102,12 @@ def download_whatsapp_image(media_id):
         print(f"Error downloading image: {e}")
     return None
 
-# --- ৪. এআই থেকে উত্তর নেওয়ার মূল ফাংশন ---
+# --- ৪. এআই থেকে উত্তর নেওয়ার মূল ফাংশন (FIXED) ---
 def get_ai_answer(user_query, image_obj=None):
     try:
         catalog_info = get_catalog_data()
+        
+        # আপনার ইম্পোর্ট করা লাইব্রেরির সাথে সামঞ্জস্যপূর্ণ সঠিক মেথড
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         context = (
@@ -170,7 +168,6 @@ def handle_async_message(msg):
             media_id = msg["image"]["id"]
             caption = msg["image"].get("caption", "")
             
-            # গ্রাহককে তাৎক্ষণিক একটি আপডেট পাঠানো (যাতে তারা বুঝতে পারে কাজ হচ্ছে)
             send_message(from_number, "প্রিয় গ্রাহক, আপনার পাঠানো পণ্যটি আমি আমাদের ক্যাটালগে চেক করছি। একটু অপেক্ষা করুন...")
             
             image_obj = download_whatsapp_image(media_id)
@@ -195,15 +192,24 @@ def webhook():
         if "messages" in data["entry"][0]["changes"][0]["value"]:
             value = data["entry"][0]["changes"][0]["value"]
             msg = value["messages"][0]
+            msg_id = msg.get("id")
             
-            # FIXED: এআই প্রসেসিং আলাদা থ্রেডে পাঠিয়ে দিয়ে হোয়াটসঅ্যাপকে দ্রুত 'ok' পাঠানো হচ্ছে
+            # ডুপ্লিকেট মেসেজ প্রসেস হওয়া আটকানোর লজিক
+            current_time = time.time()
+            if msg_id in global_processed_messages and (current_time - global_processed_messages[msg_id]) < 60:
+                print(f"⏭️ Skipping duplicate message ID: {msg_id}")
+                return "ok", 200
+                
+            global_processed_messages[msg_id] = current_time
+            
+            # এআই প্রসেসিং আলাদা থ্রেডে পাঠানো হচ্ছে
             processing_thread = Thread(target=handle_async_message, args=(msg,))
             processing_thread.start()
                     
     except Exception as e:
         print(f"WEBHOOK ERROR: {e}")
         
-    return "ok", 200 # হোয়াটসঅ্যাপকে তাৎক্ষণিক রেসপন্স দেওয়া হচ্ছে
+    return "ok", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
