@@ -12,17 +12,20 @@ app = Flask(__name__)
 # ডুপ্লিকেট মেসেজ আটকানোর জন্য গ্লোবাল মেমোরি ট্র্যাকিং
 global_processed_messages = {}
 
-# --- কনফিগারেশন (সুরক্ষার জন্য Environment Variables ব্যবহার করা শ্রেয়) ---
-PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
-GEMINI_KEY = os.environ.get("AIzaSyCRZIRWSoenfhA33qr7rkzoa56Byun0IWU")
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
+# --- কনফিগারেশন ---
+PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
+PHONE_NUMBER_ID = "1039959469208417"
+GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
+VERIFY_TOKEN = "dhakaex0020"
+
+# --- Gemini AI Setup ---
+genai.configure(api_key=GEMINI_KEY)
+
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 
 # --- জেমিনি ক্লায়েন্ট সেটআপ ---
-client = genai.Client(api_key=GEMINI_KEY)
-MODEL_NAME = "gemini-2.5-flash"
+# MODEL_NAME = "gemini-2.5-flash"
 
 # গুগল লাইভ সার্চ টুল চালু
 search_tool = types.Tool(google_search=types.GoogleSearch())
