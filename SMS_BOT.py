@@ -10,8 +10,9 @@ from threading import Thread
 
 app = Flask(__name__)
 
-# ট্র্যাকিং এবং মেমোরি ফিক্স
+# ডুপ্লিকেট মেসেজ আইডি ট্র্যাকিং (যাতে মেটার ডাবল রিকোয়েস্ট কোড রিজেক্ট করতে পারে)
 global_processed_messages = {}
+# কাস্টমারের চ্যাট সেশন মেমোরি (এটি কাস্টমারের সব কথা মনে রাখবে)
 user_chat_sessions = {}  
 
 # --- কনফিগারেশন ---
@@ -41,12 +42,11 @@ def download_whatsapp_media(media_id):
         print(f"Media Download Error: {e}")
     return None
 
-# --- ক্যাটালগ সার্চ ফাংশন (উন্নত লজিক) ---
+# --- ক্যাটালগ সার্চ ফাংশন ---
 def search_product_in_catalog(user_query):
     try:
         if not user_query:
             return ""
-        # দাম কত বা অপ্রয়োজনীয় শব্দ বাদ দেওয়া
         ignored_words = {"dam", "koto", "price", "কত", "দাম", "বলেন", "বলো", "blo", "bolen", "tmi", "buka", "okay", "thik", "ace", "এটার"}
         clean_query = " ".join([w for w in user_query.lower().split() if w not in ignored_words]).strip()
         
@@ -70,7 +70,6 @@ def search_product_in_catalog(user_query):
                 title_text = title.text.strip()
                 price_text = price.text.strip()
                 
-                # কিওয়ার্ড ম্যাচিং
                 if any(word in title_text.lower() for word in query_words):
                     matched_products += f"- Product: {title_text}, Price: {price_text}\n"
                     count += 1
@@ -81,51 +80,43 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর (স্থিতিশীল সংস্করণ) ---
+# --- মূল জেমিনি এআই প্রসেসর (স্মার্ট মেমোরি ও লুপ প্রোটেকশন) ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
-        if len(user_chat_sessions) > 1000:
-            user_chat_sessions.pop(next(iter(user_chat_sessions)))
-            
-        # কাস্টমারের টেক্সট দিয়ে ক্যাটালগ সার্চ
         catalog_context = search_product_in_catalog(user_query) if user_query else ""
         catalog_info = f"Matched Products in Catalog:\n{catalog_context}" if catalog_context else "No direct match found in catalog file."
 
         system_instruction = (
             "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
             f"XML Catalog Context:\n{catalog_info}\n\n"
-            "INSTRUCTIONS FOR PRODUCT HANDLING:\n"
-            "1. If the customer sends an image, look at the product carefully and look up your provided 'XML Catalog Context' or identify what it is to find a match.\n"
-            "2. If you find a matching product and price from the catalog context, state the price politely in Taka. Never show currency in USD or dollars.\n"
-            "3. DO NOT output internal thinking, search logs, or any filler statements like 'আমি অনুসন্ধান করছি' or 'ধন্যবাদ প্রিয় গ্রাহক, আমাদের সাথেই থাকুন'. Keep it directly conversational.\n\n"
-            "STRICT BUSINESS RULES:\n"
-            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার' or 'হ্যালো'.\n"
-            "2. Keep replies short, polite, helpful, and completely in Bengali.\n"
-            "3. If the customer wants to buy/order, ask for: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
-            "4. Delivery Charge: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK.\n"
-            "5. Once Name, Phone, and Address are all collected, say strictly: 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
-            "6. DO NOT repeat the same order confirmation message if the customer just says 'okay' or 'thik আছে' after order placement. Respond with a polite closing statement or ask if they need anything else.\n"
-            "7. IF AND ONLY IF the product is completely missing from the XML catalog or cannot be identified, strictly say this exact sentence and nothing else:\n"
+            "STRICT CONVERSATION RULES:\n"
+            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use internal system logs or search messages.\n"
+            "2. Keep replies short, extremely polite, and completely in Bengali.\n"
+            "3. If you find a matching product price from the catalog context, state the price politely in Taka. Never use USD or dollars ($).\n"
+            "4. NEVER output your internal thinking, planning, or words like 'আমি অনুসন্ধান করছি'. Give the final answer directly.\n"
+            "5. CORE GOAL: Fulfill customer orders. You must collect: 1. Full Name, 2. Phone Number, 3. Full Delivery Address. Track these requirements across the chat history carefully.\n"
+            "6. Delivery Charge: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK.\n"
+            "7. Order Confirmation Rule: Once the customer has provided all three details (Name, Phone, Address), state strictly: 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
+            "8. Do NOT repeat the order confirmation sentence if the customer says 'okay', 'thik ace' or continues the chat after the order is already placed.\n"
+            "9. IF AND ONLY IF the product is completely missing from the XML catalog context and cannot be identified from the image, strictly say this exact sentence and nothing else:\n"
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
 
-        # কনফিগারেশন (গুগল সার্চ বন্ধ এবং থিংকিং বাজেট ০ করা হয়েছে)
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            tools=[], # গুগল সার্চ টুলটি সম্পূর্ণ রিমুভ করা হলো ঝামেলা এড়াতে
+            tools=[], # গুগল সার্চ বন্ধ থাকবে
             thinking_config=types.ThinkingConfig(thinking_budget=0),
-            temperature=0.1, # ক্রিয়েটিভিটি কমিয়ে একদম ফিক্সড উত্তর দেওয়ার জন্য ০.১ করা হলো       
-            max_output_tokens=300  
+            temperature=0.2,       
+            max_output_tokens=250  
         )
 
+        # এখানে মেমোরি ডিলিট করা হবে না, কাস্টমারের সেশন বজায় থাকবে
         if from_number not in user_chat_sessions:
             user_chat_sessions[from_number] = client.chats.create(model=MODEL_NAME, config=ai_config)
             
         chat_session = user_chat_sessions[from_number]
 
-        # Pydantic এরর ফিক্স করতে সঠিক অবজেক্ট ফরম্যাটিং
         message_contents = []
-        
         if image_bytes:
             img = Image.open(io.BytesIO(image_bytes))
             img.thumbnail((800, 800))
@@ -141,9 +132,7 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
 
     except Exception as e:
         print(f"Gemini Error: {e}")
-        if from_number in user_chat_sessions:
-            del user_chat_sessions[from_number]
-        return "প্রিয় গ্রাহক, আমি আপনার মেসেজটি বুঝতে পারছি। প্রোডাক্টের দাম ও স্টক কনফার্ম করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।"
+        return "প্রিয় গ্রাহক, আমি আপনার মেসেজটি বুঝতে পেরেছি। আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিয়ে অর্ডারটি নিশ্চিত করছেন।"
 
 # --- হোয়াটসঅ্যাপে মেসেজ পাঠানো ---
 def send_message(recipient_number, message_body):
@@ -163,7 +152,7 @@ def send_message(recipient_number, message_body):
     except Exception as e:
         print(f"Send Message Error: {e}")
 
-# --- ব্যাকগ্রাউন্ড প্রসেসিং টাস্ক ---
+# --- ব্যাকগ্রাউন্ড প্রসেস ---
 def process_async_webhook(msg, from_number):
     if msg.get("type") == "text":
         user_text = msg["text"]["body"].strip()
@@ -177,20 +166,16 @@ def process_async_webhook(msg, from_number):
         image_bytes = download_whatsapp_media(media_id)
         if image_bytes:
             ai_response = get_ai_answer(from_number, user_query=caption, image_bytes=image_bytes)
-        else:
-            ai_response = "প্রিয় গ্রাহক, আমি আপনার পাঠানো ছবিটি সঠিকভাবে দেখতে পাচ্ছি না। দয়া করে আবার চেষ্টা করুন।"
-        send_message(from_number, ai_response)
-    else:
-        send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট এবং ছবি বুঝতে পারি।")
+            send_message(from_number, ai_response)
 
-# --- মেটা ভেরিফিকেশন (Webhook GET) ---
+# --- মেটা Webhook ভেরিফিকেশন ---
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge"), 200
     return "Failed", 403
 
-# --- মূল হোয়াটসঅ্যাপ রিসিভার (Webhook POST) ---
+# --- হোয়াটসঅ্যাপ রিসিভার (লুপ ও ডুপ্লিকেট মেসেজ ফিল্টার) ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -201,11 +186,12 @@ def webhook():
             msg_id = msg["id"]
             from_number = msg["from"]
             
+            # মেটা সার্ভার একই মেসেজ আবার পাঠালে তা এখানেই ড্রপ করা হবে
             if msg_id in global_processed_messages:
                 return "ok", 200
                 
             global_processed_messages[msg_id] = True
-            if len(global_processed_messages) > 1000:
+            if len(global_processed_messages) > 2000:
                 global_processed_messages.pop(next(iter(global_processed_messages)))
 
             thread = Thread(target=process_async_webhook, args=(msg, from_number))
