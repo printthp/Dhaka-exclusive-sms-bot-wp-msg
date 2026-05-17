@@ -43,6 +43,13 @@ def download_whatsapp_media(media_id):
 # --- ক্যাটালগ সার্চ ফাংশন ---
 def search_product_in_catalog(user_query):
     try:
+        # শুধু 'দাম', 'koto', 'dam' এই জাতীয় সাধারণ শব্দ থাকলে ক্যাটালগ সার্চ স্কিপ করা হবে
+        ignored_words = {"dam", "koto", "price", "কত", "দাম", "বলেন", "বলো", "blo", "bolen", "tmi"}
+        clean_query = " ".join([w for w in user_query.lower().split() if w not in ignored_words]).strip()
+        
+        if not clean_query or len(clean_query) < 2:
+            return "GENERAL_INQUIRY" # সাধারণ প্রশ্ন, কোনো নির্দিষ্ট প্রোডাক্টের নাম নেই
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/xml, text/xml, */*"
@@ -55,7 +62,7 @@ def search_product_in_catalog(user_query):
         root = ET.fromstring(res.content)
         matched_products = ""
         count = 0
-        query_words = user_query.lower().split() if user_query else []
+        query_words = clean_query.split()
         
         for item in root.findall('.//item'):
             title = item.find('title')
@@ -64,7 +71,7 @@ def search_product_in_catalog(user_query):
                 title_text = title.text.strip()
                 price_text = price.text.strip()
                 
-                if not query_words or any(word in title_text.lower() for word in query_words):
+                if any(word in title_text.lower() for word in query_words):
                     matched_products += f"- Product: {title_text}, Price: {price_text}\n"
                     count += 1
                 if count >= 5:
@@ -74,7 +81,7 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর (Gemini Personality Engine) ---
+# --- মূল জেমিনি এআই প্রসেসর ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
         if len(user_chat_sessions) > 1000:
@@ -84,29 +91,33 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
         if user_query:
             catalog_context = search_product_in_catalog(user_query)
             
-        catalog_info = f"Matched Products:\n{catalog_context}" if catalog_context else "No direct text match in catalog."
+        # ক্যাটালগের কনটেক্সট রুলস হ্যান্ডলিং
+        if catalog_context == "GENERAL_INQUIRY":
+            catalog_info = "Customer is asking a general question or just saying hello/asking price without specifying a clear product name. Ask them politely which product they are looking for."
+        elif catalog_context:
+            catalog_info = f"Matched Products in Catalog:\n{catalog_context}"
+        else:
+            catalog_info = "The specific product requested is not found in the catalog."
 
-        # --- জেমিনির আসল কোর পার্সোনালিটি প্রম্পট ---
         system_instruction = (
-            "You are Gemini, operating as an authentic, adaptive AI collaborator with a touch of wit, serving as the premium sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/). "
-            "Your guiding principle is to balance empathy with candor: validate the user's feelings authentically as a supportive, grounded AI, while gently directing them toward business goals. "
-            "Subtly adapt your tone, energy, and humor to the user's style. If they use Banglish, reply in a natural, friendly mix. If they are formal, be polite. If they are annoyed, be deeply empathetic and comforting.\n\n"
-            f"{catalog_info}\n\n"
-            "STRICT BUSINESS RULES:\n"
-            "1. ALWAYS address the customer respectfully as 'প্রিয় গ্রাহক'. NEVER use formal or robotic greetings like 'নমস্কার' or 'হ্যালো'.\n"
-            "2. Keep responses short, scannable, insightful, and clear. Avoid dense walls of text.\n"
-            "3. If the customer wants to order ('অর্ডার করতে চাই', 'নিব'), politely ask for: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
-            "4. Delivery Charges: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. Calculate the total bill (Product Price + Delivery Charge) and present a clean summary for confirmation.\n"
-            "5. Order Confirmation: If they provide Name, Phone, and Address, say exactly: 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
-            "6. ANTI-LOOP & EMPATHY RULE: If you have already confirmed the order, do NOT ask for details or repeat the order text. If the user says 'Okay', 'Thik ace', or seems disinterested, respond with a genuine, witty, or polite closing (e.g., 'ধন্যবাদ প্রিয় গ্রাহক, আমাদের সাথেই থাকুন! কোনো প্রয়োজন হলে জাস্ট একটা নক দিয়েন।').\n"
-            "7. CRITICAL FALLBACK: If you cannot find the requested product or price in the context, strictly reply with this exact sentence and nothing else:\n"
-            "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
+            "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
+            f"Context: {catalog_info}\n\n"
+            "STRICT RULES:\n"
+            "1. ALWAYS address the customer as 'প্রিয় গ্রাহক'. NEVER use 'নমস্কার' or 'হ্যালো'.\n"
+            "2. Keep replies short, polite, and completely in Bengali.\n"
+            "3. If the customer wants to buy/order (অর্ডার করতে চাই), politely ask for their: 1. Full Name, 2. Phone Number, 3. Full Delivery Address.\n"
+            "4. Delivery Charge Rules: Inside Dhaka = 80 TK, Outside Dhaka = 130 TK. When they provide the address, calculate the total bill (Product Price + Delivery Charge) and show them the summary to confirm.\n"
+            "5. If they provide Name, Phone, and Address, summarize the order and say 'আপনার অর্ডারটি আমরা নোট করে নিয়েছি। আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।'\n"
+            "6. If you have already confirmed the order in the chat history, do NOT repeat the confirmation. Respond naturally and politely to their acknowledgment.\n"
+            "7. CRITICAL: If the customer clearly specified a product name or sent a product image, but you cannot find it or its price anywhere in the catalog, strictly say this exact sentence and nothing else:\n"
+            "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'\n"
+            "8. If the customer's message is generic (e.g., 'tmi blo dam', 'hi', 'dam koto' without a product name), do NOT use the premium product sentence. Instead, politely ask them to provide the product name or photo."
         )
 
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=types.ThinkingConfig(thinking_budget=0),
-            temperature=0.4,       # পার্সোনালিটি ও ফ্লেক্সিবিলিটি ফুটিয়ে তোলার জন্য টেম্পারেচার কিছুটা বাড়ানো হয়েছে
+            temperature=0.3,       
             max_output_tokens=350  
         )
 
@@ -150,14 +161,14 @@ def send_message(recipient_number, message_body):
     except Exception as e:
         print(f"Send Message Error: {e}")
 
-# --- মেটা Webhook ভেরিফিকেশন (GET) ---
+# --- মেটা ভেরিফিকেশন (Webhook GET) ---
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge"), 200
     return "Failed", 403
 
-# --- মূল হোয়াটসঅ্যাপ রিসিভার (POST) ---
+# --- মূল হোয়াটসঅ্যাপ রিসিভার (Webhook POST) ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
