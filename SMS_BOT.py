@@ -76,7 +76,7 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর (Fixed & Optimized) ---
+# --- মূল জেমিনি এআই প্রসেসর (Fixed for validation rules) ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
         if from_number not in user_chat_sessions:
@@ -112,29 +112,37 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             max_output_tokens=350  
         )
 
-        # वर्तमान ইউজার ইনপুট প্রিপেয়ার করা
+        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি (হিস্ট্রি + কারেন্ট মেসেজ) - STRICT TYPES IMPLEMENTATION
+        full_contents = []
+        
+        # পূর্ববর্তী চ্যাট হিস্ট্রি প্রিপেয়ার করা
+        for hist in history_contents[-6:]:
+            full_contents.append(
+                types.Content(
+                    role=hist['role'],
+                    parts=[types.Part.from_text(text=hist['text'])]
+                )
+            )
+            
+        # বর্তমান ইউজার ইনপুটের পার্টস তৈরি করা
         current_message_parts = []
         
         if image_bytes:
             img = Image.open(io.BytesIO(image_bytes))
             img.thumbnail((800, 800))
+            # ইমেজ ডেটা সরাসরি পার্টস লিস্টে যোগ করা হলো
             current_message_parts.append(img)
             
-        current_message_parts.append(user_query or "এটার দাম কত?")
+        # টেক্সট ডেটা পার্টস লিস্টে যোগ করা হলো
+        current_message_parts.append(types.Part.from_text(text=user_query or "এটার দাম কত?"))
 
-        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি (হিস্ট্রি + কারেন্ট মেসেজ) - FIXED SECTION
-        full_contents = []
-        
-        for hist in history_contents[-6:]:
-            full_contents.append({
-                "role": hist['role'],
-                "parts": [hist['text']]
-            })
-            
-        full_contents.append({
-            "role": "user",
-            "parts": current_message_parts
-        })
+        # বর্তমান সম্পূর্ণ মেসেজটি হিস্ট্রি লিস্টের শেষে যোগ করা
+        full_contents.append(
+            types.Content(
+                role="user",
+                parts=current_message_parts
+            )
+        )
 
         # জেমিনি জেনারেট কল
         response = client.models.generate_content(
