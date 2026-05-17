@@ -11,19 +11,22 @@ from io import BytesIO
 
 app = Flask(__name__)
 
-# ডুপ্লিকেট মেসেজ আটকানোর জন্য গ্লোবাল মেমোরি ট্র্যাকিং
+# ডুপ্লিকেট মেসেজ আটকানো এবং মেমোরি ক্লিনআপের জন্য ট্র্যাকিং
 global_processed_messages = {}
 
-# --- কনফিগারেশন (Environment Variables থেকে নেওয়া নিরাপদ) ---
-PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
+# --- কনফিগারেশন (আপনার দেওয়া ডাটা সরাসরি সেট করা হলো) ---
+PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
+PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = os.environ.get("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
+VERIFY_TOKEN = "dhakaex0020"
 
 # --- Gemini AI Setup ---
-genai.configure(api_key=GEMINI_KEY)
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+else:
+    print("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 
-# আপনার ফেসবুক ক্যাটালগ লিঙ্ক
+# ফেসবুক ক্যাটালগ লিঙ্ক
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 DATABASE_FILE = "catalog_db.json"
 
@@ -66,9 +69,9 @@ def update_catalog_database():
         except Exception as e:
             print(f"❌ Error updating catalog: {e}")
             
-        time.sleep(3600) # প্রতি ১ ঘণ্টা পর পর আপডেট
+        time.sleep(3600) # প্রতি ১ ঘণ্টা পর পর ব্যাকগ্রাউন্ডে ক্যাটালগ আপডেট হবে
 
-# ব্যাকগ্রাউন্ডে ক্যাটালগ আপডেটের থ্রেড চালু করা
+# ব্যাকগ্রাউন্ড থ্রেড চালু করা
 catalog_thread = Thread(target=update_catalog_database, daemon=True)
 catalog_thread.start()
 
@@ -99,12 +102,12 @@ def download_whatsapp_image(media_id):
         print(f"Error downloading image: {e}")
     return None
 
-# --- ৪. এআই থেকে উত্তর নেওয়ার মূল ফাংশন (FIXED) ---
+# --- ৪. এআই থেকে উত্তর নেওয়ার মূল ফাংশন ---
 def get_ai_answer(user_query, image_obj=None):
     try:
         catalog_info = get_catalog_data()
         
-        # আপনার ইম্পোর্ট করা লাইব্রেরির সাথে সামঞ্জস্যপূর্ণ সঠিক মেথড
+        # জেমিনি মডেল ২.৫ ফ্ল্যাশ সেটআপ
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         context = (
@@ -133,6 +136,7 @@ def get_ai_answer(user_query, image_obj=None):
         print(f"Primary Model Error: {e}")
         return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
+# --- ৫. হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন ---
 def send_message(recipient_number, message_body):
     if not PHONE_NUMBER_ID or not PERMANENT_TOKEN:
         return
@@ -147,9 +151,12 @@ def send_message(recipient_number, message_body):
         "type": "text",
         "text": {"body": message_body}
     }
-    requests.post(url, json=payload, headers=headers)
+    try:
+        requests.post(url, json=payload, headers=headers, timeout=10)
+    except Exception as e:
+        print(f"Error sending message: {e}")
 
-# --- ৫. হোয়াটসঅ্যাপ রিকোয়েস্ট ব্যাকগ্রাউন্ডে প্রসেস করার ফাংশন ---
+# --- ৬. হোয়াটসঅ্যাপ রিকোয়েস্ট ব্যাকগ্রাউন্ডে প্রসেস করার ফাংশন ---
 def handle_async_message(msg):
     try:
         from_number = msg["from"]
@@ -176,6 +183,14 @@ def handle_async_message(msg):
     except Exception as e:
         print(f"ASYNC PROCESSING ERROR: {e}")
 
+# --- ৭. মেমোরি ক্লিনআপ ফাংশন (RAM ফুল হওয়া আটকানোর জন্য) ---
+def cleanup_processed_messages():
+    current_time = time.time()
+    # ৬০ সেকেন্ডের বেশি পুরনো মেসেজ আইডিগুলো ডিলিট করবে
+    to_delete = [msg_id for msg_id, timestamp in global_processed_messages.items() if (current_time - timestamp) > 60]
+    for msg_id in to_delete:
+        del global_processed_messages[msg_id]
+
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
@@ -191,8 +206,12 @@ def webhook():
             msg = value["messages"][0]
             msg_id = msg.get("id")
             
-            # ডুপ্লিকেট মেসেজ প্রসেস হওয়া আটকানোর লজিক
             current_time = time.time()
+            
+            # মেমোরি ক্লিনআপ রান করা
+            cleanup_processed_messages()
+            
+            # ডুপ্লিকেট মেসেজ চেক
             if msg_id in global_processed_messages and (current_time - global_processed_messages[msg_id]) < 60:
                 print(f"⏭️ Skipping duplicate message ID: {msg_id}")
                 return "ok", 200
