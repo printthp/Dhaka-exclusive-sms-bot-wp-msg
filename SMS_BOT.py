@@ -3,7 +3,7 @@ import requests
 import xml.etree.ElementTree as ET
 import json
 import time
-from threading import Thread
+from threading import Thread, Lock
 from flask import Flask, request
 import google.generativeai as genai
 from PIL import Image
@@ -11,16 +11,19 @@ from io import BytesIO
 
 app = Flask(__name__)
 
-# ডুপ্লিকেট মেসেজ আটকানো এবং মেমোরি ক্লিনআপের জন্য ট্র্যাকিং
+# ডুপ্লিকেট মেসেজ ট্র্যাকিং এবং থ্রেড সুরক্ষার জন্য লক
 global_processed_messages = {}
+dict_lock = Lock()
 
-# --- কনফিগারেশন (আপনার দেওয়া ডাটা সরাসরি নিখুঁতভাবে সেট করা হলো) ---
-PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
-PHONE_NUMBER_ID = "1039959469208417"
-VERIFY_TOKEN = "dhakaex0020"
+# --- কনফিগারেশন ---
+# সিকিউরিটির জন্য এগুলো Environment Variable হিসেবে রাখা উত্তম, না থাকলে ডিফল্ট ভ্যালু কাজ করবে
+PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 
-# সরাসরি এপিআই কি কনফিগার করা হলো যাতে কোনো এনভায়রনমেন্ট এরর না আসে
-genai.configure(api_key="AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
+# জেমিনি কনফিগারেশন
+genai.configure(api_key=GEMINI_API_KEY)
 
 # ফেসবুক ক্যাটালগ লিঙ্ক
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
@@ -31,32 +34,35 @@ def update_catalog_database():
     while True:
         try:
             print("🔄 Fetching product catalog from XML...")
-            # 403 Error ফিক্স করার জন্য ব্রাউজারের আসল হেডার ব্যবহার করা হলো
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5'
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
             }
             response = requests.get(CATALOG_URL, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 root = ET.fromstring(response.content)
+                
+                # নেমস্পেস হ্যান্ডলিং (গুগল মার্চেন্ট সেন্টারের স্ট্যান্ডার্ড ক্যাটালগ ফরম্যাট)
                 namespaces = {'g': 'http://base.google.com/ns/1.0'}
+                
+                # ক্যাটালগে অনেক সময় নেমস্পেস ছাড়া বা সহ 'item' থাকে, তাই দুটোই খোঁজার ব্যবস্থা
+                items = root.findall('.//item') or root.findall('.//{*}item')
                 products = []
                 
-                for item in root.findall('.//item'):
-                    title = item.find('title')
-                    price = item.find('.//g:price', namespaces)
-                    link = item.find('link')
-                    image_link = item.find('.//g:image_link', namespaces)
-                    description = item.find('description')
+                for item in items:
+                    title = item.find('title') or item.find('.//{*}title')
+                    price = item.find('.//g:price', namespaces) or item.find('.//{*}price')
+                    link = item.find('link') or item.find('.//{*}link')
+                    image_link = item.find('.//g:image_link', namespaces) or item.find('.//{*}image_link')
+                    description = item.find('description') or item.find('.//{*}description')
                     
                     product_data = {
-                        "title": title.text.strip() if title is not None else "Unknown Product",
-                        "price": price.text.strip() if price is not None else "Contact Admin",
-                        "link": link.text.strip() if link is not None else "",
-                        "image_url": image_link.text.strip() if image_link is not None else "",
-                        "description": description.text.strip() if description is not None else ""
+                        "title": title.text.strip() if title is not None and title.text else "Unknown Product",
+                        "price": price.text.strip() if price is not None and price.text else "Contact Admin",
+                        "link": link.text.strip() if link is not None and link.text else "",
+                        "image_url": image_link.text.strip() if image_link is not None and image_link.text else "",
+                        "description": description.text.strip() if description is not None and description.text else ""
                     }
                     products.append(product_data)
                 
@@ -70,7 +76,7 @@ def update_catalog_database():
         except Exception as e:
             print(f"❌ Error updating catalog: {e}")
             
-        time.sleep(3600) # প্রতি ১ ঘণ্টা পর পর ব্যাকগ্রাউন্ডে ক্যাটালগ আপডেট হবে
+        time.sleep(3600)  # প্রতি ১ ঘণ্টা পর পর ব্যাকগ্রাউন্ডে ক্যাটালগ আপডেট হবে
 
 # ব্যাকগ্রাউন্ড থ্রেড চালু করা
 catalog_thread = Thread(target=update_catalog_database, daemon=True)
@@ -79,16 +85,19 @@ catalog_thread.start()
 # --- ২. ডাটাবেজ থেকে প্রোডাক্টের তালিকা পড়ার ফাংশন ---
 def get_catalog_data():
     if os.path.exists(DATABASE_FILE):
-        with open(DATABASE_FILE, "r", encoding="utf-8") as f:
-            return f.read()
-    return "No product catalog data available yet."
+        try:
+            with open(DATABASE_FILE, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            print(f"Error reading catalog file: {e}")
+    return "[]"
 
 # --- ৩. WhatsApp থেকে ছবি ডাউনলোড করার ফাংশন ---
 def download_whatsapp_image(media_id):
     try:
         url = f"https://graph.facebook.com/v18.0/{media_id}"
         headers = {"Authorization": f"Bearer {PERMANENT_TOKEN}"}
-        res = requests.get(url, headers=headers)
+        res = requests.get(url, headers=headers, timeout=15)
         if res.status_code != 200:
             return None
         
@@ -96,7 +105,7 @@ def download_whatsapp_image(media_id):
         if not media_url:
             return None
             
-        img_res = requests.get(media_url, headers=headers)
+        img_res = requests.get(media_url, headers=headers, timeout=30)
         if img_res.status_code == 200:
             return Image.open(BytesIO(img_res.content))
     except Exception as e:
@@ -108,8 +117,7 @@ def get_ai_answer(user_query, image_obj=None):
     try:
         catalog_info = get_catalog_data()
         
-        # জেমিনি মডেল ২.৫ ফ্ল্যাশ সেটআপ
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         context = (
             f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh.\n"
@@ -137,9 +145,10 @@ def get_ai_answer(user_query, image_obj=None):
         print(f"Primary Model Error: {e}")
         return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
 
-# --- ৫. হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন ---
+# --- ৫. হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন ---
 def send_message(recipient_number, message_body):
     if not PHONE_NUMBER_ID or not PERMANENT_TOKEN:
+        print("Missing WhatsApp Credentials!")
         return
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
@@ -153,7 +162,9 @@ def send_message(recipient_number, message_body):
         "text": {"body": message_body}
     }
     try:
-        requests.post(url, json=payload, headers=headers, timeout=10)
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if res.status_code not in [200, 201]:
+            print(f"WhatsApp API Error: {res.text}")
     except Exception as e:
         print(f"Error sending message: {e}")
 
@@ -184,12 +195,14 @@ def handle_async_message(msg):
     except Exception as e:
         print(f"ASYNC PROCESSING ERROR: {e}")
 
-# --- ৭. মেমোরি ক্লিনআপ ফাংশন (RAM ফুল হওয়া আটকানোর জন্য) ---
+# --- ৭. মেমোরি ক্লিনআপ ফাংশন (থ্রেড-সেফ এবং ক্র্যাশ প্রুফ) ---
 def cleanup_processed_messages():
     current_time = time.time()
-    to_delete = [msg_id for msg_id, timestamp in global_processed_messages.items() if (current_time - timestamp) > 60]
-    for msg_id in to_delete:
-        del global_processed_messages[msg_id]
+    with dict_lock:
+        # ডিকশনারি লুপ করার সময় ডিলিট করলে RuntimeError আসতে পারে, তাই লিস্টে নিয়ে ডিলিট করা হচ্ছে
+        to_delete = [msg_id for msg_id, timestamp in global_processed_messages.items() if (current_time - timestamp) > 60]
+        for msg_id in to_delete:
+            global_processed_messages.pop(msg_id, None)
 
 @app.route("/webhook", methods=["GET"])
 def verify():
@@ -207,15 +220,14 @@ def webhook():
             msg_id = msg.get("id")
             
             current_time = time.time()
-            
             cleanup_processed_messages()
             
-            # ডুপ্লিকেট মেসেজ চেক
-            if msg_id in global_processed_messages and (current_time - global_processed_messages[msg_id]) < 60:
-                print(f"⏭️ Skipping duplicate message ID: {msg_id}")
-                return "ok", 200
-                
-            global_processed_messages[msg_id] = current_time
+            # ডুপ্লিকেট মেসেজ চেক (থ্রেড লক সহ)
+            with dict_lock:
+                if msg_id in global_processed_messages and (current_time - global_processed_messages[msg_id]) < 60:
+                    print(f"⏭️ Skipping duplicate message ID: {msg_id}")
+                    return "ok", 200
+                global_processed_messages[msg_id] = current_time
             
             # এআই প্রসেসিং আলাদা থ্রেডে পাঠানো হচ্ছে
             processing_thread = Thread(target=handle_async_message, args=(msg,))
