@@ -14,10 +14,11 @@ global_processed_messages = {}
 user_chat_sessions = {}  
 
 # --- কনফিগারেশন ---
-PERMANENT_TOKEN = os.environ.get("EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
-PHONE_NUMBER_ID = os.environ.get("1039959469208417")
-GEMINI_KEY = os.environ.get("AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
-VERIFY_TOKEN = os.environ.get("dhakaex0020")
+# --- কনফিগারেশন (Strict Bypass) ---
+PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
+PHONE_NUMBER_ID = "1039959469208417"
+GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q" # আপনার দেওয়া আসল কি
+VERIFY_TOKEN = "dhakaex0020"
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 
