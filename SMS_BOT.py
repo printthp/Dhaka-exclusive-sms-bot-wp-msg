@@ -1,11 +1,13 @@
 import os
-import io
 import requests
 import xml.etree.ElementTree as ET
+import json
+import time
+from threading import Thread  # <--- এই লাইনটি অবশ্যই থাকতে হবে
 from flask import Flask, request
+import google.generativeai as genai
 from PIL import Image
-from google import genai
-from google.genai import types
+from io import BytesIO
 
 app = Flask(__name__)
 
