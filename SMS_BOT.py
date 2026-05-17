@@ -113,11 +113,13 @@ def download_whatsapp_image(media_id):
     return None
 
 # --- ৪. এআই থেকে উত্তর নেওয়ার মূল ফাংশন ---
+# --- ৪. এআই থেকে উত্তর নেওয়ার মূল ফাংশন ---
 def get_ai_answer(user_query, image_obj=None):
     try:
         catalog_info = get_catalog_data()
         
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # মডেল নেম আপডেট করা হয়েছে (gemini-2.5-flash)
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         context = (
             f"You are the helpful AI assistant for 'Dhaka Exclusive', a premium kitchenware brand in Bangladesh.\n"
@@ -144,7 +146,6 @@ def get_ai_answer(user_query, image_obj=None):
     except Exception as e:
         print(f"Primary Model Error: {e}")
         return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন একটু ব্যস্ত। আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
-
 # --- ৫. হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন ---
 def send_message(recipient_number, message_body):
     if not PHONE_NUMBER_ID or not PERMANENT_TOKEN:
