@@ -14,9 +14,9 @@ global_processed_messages = {}
 user_chat_sessions = {}  
 
 # --- কনফিগারেশন ---
-PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "YOUR_WHATSAPP_TOKEN")
+PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
-GEMINI_KEY = os.environ.get("GEMINI_KEY", "YOUR_GEMINI_KEY")
+GEMINI_KEY = os.environ.get("GEMINI_KEY", "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
@@ -49,6 +49,7 @@ def search_product_in_catalog(user_query):
         }
         
         res = requests.get(CATALOG_URL, headers=headers, timeout=12)
+        
         if res.status_code != 200:
             print(f"Catalog Fetch Failed. Status Code: {res.status_code}")
             return ""
@@ -75,13 +76,14 @@ def search_product_in_catalog(user_query):
         print(f"Catalog Filter Error: {e}")
         return ""
 
-# --- মূল জেমিনি এআই প্রসেসর (Fixed for google-genai) ---
+# --- মূল জেমিনি এআই প্রসেসর (Fixed & Optimized) ---
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
-        # মেমোরি ক্লিনিং (১০০০ কাস্টমারের বেশি হলে পুরনো ডাটা ডিলিট হবে)
-        if len(user_chat_sessions) > 1000:
-            user_chat_sessions.pop(next(iter(user_chat_sessions)))
-
+        if from_number not in user_chat_sessions:
+            user_chat_sessions[from_number] = []
+        
+        history_contents = user_chat_sessions[from_number]
+        
         # ক্যাটালগ কনটেক্সট তৈরি
         catalog_context = ""
         if user_query:
@@ -102,13 +104,7 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             "'প্রিয় গ্রাহক, এটি আমাদের একটি প্রিমিয়াম প্রোডাক্ট। এটির সঠিক লাইভ দাম ও সাইজটি নিশ্চিত করতে আমাদের একজন প্রতিনিধি খুব দ্রুত আপনাকে ইনবক্সে মেসেজ দিচ্ছেন।'"
         )
 
-        # ১. চ্যাট হিস্ট্রি ট্র্যাকিং (নতুন SDK-এর Content টাইপ অনুযায়ী স্ট্রাকচার্ড করা)
-        if from_number not in user_chat_sessions:
-            user_chat_sessions[from_number] = []
-        
-        history_contents = user_chat_sessions[from_number]
-
-        # ২. কনফিগারেশন সেটআপ (সিস্টেম প্রম্পট এবং গুগল সার্চ কনফিগ সহ)
+        # কনফিগারেশন সেটআপ (সিস্টেম প্রম্পট এবং গুগল সার্চ কনফিগ সহ)
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             tools=[types.Tool(google_search=types.GoogleSearch())],
@@ -116,7 +112,7 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             max_output_tokens=350  
         )
 
-        # ৩. বর্তমান ইউজার মেসেজের পার্টস বা কনটেন্ট রেডি করা
+        # वर्तमान ইউজার ইনপুট প্রিপেয়ার করা
         current_message_parts = []
         
         if image_bytes:
@@ -124,33 +120,33 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             img.thumbnail((800, 800))
             current_message_parts.append(img)
             
-        # ইউজার টেক্সট বা ডিফল্ট প্রম্পট যুক্ত করা
         current_message_parts.append(user_query or "এটার দাম কত?")
 
-        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি (হিস্ট্রি + কারেন্ট মেসেজ)
-        # জেমিনি এপিআই-এর নিয়ম অনুসারে সিস্টেম প্রম্পট বাদে শুধু user এবং model এর ডায়ালগ হিস্ট্রি পাঠাতে হয়
+        # ৪. ফুল কন্টেন্ট অবজেক্ট তৈরি (হিস্ট্রি + কারেন্ট মেসেজ) - FIXED SECTION
         full_contents = []
-        for hist in history_contents[-6:]: # সর্বশেষ ৬টি মেসেজ মেমোরিতে রাখা হচ্ছে
-            full_contents.append(
-                types.Content(
-                    role=hist['role'],
-                    parts=[types.Part.from_text(text=hist['text'])]
-                )
-            )
+        
+        for hist in history_contents[-6:]:
+            full_contents.append({
+                "role": hist['role'],
+                "parts": [hist['text']]
+            })
             
-        # বর্তমান ইনপুটটি হিস্ট্রির শেষে যুক্ত করা
-        full_contents.append(
-            types.Content(role="user", parts=current_message_parts)
-        )
+        full_contents.append({
+            "role": "user",
+            "parts": current_message_parts
+        })
 
-        # ৫. এপিআই কল করা
+        # জেমিনি জেনারেট কল
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=full_contents,
             config=ai_config
         )
 
-        # ৬. লোকাল চ্যাট সেশন আপডেট করা
+        # চ্যাট মেমোরি আপডেট (মেমোরি লিক রোধে ১০০০ কাস্টমারের বেশি হলে পুরনো ডাটা ডিলিট হবে)
+        if len(user_chat_sessions) > 1000:
+            user_chat_sessions.pop(next(iter(user_chat_sessions)))
+
         if user_query:
             history_contents.append({"role": "user", "text": user_query})
         else:
