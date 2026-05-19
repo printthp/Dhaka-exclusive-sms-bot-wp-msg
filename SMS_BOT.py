@@ -136,6 +136,9 @@ def track_pathao_order(tracking_key):
 # =====================================================================
 # 🤖 জেমিনি এআই প্রসেসর (অটোমেটিক ট্র্যাকিং ও অর্ডার ডিটেকশন)
 # =====================================================================
+# =====================================================================
+# 🤖 জেমিনি এআই প্রসেসর (অটোমেটিক ট্র্যাকিং ও অর্ডার ডিটেকশন আপগ্রেড)
+# =====================================================================
 def get_ai_answer(user_query):
     try:
         saved_knowledge = read_knowledge()
@@ -147,19 +150,25 @@ def get_ai_answer(user_query):
             "2. Keep replies short, extremely polite, and completely in Bengali.\n"
             "3. State prices politely in Taka. Never use USD ($).\n"
             "4. Core Goal: Fulfill customer orders. Ask for: Full Name, Phone Number, and Full Delivery Address.\n\n"
+            
             "ORDER DETECTION RULE:\n"
             "If the customer provides Name, Phone, and Address, append this block at the end:\n"
             "||ORDER_DATA||{\"name\": \"EXTRACTED_NAME\", \"phone\": \"EXTRACTED_PHONE\", \"address\": \"EXTRACTED_ADDRESS\"}||\n\n"
-            "TRACKING DETECTION RULE:\n"
-            "If the customer asks about order status, where is the product, or wants to track an old order and provides a phone number or a tracking ID, you MUST extract that ID/phone number and append this block at the very end:\n"
+            
+            "TRACKING DETECTION RULE (STRICT):\n"
+            "If the user query is JUST a phone number (e.g., starting with 01 or 880) or looks like a tracking ID, "
+            "OR if the customer is asking about an old order status, you MUST extract that number/ID and append "
+            "this exact block at the very end without fail:\n"
             "||TRACK_DATA||{\"key\": \"EXTRACTED_PHONE_OR_ID\"}||\n"
-            "Example: If they say 'আমার প্রোডাক্ট কোথায়', ask them for the phone number. If they provide the number, trigger this block.\n\n"
+            "Ensure 'EXTRACTED_PHONE_OR_ID' contains only the numbers/ID provided by the user. "
+            "Do not output anything else if the input is just a number.\n\n"
+            
             f"LIVE KNOWLEDGE BASE:\n{saved_knowledge}"
         )
         
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=0.2,
+            temperature=0.1, # ক্রিয়েটিভিটি কমিয়ে ১ করা হলো যেন রুল একদম শক্তভাবে মানে
             max_output_tokens=400
         )
         
@@ -169,8 +178,7 @@ def get_ai_answer(user_query):
         return response.text
     except Exception as e:
         print(f"Gemini AI Error: {e}")
-        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন কিছুটা व्यस्त। আমাদের প্রতিনিধি দ্রুত যোগাযোগ করছেন।"
-
+        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন কিছুটা ব্যস্ত। আমাদের প্রতিনিধি দ্রুত যোগাযোগ করছেন।"
 # =====================================================================
 # ⚡ হোয়াটসঅ্যাপ ও এপিআই কানেক্টর (ব্যাকগ্রাউন্ড প্রসেসর)
 # =====================================================================
