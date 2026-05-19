@@ -28,8 +28,7 @@ PATHAO_STORE_ID = "333358"
 PATHAO_CLIENT_ID = "openOlRa7A"
 PATHAO_CLIENT_SECRET = "7clJGfV1jh5njQEuR5yepVXZ9nYAjGORhNCOjgzG"
 PATHAO_MERCHANT_EMAIL = "cocid1000006@gmail.com"
-
-PATHAO_MERCHANT_PASSWORD = "trustedaA@2" 
+PATHAO_MERCHANT_PASSWORD = "trustedaA@2"
 
 # --- New Gemini Client Setup ---
 client = genai.Client(api_key=GEMINI_KEY)
