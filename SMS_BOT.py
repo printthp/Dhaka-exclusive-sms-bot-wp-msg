@@ -51,86 +51,36 @@ def save_knowledge(new_info):
 # =====================================================================
 def get_pathao_token():
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/issue-token"
-    headers = {"accept": "application/json", "content-type": "application/json"}
-    payload = {
-        "client_id": PATHAO_CLIENT_ID,
-        "client_secret": PATHAO_CLIENT_SECRET,
-        "username": PATHAO_MERCHANT_EMAIL,
-        "password": PATHAO_MERCHANT_PASSWORD
+    
+    # পাঠাও লাইভ এপিআই-এর জন্য একদম নিখুঁত হেডার্স
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "X-API-KEY": PATHAO_CLIENT_ID.strip(),
+        "X-SECRET-KEY": PATHAO_CLIENT_SECRET.strip()
     }
+    
+    payload = {
+        "client_id": PATHAO_CLIENT_ID.strip(),
+        "client_secret": PATHAO_CLIENT_SECRET.strip(),
+        "username": PATHAO_MERCHANT_EMAIL.strip(),
+        "password": PATHAO_MERCHANT_PASSWORD.strip()
+    }
+    
     try:
+        # ভেরিফিকেশনের জন্য হেডার্স এবং বডি দুটিতেই কী-গুলো পাঠানো হচ্ছে
         res = requests.post(url, json=payload, headers=headers, timeout=10)
+        
         if res.status_code == 200:
             return res.json().get("access_token")
-        return None
+        else:
+            # যদি এরর আসে, রেন্ডার লগে আমরা দেখতে পাবো ঠিক কী বলছে (যেমন: Client ID mismatch)
+            print(f"❌ PATHAO API REJECTION RESP: {res.status_code} - {res.text}")
+            return None
+            
     except Exception as e:
         print(f"❌ Pathao Token Exception: {e}")
         return None
-
-def create_pathao_order(customer_name, customer_phone, delivery_address):
-    token = get_pathao_token()
-    if not token:
-        return False, "Token initialization failed."
-        
-    url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders"
-    headers = {
-        "authorization": f"Bearer {token}",
-        "accept": "application/json",
-        "content-type": "application/json"
-    }
-    payload = {
-        "store_id": int(PATHAO_STORE_ID),
-        "recipient_name": customer_name,
-        "recipient_phone": customer_phone,
-        "recipient_address": delivery_address,
-        "recipient_city": "1", "recipient_zone": "1", "recipient_area": "1",
-        "delivery_type": "48", "item_type": "2",
-        "special_instruction": "WhatsApp Bot Auto Order",
-        "item_quantity": 1, "amount_to_collect": 0,
-        "item_description": "Premium Kitchenware"
-    }
-    try:
-        res = requests.post(url, json=payload, headers=headers, timeout=10)
-        if res.status_code == 201:
-            return True, res.json().get("data", {}).get("consignment_id")
-        return False, res.text
-    except Exception as e:
-        return False, str(e)
-
-def track_pathao_order(tracking_key):
-    """পাঠাও প্যানেল থেকে কনসাইনমেন্ট আইডি বা ফোন নম্বর দিয়ে লাইভ স্ট্যাটাস নিয়ে আসবে"""
-    token = get_pathao_token()
-    if not token:
-        return "সিস্টেম ত্রুটি (Token Error)"
-        
-    # ট্র্যাকিং আইডি বা ফোন নম্বর ক্লিন করা
-    tracking_key = str(tracking_key).strip().replace("+", "")
-    url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders/{tracking_key}/tracking"
-    headers = {
-        "authorization": f"Bearer {token}",
-        "accept": "application/json"
-    }
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json().get("data", {})
-            status = data.get("order_status", "unknown").lower()
-            
-            # পাঠাও স্ট্যাটাসগুলোর সহজ বাংলা রূপান্তর
-            status_map = {
-                "pending": "পেন্ডিং (অর্ডারটি রিভিউ করা হচ্ছে)",
-                "picked": "কুরিয়ারের কাছে হস্তান্তরিত (Picked)",
-                "in_transit": "ডেলিভারির জন্য রাস্তায় আছে (In Transit)",
-                "delivered": "সফলভাবে ডেলিভারি সম্পন্ন হয়েছে 🎉",
-                "cancelled": "অর্ডারটি বাতিল করা হয়েছে",
-                "returned": "অর্ডারটি রিটার্ন এসেছে"
-            }
-            return status_map.get(status, f"স্ট্যাটাস: {status.upper()}")
-        else:
-            return "দুঃখিত, এই নম্বর বা ট্র্যাকিং আইডি দিয়ে কোনো অর্ডার খুঁজে পাওয়া যায়নি।"
-    except Exception as e:
-        print(f"❌ Pathao Track Exception: {e}")
-        return "ট্র্যাকিং তথ্য লোড করতে সমস্যা হচ্ছে।"
 
 # =====================================================================
 # 🤖 জেমিনি এআই প্রসেসর (অটোমেটিক ট্র্যাকিং ও অর্ডার ডিটেকশন)
