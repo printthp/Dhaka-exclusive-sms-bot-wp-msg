@@ -24,14 +24,14 @@ ADMIN_NUMBERS = ["8801717121068", "8801954080047", "8801884413951", "88017355143
 global_processed_messages = {}
 MEMORY_FILE = "knowledge.txt"
 
-# 🚚 পাঠাও মার্চেন্ট ক্রেডেনশিয়ালস
+# 🚚 পাঠাও মার্চেন্ট ক্রেডেনশিয়ালস
 PATHAO_BASE_URL = "https://api-hermes.pathao.com"  # লাইভ প্রোডাকশন ইউআরএল
 PATHAO_STORE_ID = "333358"
 PATHAO_CLIENT_ID = "openOlRa7A"
 PATHAO_CLIENT_SECRET = "7clJGfV1jh5njQEuR5yepVXZ9nYAjGORhNCOjgzG"
 PATHAO_MERCHANT_EMAIL = "cocid1000006@gmail.com"
 
-# ⚠️ জরুরি: এখানে আপনার মার্চেন্ট অ্যাকাউন্টের আসল পাসওয়ার্ডটি বসিয়ে নিন
+# ⚠️ জরুরি: এখানে আপনার মার্চেন্ট অ্যাকাউন্টের আসল পাসওয়ার্ডটি বসিয়ে নিন
 PATHAO_MERCHANT_PASSWORD = "trustedaA@2"
 
 # --- New Gemini Client Setup ---
@@ -55,20 +55,22 @@ def save_knowledge(new_info):
 
 
 # =====================================================================
-# 🚚 ৩. পাঠাও মার্চেন্ট এপিআই ফাংশনসমূহ (অর্ডার ক্রিয়েট ও ট্র্যাকিং)
+# 🚚 ৩. পাঠাও মার্চেন্ট এপিআই ফাংশনসমূহ (অর্ডার ক্রিয়েট ও ট্র্যাকিং)
 # =====================================================================
 def get_pathao_token():
     """পাঠাও এপিআই-তে কানেক্ট করার জন্য লাইভ এক্সেস টোকেন জেনারেট করবে"""
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/issue-token"
+    
+    # ✅ হেডার একদম পরিষ্কার করা হয়েছে (অতিরিক্ত X-API-KEY বা X-SECRET-KEY বাদ দেওয়া হয়েছে)
     headers = {
         "accept": "application/json",
-        "content-type": "application/json",
-        "X-API-KEY": PATHAO_CLIENT_ID.strip(),
-        "X-SECRET-KEY": PATHAO_CLIENT_SECRET.strip()
+        "content-type": "application/json"
     }
+    
     payload = {
         "client_id": PATHAO_CLIENT_ID.strip(),
         "client_secret": PATHAO_CLIENT_SECRET.strip(),
+        "grant_type": "password",
         "username": PATHAO_MERCHANT_EMAIL.strip(),
         "password": PATHAO_MERCHANT_PASSWORD.strip()
     }
@@ -119,7 +121,7 @@ def create_pathao_order(customer_name, customer_phone, delivery_address):
         return False, str(e)
 
 def track_pathao_order(tracking_key):
-    """পাঠাও প্যানেল থেকে ফোন নম্বর দিয়ে লাইভ স্ট্যাটাস নিয়ে আসবে"""
+    """পাঠাও প্যানেল থেকে ফোন নম্বর দিয়ে লাইভ স্ট্যাটাস নিয়ে আসবে"""
     token = get_pathao_token()
     if not token:
         return "সিস্টেম ত্রুটি (Token Error)"
@@ -139,15 +141,15 @@ def track_pathao_order(tracking_key):
             # পাঠাও স্ট্যাটাসগুলোর সহজ বাংলা ম্যাপ
             status_map = {
                 "pending": "পেন্ডিং (অর্ডারটি রিভিউ করা হচ্ছে)",
-                "picked": "কুরিয়ারের কাছে হস্তান্তরিত হয়েছে (Picked)",
-                "in_transit": "ডেলিভারির জন্য রাস্তায় আছে (In Transit)",
-                "delivered": "সফলভাবে ডেলিভারি সম্পন্ন হয়েছে 🎉",
-                "cancelled": "অর্ডারটি বাতিল করা হয়েছে",
+                "picked": "কুরিয়ারের কাছে হস্তান্তরিত হয়েছে (Picked)",
+                "in_transit": "ডেলিভারির জন্য রাস্তায় আছে (In Transit)",
+                "delivered": "সফলভাবে ডেলিভারি সম্পন্ন হয়েছে 🎉",
+                "cancelled": "অর্ডারটি বাতিল করা হয়েছে",
                 "returned": "অর্ডারটি রিটার্ন এসেছে"
             }
             return status_map.get(status, f"স্ট্যাটাস: {status.upper()}")
         else:
-            return "দুঃখিত, এই নম্বর বা ট্র্যাকিং আইডি দিয়ে কোনো অর্ডার খুঁজে পাওয়া যায়নি।"
+            return "দুঃখিত, এই নম্বর বা ট্র্যাকিং আইডি দিয়ে কোনো অর্ডার খুঁজে পাওয়া যায়নি।"
     except Exception as e:
         print(f"❌ Pathao Track Exception: {e}")
         return "ট্র্যাকিং তথ্য লোড করতে সমস্যা হচ্ছে।"
@@ -175,7 +177,7 @@ def get_ai_answer(user_query):
             "TRACKING DETECTION RULE:\n"
             "If the customer asks about order status, where is the product, or wants to track an old order and provides a phone number or a tracking ID, you MUST extract that ID/phone number and append this block at the very end:\n"
             "||TRACK_DATA||{\"key\": \"EXTRACTED_PHONE_OR_ID\"}||\n"
-            "Example: If they say 'আমার প্রোডাক্ট কোথায়', ask them for the phone number.\n\n"
+            "Example: If they say 'আমার প্রোডাক্ট কোথায়', ask them for the phone number.\n\n"
             
             f"LIVE KNOWLEDGE BASE:\n{saved_knowledge}"
         )
@@ -192,7 +194,7 @@ def get_ai_answer(user_query):
         return response.text
     except Exception as e:
         print(f"Gemini AI Error: {e}")
-        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন কিছুটা ব্যস্ত। আমাদের প্রতিনিধি দ্রুত যোগাযোগ করছেন।"
+        return "দুঃখিত প্রিয় গ্রাহক, আমাদের系统 এখন কিছুটা ব্যস্ত। আমাদের প্রতিনিধি দ্রুত যোগাযোগ করছেন।"
 
 
 # =====================================================================
@@ -207,27 +209,27 @@ def process_async_webhook(msg, from_number):
             if from_number in ADMIN_NUMBERS:
                 new_info = user_text[7:].strip()
                 save_knowledge(new_info)
-                send_message(from_number, "✅ তথ্যটি সফলভাবে আপডেট করা হয়েছে। এখন থেকে সম্মানিত গ্রাহকদের এই নতুন তথ্যের ভিত্তিতেই রেসপন্স করা হবে।")
+                send_message(from_number, "✅ তথ্যটি সফলভাবে আপডেট করা হয়েছে। এখন থেকে সম্মানিত গ্রাহকদের এই নতুন তথ্যের ভিত্তিতেই রেসপন্স করা হবে।")
             else:
-                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, এই কমান্ডটি শুধুমাত্র আমাদের সিস্টেম অ্যাডমিনের জন্য সংরক্ষিত।")
+                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, এই আদেশটি শুধুমাত্র আমাদের সিস্টেম অ্যাডমিনের জন্য সংরক্ষিত।")
         
         # 🛒 খ) সাধারণ কাস্টমার চ্যাট এবং মোবাইল নম্বর রিয়েল-টাইম ডিটেক্টর
         else:
             # স্পেস এবং কান্ট্রি কোডের প্লাস সাইন ক্লিন করা
             clean_text = user_text.replace(" ", "").replace("+", "").strip()
             
-            # 🎯 কাস্টমার যদি সরাসরি শুধু ১১ বা ১৩ ডিজিটের মোবাইল নম্বর ইনপুট দেয় (যেমন: 018... বা 88018...)
+            # 🎯 কাস্টমার যদি সরাসরি শুধু ১১ বা ১৩ ডিজিটের মোবাইল নম্বর ইনপুট দেয় (যেমন: 018... বা 88018...)
             if clean_text.isdigit() and (len(clean_text) == 11 or len(clean_text) == 13) and clean_text.startswith(("01", "8801")):
                 # জেমিনিকে বাইপাস করে সরাসরি লাইভ পাঠাও ট্র্যাকিং রান হবে
                 live_status = track_pathao_order(clean_text)
-                final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
+                final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
                 send_message(from_number, final_msg)
                 
             else:
                 # কাস্টমার সাধারণ কথা বললে জেমিনি এআই রেসপন্স হ্যান্ডেল করবে
                 ai_response = get_ai_answer(user_text)
                 
-                # ১. জেমিনি ট্র্যাকিং রিকোয়েস্ট ব্লক ডিটেক্ট করলে
+                # ১. জেমিনি ট্র্যাকিং রিকোয়েস্ট ব্লক ডিটেক্ট করলে
                 if "||TRACK_DATA||" in ai_response:
                     try:
                         parts = ai_response.split("||TRACK_DATA||")
@@ -235,12 +237,12 @@ def process_async_webhook(msg, from_number):
                         track_info = json.loads(json_str)
                         
                         live_status = track_pathao_order(track_info.get("key"))
-                        final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
+                        final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
                         send_message(from_number, final_msg)
                     except Exception as track_err:
                         send_message(from_number, ai_response.split("||TRACK_DATA||")[0].strip())
                 
-                # ২. জেমিনি নতুন অর্ডার ক্রিয়েট ব্লক ডিটেক্ট করলে
+                # ২. জেমিনি নতুন অর্ডার ক্রিয়েট ব্লক ডিটেক্ট করলে
                 elif "||ORDER_DATA||" in ai_response:
                     try:
                         parts = ai_response.split("||ORDER_DATA||")
@@ -254,10 +256,10 @@ def process_async_webhook(msg, from_number):
                             delivery_address=order_info.get("address")
                         )
                         if success:
-                            final_msg = f"{clean_reply}\n\n📦 আপনার অর্ডারটি সফলভাবে পাঠাও কুরিয়ারে এন্ট্রি করা হয়েছে! ট্র্যাকিং আইডি: {result}"
+                            final_msg = f"{clean_reply}\n\n📦 আপনার অর্ডারটি সফলভাবে পাঠাও কুরিয়ারে এন্ট্রি করা হয়েছে! ট্র্যাকিং আইডি: {result}"
                             send_message(from_number, final_msg)
                         else:
-                            send_message(from_number, f"{clean_reply}\n\n(আপনার অর্ডারটি নোট করা হয়েছে, আমাদের প্রতিনিধি খুব দ্রুত কল করে কনফার্ম করবেন।)")
+                            send_message(from_number, f"{clean_reply}\n\n(আপনার অর্ডারটি নোট করা হয়েছে, আমাদের প্রতিনিধি খুব দ্রুত কল করে কনফার্ম করবেন।)")
                     except Exception as json_err:
                         send_message(from_number, ai_response.split("||ORDER_DATA||")[0].strip())
                 
