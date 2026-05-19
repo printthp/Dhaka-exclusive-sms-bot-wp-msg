@@ -22,12 +22,13 @@ ADMIN_NUMBERS = ["8801717121068", "8801954080047", "8801884413951", "88017355143
 global_processed_messages = {}
 MEMORY_FILE = "knowledge.txt"
 
-# --- 🚚 পাঠাও এপিআই লাইভ কনফিগারেশন (আপনার স্ক্রিনশট অনুযায়ী) ---
-PATHAO_BASE_URL = "https://api-hermes.pathao.com"  # লাইভ প্রোডাকশন ইউআরএল
+# --- 🚚 পাঠাও এপিআই লাইভ কনফিগারেশন ---
+PATHAO_BASE_URL = "https://api-hermes.pathao.com"  
 PATHAO_STORE_ID = "333358"
 PATHAO_CLIENT_ID = "openOlRa7A"
 PATHAO_CLIENT_SECRET = "7clJGfV1jh5njQEuR5yepVXZ9nYAjGORhNCOjgzG"
 PATHAO_MERCHANT_EMAIL = "cocid1000006@gmail.com"
+
 PATHAO_MERCHANT_PASSWORD = "trustedaA@2" 
 
 # --- New Gemini Client Setup ---
@@ -47,15 +48,11 @@ def save_knowledge(new_info):
         f.write(f"\n- {new_info}")
 
 # =====================================================================
-# 🚚 পাঠাও মার্চেন্ট এপিআই ফাংশনসমূহ
+# 🚚 পাঠাও মার্চেন্ট এপিআই ফাংশনসমূহ (অর্ডার ক্রিয়েট ও ট্র্যাকিং)
 # =====================================================================
 def get_pathao_token():
-    """পাঠাও এপিআই-তে কানেক্ট করার জন্য লাইভ টোকেন জেনারেট করবে"""
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/issue-token"
-    headers = {
-        "accept": "application/json",
-        "content-type": "application/json"
-    }
+    headers = {"accept": "application/json", "content-type": "application/json"}
     payload = {
         "client_id": PATHAO_CLIENT_ID,
         "client_secret": PATHAO_CLIENT_SECRET,
@@ -66,15 +63,12 @@ def get_pathao_token():
         res = requests.post(url, json=payload, headers=headers, timeout=10)
         if res.status_code == 200:
             return res.json().get("access_token")
-        else:
-            print(f"❌ Pathao Token Error: {res.text}")
-            return None
+        return None
     except Exception as e:
         print(f"❌ Pathao Token Exception: {e}")
         return None
 
 def create_pathao_order(customer_name, customer_phone, delivery_address):
-    """পাঠাও মার্চেন্ট প্যানেলে অটোমেটিক অর্ডার এন্ট্রি করবে"""
     token = get_pathao_token()
     if not token:
         return False, "Token initialization failed."
@@ -85,39 +79,62 @@ def create_pathao_order(customer_name, customer_phone, delivery_address):
         "accept": "application/json",
         "content-type": "application/json"
     }
-    
     payload = {
         "store_id": int(PATHAO_STORE_ID),
-        "merchant_order_id": "", 
         "recipient_name": customer_name,
         "recipient_phone": customer_phone,
         "recipient_address": delivery_address,
-        "recipient_city": "1",      # ১ = ঢাকা সিটি স্ট্যান্ডার্ড
-        "recipient_zone": "1",      # জোন আইডি (পাঠাও জেনেশুনে ১ দেওয়া)
-        "recipient_area": "1",      # এরিয়া আইডি
-        "delivery_type": "48",      # নরমাল ডেলিভারি (৪৮ ঘণ্টা)
-        "item_type": "2",           # ২ = পার্সেল (কিচেন আইটেম)
+        "recipient_city": "1", "recipient_zone": "1", "recipient_area": "1",
+        "delivery_type": "48", "item_type": "2",
         "special_instruction": "WhatsApp Bot Auto Order",
-        "item_quantity": 1,
-        "amount_to_collect": 0,     # প্রাইস ডাইনামিক করতে চাইলে পরে মার্চেন্ট চেঞ্জ করতে পারবে
+        "item_quantity": 1, "amount_to_collect": 0,
         "item_description": "Premium Kitchenware"
     }
-    
     try:
         res = requests.post(url, json=payload, headers=headers, timeout=10)
         if res.status_code == 201:
-            order_data = res.json().get("data", {})
-            consignment_id = order_data.get("consignment_id")  # পাঠাও ট্র্যাকিং আইডি
-            return True, consignment_id
-        else:
-            print(f"❌ Pathao Order Failed: {res.text}")
-            return False, res.text
+            return True, res.json().get("data", {}).get("consignment_id")
+        return False, res.text
     except Exception as e:
-        print(f"❌ Pathao Order Exception: {e}")
         return False, str(e)
 
+def track_pathao_order(tracking_key):
+    """পাঠাও প্যানেল থেকে কনসাইনমেন্ট আইডি বা ফোন নম্বর দিয়ে লাইভ স্ট্যাটাস নিয়ে আসবে"""
+    token = get_pathao_token()
+    if not token:
+        return "সিস্টেম ত্রুটি (Token Error)"
+        
+    # ট্র্যাকিং আইডি বা ফোন নম্বর ক্লিন করা
+    tracking_key = str(tracking_key).strip().replace("+", "")
+    url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders/{tracking_key}/tracking"
+    headers = {
+        "authorization": f"Bearer {token}",
+        "accept": "application/json"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("data", {})
+            status = data.get("order_status", "unknown").lower()
+            
+            # পাঠাও স্ট্যাটাসগুলোর সহজ বাংলা রূপান্তর
+            status_map = {
+                "pending": "পেন্ডিং (অর্ডারটি রিভিউ করা হচ্ছে)",
+                "picked": "কুরিয়ারের কাছে হস্তান্তরিত (Picked)",
+                "in_transit": "ডেলিভারির জন্য রাস্তায় আছে (In Transit)",
+                "delivered": "সফলভাবে ডেলিভারি সম্পন্ন হয়েছে 🎉",
+                "cancelled": "অর্ডারটি বাতিল করা হয়েছে",
+                "returned": "অর্ডারটি রিটার্ন এসেছে"
+            }
+            return status_map.get(status, f"স্ট্যাটাস: {status.upper()}")
+        else:
+            return "দুঃখিত, এই নম্বর বা ট্র্যাকিং আইডি দিয়ে কোনো অর্ডার খুঁজে পাওয়া যায়নি।"
+    except Exception as e:
+        print(f"❌ Pathao Track Exception: {e}")
+        return "ট্র্যাকিং তথ্য লোড করতে সমস্যা হচ্ছে।"
+
 # =====================================================================
-# 🤖 জেমিনি এআই প্রসেসর (অটোমেটিক ডাটা এক্সট্র্যাকশন লজিক সহ)
+# 🤖 জেমিনি এআই প্রসেসর (অটোমেটিক ট্র্যাকিং ও অর্ডার ডিটেকশন)
 # =====================================================================
 def get_ai_answer(user_query):
     try:
@@ -130,10 +147,13 @@ def get_ai_answer(user_query):
             "2. Keep replies short, extremely polite, and completely in Bengali.\n"
             "3. State prices politely in Taka. Never use USD ($).\n"
             "4. Core Goal: Fulfill customer orders. Ask for: Full Name, Phone Number, and Full Delivery Address.\n\n"
-            "ORDER DETECTION & EXTRACTION RULE:\n"
-            "If the customer provides all 3 crucial information (Name, Phone number, Delivery address), you MUST include a special hidden block at the very end of your response text in this EXACT format:\n"
-            "||ORDER_DATA||{\"name\": \"EXTRACTED_NAME\", \"phone\": \"EXTRACTED_PHONE\", \"address\": \"EXTRACTED_ADDRESS\"}||\n"
-            "Do NOT trigger this block unless all 3 data points are perfectly clear. Keep the visible part of the reply polite and tell them that we are processing the order.\n\n"
+            "ORDER DETECTION RULE:\n"
+            "If the customer provides Name, Phone, and Address, append this block at the end:\n"
+            "||ORDER_DATA||{\"name\": \"EXTRACTED_NAME\", \"phone\": \"EXTRACTED_PHONE\", \"address\": \"EXTRACTED_ADDRESS\"}||\n\n"
+            "TRACKING DETECTION RULE:\n"
+            "If the customer asks about order status, where is the product, or wants to track an old order and provides a phone number or a tracking ID, you MUST extract that ID/phone number and append this block at the very end:\n"
+            "||TRACK_DATA||{\"key\": \"EXTRACTED_PHONE_OR_ID\"}||\n"
+            "Example: If they say 'আমার প্রোডাক্ট কোথায়', ask them for the phone number. If they provide the number, trigger this block.\n\n"
             f"LIVE KNOWLEDGE BASE:\n{saved_knowledge}"
         )
         
@@ -144,15 +164,12 @@ def get_ai_answer(user_query):
         )
         
         response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=user_query,
-            config=ai_config
+            model=MODEL_NAME, contents=user_query, config=ai_config
         )
         return response.text
-
     except Exception as e:
         print(f"Gemini AI Error: {e}")
-        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন কিছুটা ব্যস্ত। আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করছেন।"
+        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন কিছুটা व्यस्त। আমাদের প্রতিনিধি দ্রুত যোগাযোগ করছেন।"
 
 # =====================================================================
 # ⚡ হোয়াটসঅ্যাপ ও এপিআই কানেক্টর (ব্যাকগ্রাউন্ড প্রসেসর)
@@ -170,37 +187,49 @@ def process_async_webhook(msg, from_number):
             else:
                 send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, এই কমান্ডটি শুধুমাত্র আমাদের সিস্টেম অ্যাডমিনের জন্য সংরক্ষিত।")
         
-        # সাধারণ কাস্টমার চ্যাট এবং পাঠাও এন্ট্রি চেক
+        # সাধারণ কাস্টমার চ্যাট প্রসেসিং
         else:
             ai_response = get_ai_answer(user_text)
             
-            # এআই রেসপন্সে অর্ডার ডেটার হিডেন ব্লক আছে কিনা চেক করা
-            if "||ORDER_DATA||" in ai_response:
+            # ১. ট্র্যাকিং রিকোয়েস্ট ডিটেকশন
+            if "||TRACK_DATA||" in ai_response:
                 try:
-                    # হিডেন ব্লক থেকে কাস্টমার ডেটা আলাদা করা
+                    parts = ai_response.split("||TRACK_DATA||")
+                    clean_reply = parts[0].strip()
+                    json_str = parts[1].strip().replace("||", "")
+                    track_info = json.loads(json_str)
+                    
+                    # পাঠাও থেকে লাইভ ট্র্যাকিং চেক
+                    live_status = track_pathao_order(track_info.get("key"))
+                    final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
+                    send_message(from_number, final_msg)
+                except Exception as track_err:
+                    print(f"Tracking Logic Error: {track_err}")
+                    send_message(from_number, ai_response.split("||TRACK_DATA||")[0].strip())
+            
+            # ২. নতুন অর্ডার ক্রিয়েট ডিটেকশন
+            elif "||ORDER_DATA||" in ai_response:
+                try:
                     parts = ai_response.split("||ORDER_DATA||")
-                    clean_reply = parts[0].strip()  # কাস্টমারকে দেখানোর অংশ
+                    clean_reply = parts[0].strip()
                     json_str = parts[1].strip().replace("||", "")
                     order_info = json.loads(json_str)
                     
-                    # 🚚 পাঠাও-তে এন্ট্রি পাঠানো
                     success, result = create_pathao_order(
                         customer_name=order_info.get("name"),
                         customer_phone=order_info.get("phone"),
                         delivery_address=order_info.get("address")
                     )
-                    
                     if success:
                         final_msg = f"{clean_reply}\n\n📦 আপনার অর্ডারটি সফলভাবে পাঠাও কুরিয়ারে এন্ট্রি করা হয়েছে! ট্র্যাকিং আইডি: {result}"
                         send_message(from_number, final_msg)
                     else:
-                        # পাঠাও ফেইল করলেও কাস্টমারকে নরমাল অর্ডার নোট মেসেজ দেওয়া
-                        send_message(from_number, f"{clean_reply}\n\n(আপনার অর্ডারটি আমাদের সিস্টেমে নোট করা হয়েছে, আমাদের প্রতিনিধি কল করে কনফার্ম করবেন।)")
+                        send_message(from_number, f"{clean_reply}\n\n(অর্ডারটি নোট করা হয়েছে, প্রতিনিধি দ্রুত কল করবেন।)")
                 except Exception as json_err:
-                    print(f"JSON Parsing/Pathao Integration Error: {json_err}")
                     send_message(from_number, ai_response.split("||ORDER_DATA||")[0].strip())
+            
+            # ৩. সাধারণ আলাপচারিতা
             else:
-                # সাধারণ কনভারসেশন মেসেজ পাঠানো
                 send_message(from_number, ai_response)
     else:
         send_message(from_number, "প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি। অনুগ্রহ করে আপনার প্রশ্নটি লিখে জানান।")
@@ -217,10 +246,8 @@ def send_message(recipient_number, message_body):
         "type": "text",
         "text": {"body": message_body}
     }
-    try:
-        requests.post(url, json=payload, headers=headers, timeout=10)
-    except Exception as e:
-        print(f"Send Message Error: {e}")
+    try: requests.post(url, json=payload, headers=headers, timeout=10)
+    except Exception as e: print(f"Send Message Error: {e}")
 
 # =====================================================================
 # 🛠️ মেটা Webhook রিসিভার এন্ডপয়েন্টস
