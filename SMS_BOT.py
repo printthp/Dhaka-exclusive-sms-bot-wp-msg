@@ -10,13 +10,13 @@ from threading import Thread
 
 app = Flask(__name__)
 
-# ডুপ্লিকেট মেসেজ আইডি ট্র্যাকিং (যাতে মেটার ডাবল রিকোয়েস্ট কোড রিজেক্ট করতে পারে)
+# ডুপ্লিকেট মেসেজ আইডি ট্র্যাকিং
 global_processed_messages = {}
-# কাস্টমারের চ্যাট সেশন মেমোরি (এটি কাস্টমারের সব কথা মনে রাখবে)
+# কাস্টমারের চ্যাট সেশন মেমোরি
 user_chat_sessions = {}  
 
 # --- কনফিগারেশন ---
-PERMANENT_TOKEN = "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD"
+# এখানে আপনার সঠিক মেটা পার্মানেন্ট টোকেনটি বসাবেন
 PERMANENT_TOKEN = "EAANr3r8XPT8BRSkeIvxAIJYVRqjTKpOdZAeXtXIn97kgaGcpmSj8JEcGGH8ZAR12Yyimp7RQcMZCdzZBILrNXqSCL4QXF8do1J2oGp0JESS15sxq637ZAVZAwR5WKP3RuEUqhm43EfCqRtAWJcgcBZBiXvgI4bLn06uircRob3dNxqfrk0ocuC2GX4Svmox2CtNtQZDZD"
 CATALOG_ID = "3224452064423784"
 PHONE_NUMBER_ID = "1039959469208417"
@@ -25,14 +25,17 @@ VERIFY_TOKEN = "dhakaex0020"
 
 CATALOG_URL = "https://www.dhakaexclusive.org/facebook-catalog.xml"
 
+# মেটা/গুগল মার্চেন্ট XML নেমস্পেস (এটি না থাকলে কোড ক্র্যাশ করতো)
+NAMESPACES = {'g': 'http://base.google.com/ns/1.0'}
+GRAPH_API_VERSION = "v21.0"
+
 # --- জেমিনি ক্লায়েন্ট সেটআপ ---
 client = genai.Client(api_key=GEMINI_KEY)
 MODEL_NAME = "gemini-2.5-flash"
 
 
-
 # =====================================================================
-# ২. ক্যাটালগ ডাটা প্রসেসিং ফাংশনসমূহ (মেটা স্ট্যান্ডার্ড ফিক্সড)
+# ২. ক্যাটালগ ডাটা প্রসেসিং ফাংশনসমূহ
 # =====================================================================
 def get_full_catalog_context():
     """লাইভ XML লিংক থেকে ফেসবুকের স্ট্যান্ডার্ড g:title ও g:price ডেটা রিড করবে"""
@@ -40,7 +43,7 @@ def get_full_catalog_context():
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         res = requests.get(CATALOG_URL, headers=headers, timeout=15)
         if res.status_code != 200:
-            print("❌ ক্যাটালগ সার্ভার রেসপন্স দেয়নি।")
+            print("❌ ক্যাটালগ সার্ভার রেসপন্স দেয়নি।")
             return "Catalog currently unavailable."
             
         root = ET.fromstring(res.content)
@@ -57,7 +60,6 @@ def get_full_catalog_context():
                 
                 context_str += f"- Product: {title_text}, Price: {price_text}\n"
                 count += 1
-                # জেমিনির প্রম্পট লিমিট ঠিক রাখতে প্রথম ৪০০টি প্রোডাক্ট পাঠানো হচ্ছে
                 if count >= 400:  
                     break
         return context_str
@@ -111,7 +113,7 @@ def search_product_in_catalog(user_query):
 # =====================================================================
 def download_whatsapp_media(media_id):
     try:
-        url = f"https://graph.facebook.com/v21.0/{media_id}"
+        url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}"
         headers = {"Authorization": f"Bearer {PERMANENT_TOKEN}"}
         res = requests.get(url, headers=headers)
         if res.status_code == 200:
@@ -125,11 +127,10 @@ def download_whatsapp_media(media_id):
 
 
 # =====================================================================
-# ৪. মূল জেমিনি এআই প্রসেসর (স্মার্ট মেমোরি ও ইমেজ-ম্যাচিং লজিক)
+# ৪. মূল জেমিনি এআই প্রসেসর
 # =====================================================================
 def get_ai_answer(from_number, user_query, image_bytes=None):
     try:
-        # ইমেজ বা ছবি আসলে জেমিনিকে পুরো ক্যাটালগ লিস্ট দাও যেন সে ছবি দেখে মেলাতে পারে
         if image_bytes:
             catalog_info = get_full_catalog_context()
         else:
@@ -161,7 +162,6 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
             max_output_tokens=250  
         )
 
-        # ইউজারের সেশন ধরে রেখে ডাইনামিক ক্যাটালগ কনটেক্সট আপডেট করা
         if from_number not in user_chat_sessions:
             user_chat_sessions[from_number] = client.chats.create(model=MODEL_NAME, config=ai_config)
         else:
@@ -178,7 +178,6 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
         if user_query:
             message_contents.append(user_query)
         else:
-            # ছবি পাঠানোর সাথে কোনো লেখা না থাকলে এটি ডিফল্ট প্রশ্ন হিসেবে কাজ করবে
             message_contents.append("এই প্রোডাক্টটির দাম কত বা এটার ডিটেইলস বলো?")
 
         response = chat_session.send_message(message_contents)
@@ -193,7 +192,7 @@ def get_ai_answer(from_number, user_query, image_bytes=None):
 # ৫. হোয়াটসঅ্যাপে মেসেজ পাঠানোর ফাংশন
 # =====================================================================
 def send_message(recipient_number, message_body):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {PERMANENT_TOKEN}",
         "Content-Type": "application/json"
@@ -205,7 +204,9 @@ def send_message(recipient_number, message_body):
         "text": {"body": message_body}
     }
     try:
-        requests.post(url, json=payload, headers=headers, timeout=10)
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if res.status_code != 200:
+            print(f"❌ Meta API Error Response: {res.text}")
     except Exception as e:
         print(f"Send Message Error: {e}")
 
@@ -249,7 +250,6 @@ def webhook():
             msg_id = msg["id"]
             from_number = msg["from"]
             
-            # ডুপ্লিকেট মেসেজ ফিল্টার (মেটা লুপ প্রোটেকশন)
             if msg_id in global_processed_messages:
                 return "ok", 200
                 
@@ -257,7 +257,6 @@ def webhook():
             if len(global_processed_messages) > 2000:
                 global_processed_messages.pop(next(iter(global_processed_messages)))
 
-            # ব্যাকগ্রাউন্ড থ্রেড রান করা যেন মেটা ৩ সেকেন্ডের মধ্যে টাইমাউট এরর না দেয়
             thread = Thread(target=process_async_webhook, args=(msg, from_number))
             thread.start()
                 
