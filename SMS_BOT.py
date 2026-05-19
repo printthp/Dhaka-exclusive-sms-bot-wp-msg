@@ -13,8 +13,8 @@ PHONE_NUMBER_ID = "1039959469208417"
 GEMINI_KEY = "AIzaSyDICBRwj4wdwmqlut_Xjf0GgvXx_Mjcc0Q"
 VERIFY_TOKEN = "dhakaex0020"
 
-# 🔐 নেক্সট লেভেল সিকিউরিটি: শুধুমাত্র এই নম্বরগুলোই বটকে নতুন তথ্য শেখাতে পারবে
-ADMIN_NUMBERS = ["8801717121068", "8801954080047", "8801884413951", "8801735514320"]
+# 🔐 নেক্সট লেভেল সিকিউরিটি: শুধুমাত্র এই নম্বরগুলোই বটকে তথ্য শেখাতে পারবে (আপনার নম্বর যোগ করুন)
+ADMIN_NUMBERS = ["8801717121068", "8801884413951"] 
 
 # মেটা লুপ প্রোটেকশন ও ক্লাউড মেমোরি ব্যাকআপ
 global_processed_messages = {}
@@ -100,14 +100,14 @@ def process_async_webhook(msg, from_number):
         user_text = msg["text"]["body"].strip()
         
         # 🔐 এডমিন ট্রেনিং ফিল্টার
-if user_text.lower().startswith("update:"):
-    if from_number in ADMIN_NUMBERS:
-        new_info = user_text[7:].strip()
-        save_knowledge(new_info)
-        # এখানে স্মার্ট ডায়ালগটি বসানো হয়েছে
-        send_message(from_number, "✅ তথ্যটি সফলভাবে আপডেট করা হয়েছে। এখন থেকে সম্মানিত গ্রাহকদের এই নতুন তথ্যের ভিত্তিতেই রেসপন্স করা হবে।")
-    else:
-        send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, এই কমান্ডটি শুধুমাত্র আমাদের সিস্টেম অ্যাডমিনের জন্য সংরক্ষিত।")
+        if user_text.lower().startswith("update:"):
+            if from_number in ADMIN_NUMBERS:
+                new_info = user_text[7:].strip()
+                save_knowledge(new_info)
+                send_message(from_number, "✅ ওস্তাদ! নতুন তথ্যটি আমি সফলভাবে মগজে ঢুকিয়ে নিয়েছি। এখন থেকে কাস্টমারদের এই অনুযায়ী উত্তর দেব।")
+            else:
+                # সাধারণ কাস্টমার ট্রাই করলে তাকে এই মেসেজ দেবে
+                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, এই কমান্ডটি শুধুমাত্র আমাদের সিস্টেম অ্যাডমিনের জন্য সংরক্ষিত।")
         
         # সাধারণ কাস্টমার চ্যাট
         else:
