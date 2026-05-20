@@ -1,17 +1,38 @@
 import os
-import io
-import requests
+import sys
 import json
-import re  # নিখুঁত JSON খোঁজার জন্য রেগুলার এক্সপ্রেশন যুক্ত করা হয়েছে
-from flask import Flask, request
+import re
+import sqlite3
+import time
+import hmac
+import hashlib
+import logging
+import threading
+from datetime import datetime, timedelta, timezone
+from flask import Flask, request, jsonify
 from google import genai
 from google.genai import types
-from threading import Thread
+from threading import Thread, Lock, Timer
+import requests
+
+# =====================================================================
+# 🔧 ০. লগিং সেটিংস
+# =====================================================================
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(message)s"
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_FORMAT,
+    handlers=[
+        logging.FileHandler("bot.log", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
 # =====================================================================
-# ⚙️ ১. মেটা, জেমিনি ও পাঠাও লাইভ কনফিগারেশন
+# ⚙️ ১. ENV কনফিগ
 # =====================================================================
 PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
@@ -32,297 +53,633 @@ PATHAO_CLIENT_ID = "openOlRa7A"
 PATHAO_CLIENT_SECRET = "7clJGfV1jh5njQEuR5yepVXZ9nYAjGORhNCOjgzG"
 PATHAO_MERCHANT_EMAIL = "cocid1000006@gmail.com"
 PATHAO_MERCHANT_PASSWORD = "trustedaA@2" 
+# ব্যবসা সেটিংস
+BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
+BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
+CURRENCY = "৳"
 
-# --- New Gemini Client Setup ---
 client = genai.Client(api_key=GEMINI_KEY)
 MODEL_NAME = "gemini-2.5-flash"
 
+# =====================================================================
+# 🗄️ ২. SQLite ডাটাবেস
+# =====================================================================
+DB_FILE = "bot_super.db"
+db_lock = Lock()
+
+def init_db():
+    with db_lock:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        c = conn.cursor()
+
+        # মেসেজ ও রেট লিমিট
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                msg_id TEXT PRIMARY KEY,
+                from_number TEXT,
+                content TEXT,
+                msg_type TEXT DEFAULT 'text',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ইউজার প্রোফাইল
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                phone TEXT PRIMARY KEY,
+                name TEXT,
+                language TEXT DEFAULT 'bn',
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_orders INTEGER DEFAULT 0,
+                total_spent INTEGER DEFAULT 0
+            )
+        """)
+
+        # সেশন/স্টেট
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                phone TEXT PRIMARY KEY,
+                state TEXT DEFAULT 'idle',
+                context TEXT DEFAULT '{}',
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # অর্ডার
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT,
+                name TEXT,
+                address TEXT,
+                city_id INTEGER,
+                zone_id INTEGER,
+                area_id INTEGER,
+                product_id INTEGER,
+                quantity INTEGER DEFAULT 1,
+                price INTEGER,
+                delivery_charge INTEGER DEFAULT 0,
+                discount INTEGER DEFAULT 0,
+                total INTEGER,
+                payment_method TEXT DEFAULT 'cod',
+                payment_status TEXT DEFAULT 'pending',
+                pathao_consignment_id TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # প্রোডাক্ট
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                price INTEGER,
+                description TEXT,
+                image_url TEXT,
+                stock INTEGER DEFAULT 0,
+                active INTEGER DEFAULT 1,
+                category TEXT DEFAULT 'general'
+            )
+        """)
+
+        # কুপন
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS coupons (
+                code TEXT PRIMARY KEY,
+                discount_percent INTEGER DEFAULT 0,
+                discount_amount INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 100,
+                used_count INTEGER DEFAULT 0,
+                valid_until TEXT,
+                active INTEGER DEFAULT 1
+            )
+        """)
+
+        # নলেজ বেস
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT DEFAULT 'general',
+                content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # কার্ট
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS carts (
+                phone TEXT PRIMARY KEY,
+                items TEXT DEFAULT '[]',
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+        logger.info("✅ Super Database initialized")
+
+init_db()
+
+def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
+    with db_lock:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute(query, params)
+        if commit:
+            conn.commit()
+            conn.close()
+            return True
+        if fetchone:
+            row = c.fetchone()
+            conn.close()
+            return dict(row) if row else None
+        if fetchall:
+            rows = c.fetchall()
+            conn.close()
+            return [dict(r) for r in rows]
+        conn.close()
+        return None
 
 # =====================================================================
-# 📂 ২. নলেজ বেস (AI Training Data) ফাংশনসমূহ
+# 🌐 ৩. হেলপারস
 # =====================================================================
-def read_knowledge():
-    if not os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-            f.write("Brand Name: Dhaka Exclusive. Location: Bangladesh. Product: Premium kitchenware.\n")
-    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-        return f.read()
+def format_phone(num):
+    num = str(num).strip().replace(" ", "").replace("-", "").replace("+", "")
+    if num.startswith("01") and len(num) == 11:
+        num = "88" + num
+    return num
 
-def save_knowledge(new_info):
-    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-        f.write(f"\n- {new_info}")
+def extract_json_block(text):
+    start = text.find("{")
+    if start == -1:
+        return None
+    brace_count = 0
+    for i, ch in enumerate(text[start:], start):
+        if ch == "{":
+            brace_count += 1
+        elif ch == "}":
+            brace_count -= 1
+            if brace_count == 0:
+                return text[start:i+1]
+    return None
 
+def is_within_business_hours():
+    try:
+        # বাংলাদেশের টাইমজোন (UTC+6) ফিক্সড করা হয়েছে যেন ইন্টারন্যাশনাল সার্ভারেও কাজ করে
+        tz_bd = timezone(timedelta(hours=6))
+        now_bd = datetime.now(tz_bd)
+        
+        start_str, end_str = BUSINESS_HOURS.split("-")
+        start_time = datetime.strptime(start_str, "%H:%M").time()
+        end_time = datetime.strptime(end_str, "%H:%M").time()
+        
+        return start_time <= now_bd.time() <= end_time
+    except Exception as e:
+        logger.error(f"Business hours check error: {e}")
+        return True
+
+def t(msg_bn, msg_en=""):
+    return msg_bn
 
 # =====================================================================
-# 🚚 ৩. পাঠাও মার্চেন্ট এপিআই ফাংশনসমূহ (অর্ডার ক্রিয়েট ও ট্র্যাকিং)
+# 🛡️ ৪. Meta Webhook Verify
 # =====================================================================
+def verify_meta_signature(payload, signature):
+    if not APP_SECRET:
+        return True
+    if not signature:
+        return False
+    try:
+        expected = hmac.new(APP_SECRET.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+        received = signature.replace("sha256=", "")
+        return hmac.compare_digest(expected, received)
+    except Exception as e:
+        logger.error(f"Sig verify error: {e}")
+        return False
+
+# =====================================================================
+# 🚚 ৫. পাঠাও API
+# =====================================================================
+def api_post_retry(url, payload, headers, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            res = requests.post(url, json=payload, headers=headers, timeout=15)
+            if res.status_code in (200, 201):
+                return res
+            if res.status_code >= 500:
+                time.sleep(2 ** attempt)
+                continue
+            return res
+        except Exception as e:
+            logger.warning(f"API attempt {attempt+1} fail: {e}")
+            time.sleep(2 ** attempt)
+    return None
+
 def get_pathao_token():
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/issue-token"
     headers = {
         "accept": "application/json",
         "content-type": "application/json",
-        "X-API-KEY": PATHAO_CLIENT_ID.strip(),
-        "X-SECRET-KEY": PATHAO_CLIENT_SECRET.strip()
+        "X-API-KEY": PATHAO_CLIENT_ID,
+        "X-SECRET-KEY": PATHAO_CLIENT_SECRET
     }
     payload = {
-        "client_id": PATHAO_CLIENT_ID.strip(),
-        "client_secret": PATHAO_CLIENT_SECRET.strip(),
-        "username": PATHAO_MERCHANT_EMAIL.strip(),
-        "password": PATHAO_MERCHANT_PASSWORD.strip()
+        "client_id": PATHAO_CLIENT_ID,
+        "client_secret": PATHAO_CLIENT_SECRET,
+        "username": PATHAO_MERCHANT_EMAIL,
+        "password": PATHAO_MERCHANT_PASSWORD
     }
-    try:
-        res = requests.post(url, json=payload, headers=headers, timeout=10)
-        if res.status_code == 200:
-            return res.json().get("access_token")
-        else:
-            print(f"❌ PATHAO API REJECTION RESP: {res.status_code} - {res.text}")
-            return None
-    except Exception as e:
-        print(f"❌ Pathao Token Exception: {e}")
-        return None
-
-def create_pathao_order(customer_name, customer_phone, delivery_address):
-    token = get_pathao_token()
-    if not token:
-        return False, "Token initialization failed."
-        
-    url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders"
-    headers = {
-        "authorization": f"Bearer {token}",
-        "accept": "application/json",
-        "content-type": "application/json"
-    }
-    
-    # ফিক্স: আইডি এবং টাইপগুলো পাঠাও এপিআই স্ট্যান্ডার্ড অনুযায়ী Integer করা হয়েছে
-    payload = {
-        "store_id": int(PATHAO_STORE_ID),
-        "recipient_name": str(customer_name),
-        "recipient_phone": str(customer_phone),
-        "recipient_address": str(delivery_address),
-        "recipient_city": 1,      # Integer টাইপ
-        "recipient_zone": 1,      # Integer টাইপ
-        "recipient_area": 1,      # Integer টাইপ
-        "delivery_type": 48,      # Integer টাইপ (৪৮ ঘণ্টা)
-        "item_type": 2,           # Integer টাইপ (পার্সেল/পণ্য)
-        "special_instruction": "WhatsApp Bot Auto Order",
-        "item_quantity": 1,
-        "amount_to_collect": 0,   
-        "item_description": "Premium Kitchenware"
-    }
-    try:
-        res = requests.post(url, json=payload, headers=headers, timeout=10)
-        if res.status_code == 201:
-            return True, res.json().get("data", {}).get("consignment_id")
-        print(f"❌ Pathao Order Creation Failed: {res.status_code} - {res.text}")
-        return False, res.text
-    except Exception as e:
-        return False, str(e)
+    res = api_post_retry(url, payload, headers)
+    if not res:
+        return None, "Network error"
+    data = res.json()
+    if res.status_code == 200 and data.get("status") == 200:
+        return data.get("token"), None
+    return None, data.get("message", res.text)
 
 def track_pathao_order(tracking_key):
-    token = get_pathao_token()
+    token, err = get_pathao_token()
     if not token:
-        return "সিস্টেম ত্রুটি (Token Error)"
-        
+        return f"Token Error: {err}"
     tracking_key = str(tracking_key).strip().replace("+", "")
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders/{tracking_key}/tracking"
-    headers = {
-        "authorization": f"Bearer {token}",
-        "accept": "application/json"
-    }
+    headers = {"authorization": f"Bearer {token}", "accept": "application/json"}
     try:
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json().get("data", {})
-            status = data.get("order_status", "unknown").lower()
-            
+        res = requests.get(url, headers=headers, timeout=15)
+        data = res.json()
+        if res.status_code == 200 and data.get("status") == 200:
+            status = data.get("data", {}).get("order_status", "unknown").lower()
             status_map = {
                 "pending": "পেন্ডিং (অর্ডারটি রিভিউ করা হচ্ছে)",
-                "picked": "কুরিয়ারের কাছে হস্তান্তরিত হয়েছে (Picked)",
-                "in_transit": "ডেলিভারির জন্য রাস্তায় আছে (In Transit)",
-                "delivered": "সফলভাবে ডেলিভারি সম্পন্ন হয়েছে 🎉",
-                "cancelled": "অর্ডারটি বাতিল করা হয়েছে",
-                "returned": "অর্ডারটি রিটার্ন এসেছে"
+                "picked": "কুরিয়ারের কাছে হস্তান্তরিত (Picked)",
+                "in_transit": "ডেলিভারির পথে (In Transit)",
+                "delivered": "সফলভাবে ডেলিভারি সম্পন্ন 🎉",
+                "cancelled": "অর্ডার বাতিল",
+                "returned": "অর্ডার রিটার্ন"
             }
-            return status_map.get(status, f"স্ট্যাটাস: {status.upper()}")
-        else:
-            return "দুঃখিত, এই নম্বর বা ট্র্যাকিং আইডি দিয়ে কোনো অর্ডার খুঁজে পাওয়া যায়নি।"
+            return status_map.get(status, f"Status: {status.upper()}")
+        return "দুঃখিত, এই নম্বর/ID দিয়ে অর্ডার পাওয়া যায়নি।"
     except Exception as e:
-        print(f"❌ Pathao Track Exception: {e}")
-        return "ট্র্যাকিং তথ্য লোড করতে সমস্যা হচ্ছে।"
-
+        logger.error(f"Track error: {e}")
+        return "ট্র্যাকিং তথ্য লোডে সমস্যা।"
 
 # =====================================================================
-# 🤖 ৪. জেমিনি এআই ইঞ্জিন (অটোমেটিক ডাটা ডিটেকশন স্ট্রাকচার)
+# 📲 ৬. WhatsApp API 发送 函数
 # =====================================================================
-def get_ai_answer(user_query):
+def send_text(to, body):
+    if not PERMANENT_TOKEN or not PHONE_NUMBER_ID:
+        return False
+    url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": format_phone(to),
+        "type": "text",
+        "text": {"body": body}
+    }
+    try:
+        res = requests.post(url, json=payload, headers=headers, timeout=15)
+        return res.status_code in (200, 201)
+    except Exception as e:
+        logger.error(f"Send text error: {e}")
+        return False
+
+# =====================================================================
+# 🧠 ৭. জেমিনি AI ও প্রোডাক্টস
+# =====================================================================
+def read_knowledge():
+    rows = db_query("SELECT content FROM knowledge ORDER BY created_at DESC", fetchall=True)
+    if not rows:
+        return "Brand: Dhaka Exclusive. Bangladesh. Premium kitchenware."
+    return "\n".join([r["content"] for r in rows])
+
+def save_knowledge(category, content):
+    db_query("INSERT INTO knowledge (category, content) VALUES (?, ?)", (category, content), commit=True)
+
+def get_products():
+    return db_query("SELECT * FROM products WHERE active = 1", fetchall=True)
+
+def add_product(name, price, description, stock=10, category="general", image_url=""):
+    db_query(
+        "INSERT INTO products (name, price, description, stock, category, image_url) VALUES (?, ?, ?, ?, ?, ?)",
+        (name, price, description, stock, category, image_url), commit=True
+    )
+
+def format_catalog():
+    products = get_products()
+    if not products:
+        return "কোনো প্রোডাক্ট আপডেট হয়নি।"
+    lines = ["📋 *আমাদের প্রোডাক্ট:*"]
+    for p in products:
+        lines.append(f"\n🔹 *{p['name']}* — {p['price']}৳\n📝 {p['description']}\n📦 স্টক: {p['stock']}টি")
+    return "\n".join(lines)
+
+def get_ai_answer(user_query, session_context=None):
     try:
         saved_knowledge = read_knowledge()
-        
+        products_text = format_catalog()
         system_instruction = (
-            "You are the professional AI sales assistant for 'Dhaka Exclusive' (https://dhakaexclusive.org/).\n"
-            "CRITICAL RULES:\n"
-            "1. NEVER use the word 'নমস্কার'. ALWAYS address the customer as 'প্রিয় গ্রাহক'.\n"
-            "2. Keep replies short, extremely polite, and completely in Bengali.\n"
-            "3. State prices politely in Taka. Never use USD ($).\n"
-            "4. Core Goal: Fulfill customer orders. Ask for: Full Name, Phone Number, and Full Delivery Address.\n\n"
-            
-            "ORDER DETECTION RULE:\n"
-            "If the customer provides Name, Phone, and Address, append this block at the end:\n"
-            "||ORDER_DATA||{\"name\": \"EXTRACTED_NAME\", \"phone\": \"EXTRACTED_PHONE\", \"address\": \"EXTRACTED_ADDRESS\"}||\n\n"
-            
-            "TRACKING DETECTION RULE:\n"
-            "If the customer asks about order status, where is the product, or wants to track an old order and provides a phone number or a tracking ID, you MUST extract that ID/phone number and append this block at the very end:\n"
-            "||TRACK_DATA||{\"key\": \"EXTRACTED_PHONE_OR_ID\"}||\n"
-            "Example: If they say 'আমার প্রোডাক্ট কোথায়', ask them for the phone number.\n\n"
-            
-            f"LIVE KNOWLEDGE BASE:\n{saved_knowledge}"
+            "You are the AI sales assistant for 'Dhaka Exclusive'.\n"
+            "CRITICAL:\n"
+            "1. NEVER say 'নমস্কার'. ALWAYS use 'প্রিয় গ্রাহক'.\n"
+            "2. Short, polite, Bengali replies. Taka only.\n"
+            "3. To track: append ||TRACK_DATA||{'key':'VALUE'}||\n"
+            "4. If Name+Phone+Address confirmed: append ||ORDER_DATA||{'name':'N','phone':'P','address':'A'}||\n\n"
+            f"PRODUCTS:\n{products_text}\n\n"
+            f"KNOWLEDGE:\n{saved_knowledge}\n\n"
+            f"CONTEXT: {json.dumps(session_context or {}, ensure_ascii=False)}"
         )
-        
         ai_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=0.1,
-            max_output_tokens=400
+            temperature=0.15,
+            max_output_tokens=500
         )
-        
         response = client.models.generate_content(
             model=MODEL_NAME, contents=user_query, config=ai_config
         )
         return response.text
     except Exception as e:
-        print(f"Gemini AI Error: {e}")
-        return "দুঃখিত প্রিয় গ্রাহক, আমাদের সিস্টেম এখন কিছুটা ব্যস্ত। আমাদের প্রতিনিধি দ্রুত যোগাযোগ করছেন।"
-
+        logger.error(f"Gemini error: {e}")
+        return "দুঃখিত প্রিয় গ্রাহক, সিস্টেম ব্যস্ত। প্রতিনিধি শীঘ্রই যোগাযোগ করবেন।"
 
 # =====================================================================
-# ⚡ ৫. হোয়াটসঅ্যাপ রিকোয়েস্ট ও ব্যাকগ্রাউন্ড ইন্টেলিজেন্স প্রসেসর
+# 🧠 ৮. সেশন ও রেট লিমিট ম্যানেজমেন্ট
 # =====================================================================
-def process_async_webhook(msg, from_number):
-    if msg.get("type") == "text":
-        user_text = msg["text"]["body"].strip()
-        
-        # 🔐 ক) এডমিন ট্রেনিং ফিল্টার
-        if user_text.lower().startswith("update:"):
-            if from_number in ADMIN_NUMBERS:
-                new_info = user_text[7:].strip()
-                save_knowledge(new_info)
-                send_message(from_number, "✅ তথ্যটি সফলভাবে আপডেট করা হয়েছে। এখন থেকে সম্মানিত গ্রাহকদের এই নতুন তথ্যের ভিত্তিতেই রেসপন্স করা হবে।")
-            else:
-                send_message(from_number, "দুঃখিত প্রিয় গ্রাহক, এই কমান্ডটি শুধুমাত্র আমাদের সিস্টেম অ্যাডমিনের জন্য সংরক্ষিত।")
-        
-        # 🛒 খ) সাধারণ কাস্টমার চ্যাট এবং মোবাইল নম্বর রিয়েল-টাইম ডিটেক্টর
-        else:
-            clean_text = user_text.replace(" ", "").replace("+", "").strip()
-            
-            if clean_text.isdigit() and (len(clean_text) == 11 or len(clean_text) == 13) and clean_text.startswith(("01", "8801")):
-                live_status = track_pathao_order(clean_text)
-                final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
-                send_message(from_number, final_msg)
-                
-            else:
-                ai_response = get_ai_answer(user_text)
-                
-                # ১. জেমিনি ট্র্যাকিং রিকোয়েস্ট ব্লক ডিটেক্ট করলে (Regex ফিক্সড)
-                if "||TRACK_DATA||" in ai_response:
-                    try:
-                        clean_reply = ai_response.split("||TRACK_DATA||")[0].strip()
-                        # রেগুলার এক্সপ্রেশন দিয়ে নিখুঁতভাবে JSON অংশটি বের করা হচ্ছে
-                        match = re.search(r'\{.*\}', ai_response.split("||TRACK_DATA||")[1])
-                        if match:
-                            track_info = json.loads(match.group(0))
-                            live_status = track_pathao_order(track_info.get("key"))
-                            final_msg = f"প্রিয় গ্রাহক, আপনার অর্ডারের বর্তমান অবস্থা নিচে দেওয়া হলো:\n\n📌 **অবস্থা:** {live_status}"
-                            send_message(from_number, final_msg)
-                        else:
-                            send_message(from_number, clean_reply)
-                    except Exception as track_err:
-                        print(f"Regex Tracking JSON error: {track_err}")
-                        send_message(from_number, ai_response.split("||TRACK_DATA||")[0].strip())
-                
-                # ২. জেমিনি নতুন অর্ডার ক্রিয়েট ব্লক ডিটেক্ট করলে (Regex ফিক্সড)
-                elif "||ORDER_DATA||" in ai_response:
-                    try:
-                        parts = ai_response.split("||ORDER_DATA||")
-                        clean_reply = parts[0].strip()
-                        
-                        # রেগুলার এক্সপ্রেশন দিয়ে জেমিনির রেসপন্স থেকে অবিকল JSON অবজেক্ট খুঁজে বের করা
-                        match = re.search(r'\{.*\}', parts[1])
-                        if match:
-                            order_info = json.loads(match.group(0))
-                            
-                            success, result = create_pathao_order(
-                                customer_name=order_info.get("name"),
-                                customer_phone=order_info.get("phone"),
-                                delivery_address=order_info.get("address")
-                            )
-                            if success:
-                                final_msg = f"{clean_reply}\n\n📦 আপনার অর্ডারটি সফলভাবে পাঠাও কুরিয়ারে এন্ট্রি করা হয়েছে! ট্র্যাকিং আইডি: {result}"
-                                send_message(from_number, final_msg)
-                            else:
-                                send_message(from_number, f"{clean_reply}\n\n(আপনার অর্ডারটি নোট করা হয়েছে, আমাদের প্রতিনিধি খুব দ্রুত কল করে কনফার্ম করবেন।)")
-                        else:
-                            send_message(from_number, clean_reply)
-                    except Exception as json_err:
-                        print(f"Regex Order JSON error: {json_err}")
-                        send_message(from_number, ai_response.split("||ORDER_DATA||")[0].strip())
-                
-                # ৩. নরমাল কাস্টমার মেসেজ
-                else:
-                    send_message(from_number, ai_response)
+def get_session(phone):
+    return db_query("SELECT * FROM sessions WHERE phone = ?", (phone,), fetchone=True)
+
+def set_session(phone, state, context=None):
+    ctx = json.dumps(context or {}, ensure_ascii=False)
+    existing = get_session(phone)
+    if existing:
+        db_query(
+            "UPDATE sessions SET state = ?, context = ?, last_active = CURRENT_TIMESTAMP WHERE phone = ?",
+            (state, ctx, phone), commit=True
+        )
     else:
-        send_message(from_number, "প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট মেসেজ বুঝতে পারি। অনুগ্রহ করে আপনার প্রশ্নটি লিখে জানান।")
+        db_query(
+            "INSERT INTO sessions (phone, state, context) VALUES (?, ?, ?)",
+            (phone, state, ctx), commit=True
+        )
 
-def send_message(recipient_number, message_body):
-    url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {PERMANENT_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": recipient_number,
-        "type": "text",
-        "text": {"body": message_body}
-    }
-    try:
-        requests.post(url, json=payload, headers=headers, timeout=10)
-    except Exception as e:
-        print(f"Send Message Error: {e}")
+def get_context(phone):
+    session = get_session(phone)
+    return json.loads(session["context"]) if session and session["context"] else {}
 
+def ensure_user(phone):
+    user = db_query("SELECT * FROM users WHERE phone = ?", (phone,), fetchone=True)
+    if not user:
+        db_query("INSERT OR IGNORE INTO users (phone) VALUES (?)", (phone,), commit=True)
+    else:
+        db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
+    return user
+
+def is_rate_limited(phone):
+    one_min_ago = (datetime.utcnow() - timedelta(minutes=1)).isoformat()
+    count = db_query(
+        "SELECT COUNT(*) as cnt FROM messages WHERE from_number = ? AND created_at > ?",
+        (phone, one_min_ago), fetchone=True
+    )
+    return count and count["cnt"] >= 10
+
+def log_message(msg_id, phone, content, msg_type="text"):
+    db_query(
+        "INSERT OR IGNORE INTO messages (msg_id, from_number, content, msg_type) VALUES (?, ?, ?, ?)",
+        (msg_id, phone, content, msg_type), commit=True
+    )
+
+def broadcast_message(message_text, exclude_admins=False):
+    users = db_query("SELECT phone FROM users", fetchall=True)
+    sent = 0
+    for u in users:
+        phone = u["phone"]
+        if exclude_admins and phone in ADMIN_NUMBERS:
+            continue
+        if send_text(phone, message_text):
+            sent += 1
+        time.sleep(0.5)
+    return sent, len(users)
+
+def get_dashboard_stats():
+    total_users = db_query("SELECT COUNT(*) as c FROM users", fetchone=True)["c"]
+    total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"]
+    today_orders = db_query("SELECT COUNT(*) as c FROM orders WHERE date(created_at) = date('now')", fetchone=True)["c"]
+    revenue = db_query("SELECT COALESCE(SUM(total), 0) as s FROM orders WHERE status = 'delivered'", fetchone=True)["s"]
+    pending = db_query("SELECT COUNT(*) as c FROM orders WHERE status = 'pending'", fetchone=True)["c"]
+    return {"users": total_users, "total_orders": total_orders, "today_orders": today_orders, "revenue": revenue, "pending": pending}
 
 # =====================================================================
-# 🛠️ ৬. মেটা Webhook গেটওয়ে এন্ডপয়েন্টস
+# 🧠 ৯. মেইন প্রসেসর (State Machine + ফিক্সড হেল্প ব্লক)
 # =====================================================================
-@app.route("/webhook", methods=["GET"])
-def verify():
-    if request.args.get("hub.verify_token") == VERIFY_TOKEN:
-        return request.args.get("hub.challenge"), 200
-    return "Failed", 403
+def process_webhook_async(msg, from_number):
+    msg_type = msg.get("type")
+    msg_id = msg.get("id")
 
-@app.route("/webhook", methods=["POST"])
+    existing = db_query("SELECT 1 FROM messages WHERE msg_id = ?", (msg_id,), fetchone=True)
+    if existing:
+        return
+    log_message(msg_id, from_number, str(msg), msg_type)
+    ensure_user(from_number)
+
+    if is_rate_limited(from_number):
+        send_text(from_number, "প্রিয় গ্রাহক, অনেক মেসেজ পাঠিয়েছেন। কিছুক্ষণ অপেক্ষা করুন।")
+        return
+
+    if not is_within_business_hours():
+        send_text(from_number, f"প্রিয় গ্রাহক, আমাদের কার্যক্রম সময় {BUSINESS_HOURS}। আপনার মেসেজটির উত্তর কাজের সময়ে দেওয়া হবে। 🙏")
+        return
+
+    if msg_type in ("audio", "voice"):
+        send_text(from_number, "প্রিয় গ্রাহক, ভয়েস মেসেজ এখনো সাপোর্টেড নয়। অনুগ্রহ করে টেক্সটে লিখুন।")
+        return
+
+    if msg_type == "image":
+        send_text(from_number, "📸 ছবি পেয়েছি! আমাদের প্রতিনিধি শীঘ্রই যাচাই করে রিপ্লাই দেবেন।")
+        return
+
+    if msg_type != "text":
+        send_text(from_number, "প্রিয় গ্রাহক, আমি বর্তমানে শুধু টেক্সট বুঝতে পারি।")
+        return
+
+    user_text = msg["text"]["body"].strip()
+    session = get_session(from_number)
+    state = session["state"] if session else "idle"
+    context = get_context(from_number)
+
+    # ─────────────────────────────────────────
+    # 🔐 অ্যাডমিন কমান্ড প্রসেসর (সম্পূর্ণ করা হয়েছে)
+    # ─────────────────────────────────────────
+    if user_text.lower().startswith("admin:"):
+        if from_number not in ADMIN_NUMBERS:
+            send_text(from_number, "দুঃখিত, এই কমান্ড শুধু অ্যাডমিনের জন্য।")
+            return
+        cmd = user_text[6:].strip()
+
+        if cmd.lower().startswith("addproduct"):
+            parts = [p.strip() for p in cmd.split("|")]
+            if len(parts) >= 4:
+                add_product(parts[1], int(parts[2]), parts[3], stock=int(parts[4]) if len(parts)>4 else 10)
+                send_text(from_number, f"✅ '{parts[1]}' যোগ হয়েছে।")
+            else:
+                send_text(from_number, "ফরম্যাট: admin:addproduct | নাম | দাম | বর্ণনা | [স্টক]")
+            return
+
+        if cmd.lower().startswith("knowledge"):
+            save_knowledge("general", cmd[9:].strip())
+            send_text(from_number, "✅ নলেজ আপডেট সম্পন্ন।")
+            return
+
+        if cmd.lower().startswith("orders"):
+            orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5", fetchall=True)
+            if orders:
+                lines = ["📦 সর্বশেষ অর্ডারসমূহ:"]
+                for o in orders:
+                    lines.append(f"\n#{o['id']} | {o['name']} | {o['total']}৳ | {o['status']}")
+                send_text(from_number, "\n".join(lines))
+            else:
+                send_text(from_number, "কোনো অর্ডার পাওয়া যায়নি।")
+            return
+
+        if cmd.lower().startswith("stats"):
+            stats = get_dashboard_stats()
+            send_text(from_number,
+                f"📊 ড্যাশবোর্ড আপডেট:\n"
+                f"👤 মোট ইউজার: {stats['users']}\n"
+                f"📦 মোট অর্ডার: {stats['total_orders']}\n"
+                f"📅 আজকের অর্ডার: {stats['today_orders']}\n"
+                f"💰 মোট রেভেনিউ: {stats['revenue']}৳\n"
+                f"⏳ পেন্ডিং অর্ডার: {stats['pending']}"
+            )
+            return
+
+        if cmd.lower().startswith("broadcast"):
+            message = cmd[9:].strip()
+            sent, total = broadcast_message(message, exclude_admins=True)
+            send_text(from_number, f"📢 ব্রডকাস্ট সম্পন্ন! {sent}/{total} জনকে পাঠানো হয়েছে।")
+            return
+
+        if cmd.lower().startswith("coupon"):
+            parts = [p.strip() for p in cmd.split("|")]
+            if len(parts) >= 4:
+                code, val, ctype, maxuse = parts[1], int(parts[2]), parts[3], int(parts[4])
+                valid = parts[5] if len(parts) > 5 else None
+                disc_pct = val if ctype == "percent" else 0
+                disc_amt = val if ctype == "amount" else 0
+                db_query(
+                    "INSERT INTO coupons (code, discount_percent, discount_amount, max_uses, valid_until) VALUES (?, ?, ?, ?, ?)",
+                    (code.upper(), disc_pct, disc_amt, maxuse, valid), commit=True
+                )
+                send_text(from_number, f"🎫 কুপন '{code}' সফলভাবে তৈরি হয়েছে!")
+            else:
+                send_text(from_number, "ফরম্যাট: admin:coupon | CODE | value | percent/amount | max_uses | [YYYY-MM-DD]")
+            return
+
+        if cmd.lower().startswith("help"):
+            help_text = (
+                "🔧 *অ্যাডমিন কমান্ডসমূহ:*\n\n"
+                "🔹 admin:addproduct | নাম | দাম | বর্ণনা | [স্টক]\n"
+                "🔹 admin:knowledge [তথ্য]\n"
+                "🔹 admin:orders\n"
+                "🔹 admin:stats\n"
+                "🔹 admin:broadcast [মেসেজ]\n"
+                "🔹 admin:coupon | CODE | value | percent/amount | max_uses | [YYYY-MM-DD]\n"
+                "🔹 admin:help"
+            )
+            send_text(from_number, help_text)
+            return
+
+        send_text(from_number, "❌ অজানা অ্যাডমিন কমান্ড। সাহায্য পেতে লিখুন 'admin:help'")
+        return
+
+    # ─────────────────────────────────────────
+    # 🤖 সাধারণ কাস্টমার ও জেমিনি এআই লজিক
+    # ─────────────────────────────────────────
+    ai_reply = get_ai_answer(user_text, context)
+    
+    # পাঠাও ট্র্যাকিং ডাটা চেক
+    if "||TRACK_DATA||" in ai_reply:
+        match = re.search(r"\|\|TRACK_DATA\|\|({.*?})\|\|", ai_reply)
+        if match:
+            try:
+                track_json = json.loads(match.group(1).replace("'", '"'))
+                tracking_key = track_json.get("key")
+                status_msg = track_pathao_order(tracking_key)
+                ai_reply = re.sub(r"\|\|TRACK_DATA\|\|.*?\|\|", f"\n\n📦 *ট্র্যাকিং স্ট্যাটাস:* {status_msg}", ai_reply)
+            except Exception as e:
+                logger.error(f"Tracking parse error: {e}")
+
+    # অর্ডার ডাটা ডিটেকশন ও সেভ লজিক
+    if "||ORDER_DATA||" in ai_reply:
+        match = re.search(r"\|\|ORDER_DATA\|\|({.*?})\|\|", ai_reply)
+        if match:
+            try:
+                order_json = json.loads(match.group(1).replace("'", '"'))
+                # ডাটাবেসে অর্ডার পেন্ডিং হিসেবে সেভ করা
+                db_query(
+                    "INSERT INTO orders (phone, name, address, total, status) VALUES (?, ?, ?, ?, ?)",
+                    (from_number, order_json.get("name"), order_json.get("address"), 0, "pending"),
+                    commit=True
+                )
+                ai_reply = re.sub(r"\|\|ORDER_DATA\|\|.*?\|\|", "\n\n✅ *আপনার অর্ডারটি সিস্টেমে রেকর্ড করা হয়েছে!*", ai_reply)
+            except Exception as e:
+                logger.error(f"Order parse error: {e}")
+
+    send_text(from_number, ai_reply)
+
+# =====================================================================
+# 🕸️ ১০. মেটা ওয়েবহুক রুটস (Flask Routes)
+# =====================================================================
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    data = request.get_json()
-    try:
-        if "messages" in data["entry"][0]["changes"][0]["value"]:
-            value = data["entry"][0]["changes"][0]["value"]
-            msg = value["messages"][0]
-            msg_id = msg["id"]
-            from_number = msg["from"]
-            
-            if msg_id in global_processed_messages:
-                return "ok", 200
-                
-            global_processed_messages[msg_id] = True
-            if len(global_processed_messages) > 1000:
-                global_processed_messages.pop(next(iter(global_processed_messages)))
+    if request.method == "GET":
+        # মেটা ভেরিফিকেশন (Setup Step)
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        if mode and token:
+            if mode == "subscribe" and token == VERIFY_TOKEN:
+                logger.info("🎯 Webhook Verified successfully by Meta!")
+                return challenge, 200
+            return "Forbidden", 403
+        return "Not Found", 404
 
-            thread = Thread(target=process_async_webhook, args=(msg, from_number))
-            thread.start()
-                
-    except Exception as e:
-        print(f"WEBHOOK ERROR: {e}")
+    if request.method == "POST":
+        # মেসেজ রিসিভ করা ও সিকিউরিটি ভেরিফিকেশন
+        payload = request.data
+        signature = request.headers.get("X-Hub-Signature-256", "")
         
-    return "ok", 200
+        if not verify_meta_signature(payload, signature):
+            logger.warning("🔒 Invalid signature request blocked.")
+            return "Unauthorized", 401
 
+        data = request.json
+        if not data:
+            return "Bad Request", 400
+
+        # মেসেজ অবজেক্ট এক্সট্রাকশন
+        if "object" in data and data["object"] == "whatsapp_business_account":
+            for entry in data.get("entry", []):
+                for change in entry.get("changes", []):
+                    value = change.get("value", {})
+                    if "messages" in value:
+                        for msg in value.get("messages", []):
+                            from_number = msg.get("from")
+                            # ব্যাকগ্রাউন্ড থ্রেডে মেসেজটি হ্যান্ডেল করা যাতে মেটা ৩ সেকেন্ডে ২০০ ওকে পায়
+                            Thread(target=process_webhook_async, args=(msg, from_number)).start()
+            return "OK", 200
+        return "Not Found", 404
+
+@app.route("/", methods=["GET"])
+def index():
+    return f"🚀 {BUSINESS_NAME} WhatsApp Super Bot Engine is Running Stable.", 200
+
+# =====================================================================
+# 🚀 ১১. এপ্লিকেশন স্টার্টার
+# =====================================================================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    # ডেভেলপমেন্ট বা লোকাল রান করার জন্য পোর্ট ৫০০৫ সেট করা হলো
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5005)), debug=False)
