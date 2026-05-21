@@ -10,8 +10,8 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
 from threading import Thread, Lock
-from functools import wraps
 import requests
+import functools
 
 # =====================================================================
 # 0. LOGGING
@@ -154,6 +154,25 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            defaults = [
+                ("business_name", BUSINESS_NAME),
+                ("logo_url", ""),
+                ("primary_color", "#667eea"),
+                ("header_color", "#1f2937"),
+                ("sidebar_color", "#374151"),
+                ("accent_color", "#10b981"),
+                ("fb_catalog_id", os.environ.get("FB_CATALOG_ID", "")),
+                ("fb_access_token", os.environ.get("FB_ACCESS_TOKEN", "")),
+            ]
+            for k, v in defaults:
+                c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
             conn.commit()
             conn.close()
             logger.info("Database initialized: %s", DB_FILE)
@@ -1445,9 +1464,12 @@ INLINE ADMIN PANEL — pasted into SMS_BOT.py
 # 14. DYNAMIC ADMIN PANEL — INLINED
 # =====================================================================
 def login_required(f):
+    @functools.wraps(f)
     def decorated(*args, **kwargs):
         auth = request.authorization
-        if not auth or auth.username != ADMIN_PANEL_USER or auth.password != ADMIN_PANEL_PASS:
+        admin_user = os.environ.get("ADMIN_PANEL_USER", "admin")
+        admin_pass = os.environ.get("ADMIN_PANEL_PASS", "admin123")
+        if not auth or auth.username != admin_user or auth.password != admin_pass:
             return ('<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
         return f(*args, **kwargs)
     return decorated
@@ -1482,8 +1504,17 @@ def parse_fb_price(val):
 
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Panel | {{ settings.business_name }}</title>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Dhaka Admin</title>
+<link rel="apple-touch-icon" href="https://i.postimg.cc/Wz4hS7GP/logo.jpg">
+<link rel="icon" type="image/jpeg" href="https://i.postimg.cc/Wz4hS7GP/logo.jpg">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dhaka Admin">
+<meta name="theme-color" content="{{ settings.header_color }}">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937}
 .header{background:{{ settings.header_color }};color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
@@ -1516,7 +1547,7 @@ th{background:#f9fafb;font-weight:600;font-size:12px;text-transform:uppercase;co
 </head>
 <body>
 <div class="header"><h1>🔧 Admin Panel | {{ settings.business_name }}</h1>
-<div class="tabs"><button class="tab-btn active" onclick="showTab('dashboard')">📊 Dashboard</button><button class="tab-btn" onclick="showTab('products')">📦 Products</button><button class="tab-btn" onclick="showTab('orders')">🛒 Orders</button><button class="tab-btn" onclick="showTab('users')">👤 Users</button><button class="tab-btn" onclick="showTab('tools')">📢 Tools</button><button class="tab-btn" onclick="showTab('settings')">⚙️ Settings</button></div></div>
+<div class="tabs"><button class="tab-btn active" onclick="showTab('dashboard')">📊 Dashboard</button><button class="tab-btn" onclick="showTab('products')">📦 Products</button><button class="tab-btn" onclick="showTab('orders')">🛒 Orders</button><button class="tab-btn" onclick="showTab('users')">👤 Users</button><button class="tab-btn" onclick="showTab('messages')">💬 Messages</button><button class="tab-btn" onclick="showTab('tools')">📢 Tools</button><button class="tab-btn" onclick="showTab('settings')">⚙️ Settings</button></div></div>
 <div class="container">
 <div id="dashboard" class="section active">
 <div class="stats"><div class="stat-card"><h3>মোট অর্ডার</h3><div class="num">{{ stats.total_orders }}</div></div><div class="stat-card"><h3>মোট রেভেনিউ</h3><div class="num">৳{{ stats.revenue }}</div></div><div class="stat-card"><h3>মোট ইউজার</h3><div class="num">{{ stats.users }}</div></div><div class="stat-card"><h3>পেন্ডিং</h3><div class="num">{{ stats.pending }}</div></div></div>
@@ -1552,6 +1583,7 @@ th{background:#f9fafb;font-weight:600;font-size:12px;text-transform:uppercase;co
 <button class="btn btn-primary" onclick="saveSettings()">💾 সব Settings সেভ করুন</button>
 <div id="settingsResult" style="margin-top:12px"></div>
 </div></div></div>
+<div id="messages" class="section"><div class="card"><div class="card-header"><h2>💬 কাস্টমার মেসেজেস</h2><input type="text" id="msgSearch" class="search-box" placeholder="সার্চ..." onkeyup="filterMessages()"></div><div style="display:flex;height:500px"><div style="width:300px;border-right:1px solid #e5e7eb;overflow-y:auto" id="convList">{{CONVERSATION_LIST}}</div><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1;overflow-y:auto;padding:16px" id="chatBox"><div style="text-align:center;color:#9ca3af;padding-top:100px">কোনো কাস্টমার সিলেক্ট করুন</div></div><div style="padding:12px;border-top:1px solid #e5e7eb;display:flex;gap:8px"><input type="text" id="replyText" placeholder="মেসেজ লিখুন..." style="flex:1;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px" onkeypress="if(event.key==='Enter')sendReply()"><button class="btn btn-primary" onclick="sendReply()">পাঠান</button></div></div></div></div></div>
 </div>
 <div class="modal-overlay" id="productModal"><div class="modal"><h3>➕ প্রোডাক্ট</h3><input type="hidden" id="prodId"><div class="form-group"><label>নাম</label><input type="text" id="prodName"></div><div class="form-group"><label>দাম (৳)</label><input type="number" id="prodPrice"></div><div class="form-group"><label>স্টক</label><input type="number" id="prodStock" value="10"></div><div class="form-group"><label>বিবরণ</label><textarea id="prodDesc" rows="3"></textarea></div><div class="form-group"><label>ছবি URL</label><input type="text" id="prodImage" placeholder="https://..."></div><div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="saveProduct()">💾 সেভ</button><button class="btn" onclick="closeModal('productModal')" style="background:#e5e7eb">বাতিল</button></div></div></div>
 <div class="modal-overlay" id="importModal"><div class="modal"><h3>📥 CSV Import</h3><p style="font-size:13px;color:#6b7280;margin-bottom:8px">Format: নাম,দাম,স্টক,বিবরণ,ছবি_URL</p><textarea id="csvInput" rows="8" style="width:100%;font-family:monospace;font-size:13px" placeholder="পেস্টেল কুর্তি,1299,15,সুন্দর কুর্তি,https://..."></textarea><div id="importResult" style="margin:8px 0;font-size:14px"></div><div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="importCSV()">📥 Import</button><button class="btn" onclick="closeModal('importModal')" style="background:#e5e7eb">বাতিল</button></div></div></div>
@@ -1569,6 +1601,11 @@ function sendBroadcast(){const text=document.getElementById('broadcastText').val
 function importCSV(){const text=document.getElementById('csvInput').value.trim();if(!text)return;fetch('/admin/api/products/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv:text})}).then(r=>r.json()).then(d=>{document.getElementById('importResult').textContent=d.message||d.error||'Done';if(d.success)setTimeout(()=>{closeModal('importModal');location.reload()},1500)}).catch(err=>alert('❌ Error: '+err))}
 function updatePreview(){document.getElementById('previewHeader').style.background=document.getElementById('settingHeader').value;document.getElementById('previewBtn').style.background=document.getElementById('settingPrimary').value}
 function saveSettings(){const data={business_name:document.getElementById('settingName').value,logo_url:document.getElementById('settingLogo').value,primary_color:document.getElementById('settingPrimary').value,header_color:document.getElementById('settingHeader').value,accent_color:document.getElementById('settingAccent').value,fb_catalog_id:document.getElementById('settingFbCatalog').value,fb_access_token:document.getElementById('settingFbToken').value};fetch('/admin/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(r=>r.json()).then(d=>{document.getElementById('settingsResult').textContent=d.message||'সেভ হয়েছে!';if(d.success)setTimeout(()=>location.reload(),800)}).catch(err=>alert('❌ Error: '+err))}
+let activePhone='';
+function loadConversation(phone,name){activePhone=phone;document.querySelectorAll('.conv-row').forEach(el=>el.classList.remove('active'));const row=document.getElementById('conv-'+phone);if(row)row.classList.add('active');fetch('/admin/api/conversations/'+encodeURIComponent(phone)).then(r=>r.json()).then(d=>{let html='';d.messages.forEach(m=>{const cls=m.direction==='out'?'msg-out':'msg-in';html+='<div style="max-width:70%;padding:10px 14px;border-radius:14px;margin-bottom:8px;font-size:14px;line-height:1.5;'+(m.direction==='out'?'background:#667eea;color:#fff;align-self:flex-end;border-bottom-right-radius:4px;':'background:#fff;align-self:flex-start;border-bottom-left-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,.08)')+'">'+escapeHtml(m.content)+'<div style="font-size:11px;opacity:.7;margin-top:4px;text-align:right">'+m.time+'</div></div>';});document.getElementById('chatBox').innerHTML='<div style="display:flex;flex-direction:column;gap:8px;height:100%">'+html+'</div>';setTimeout(()=>{const box=document.getElementById('chatBox');box.scrollTop=box.scrollHeight},50);}).catch(err=>console.error(err))}
+function sendReply(){const text=document.getElementById('replyText').value.trim();if(!text||!activePhone)return;fetch('/admin/api/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:activePhone,message:text})}).then(r=>r.json()).then(d=>{if(d.success){document.getElementById('replyText').value='';loadConversation(activePhone,'')}else{alert(d.error||'Failed')}}).catch(err=>alert('❌ Error: '+err))}
+function filterMessages(){const q=document.getElementById('msgSearch').value.toLowerCase();document.querySelectorAll('.conv-row').forEach(el=>{const t=el.textContent.toLowerCase();el.style.display=t.includes(q)?'block':'none'})}
+function escapeHtml(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
 </script>
 </body></html>"""
 
@@ -1593,7 +1630,84 @@ def admin_dashboard():
         if not products:
             db_query("INSERT INTO products (name, price, description, stock, image_url) VALUES (?, ?, ?, ?, ?)", ("পেস্টেল কুর্তি", 1299, "সুন্দর পেস্টেল কালার কুর্তি, প্রিমিয়াম কোয়ালিটি ফেব্রিক", 15, ""), commit=True)
             products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
-        return render_template_string(ADMIN_HTML, stats=stats, products=products, orders=orders, users=users_list, recent_orders=recent_orders, settings=settings)
+        html = ADMIN_HTML
+        html = html.replace("{{ settings.business_name }}", settings.get("business_name", "Dhaka Exclusive"))
+        html = html.replace("{{ settings.header_color }}", settings.get("header_color", "#1f2937"))
+        html = html.replace("{{ settings.primary_color }}", settings.get("primary_color", "#667eea"))
+        html = html.replace("{{ settings.accent_color }}", settings.get("accent_color", "#10b981"))
+        html = html.replace("{{ settings.logo_url }}", settings.get("logo_url", ""))
+        html = html.replace("{{ settings.fb_catalog_id }}", settings.get("fb_catalog_id", ""))
+        html = html.replace("{{ settings.fb_access_token }}", settings.get("fb_access_token", ""))
+        html = html.replace("{{ stats.total_orders }}", str(stats["total_orders"]))
+        html = html.replace("{{ stats.revenue }}", str(stats["revenue"]))
+        html = html.replace("{{ stats.users }}", str(stats["users"]))
+        html = html.replace("{{ stats.pending }}", str(stats["pending"]))
+        
+        # Build recent orders rows
+        recent_rows = ""
+        for o in recent_orders:
+            bg = "#d1fae5" if o.get("status") == "delivered" else ("#fee2e2" if o.get("status") == "cancelled" else "#fef3c7")
+            recent_rows += f"<tr><td>#{o['id']}</td><td>{o.get('name') or 'N/A'}</td><td>{o['phone']}</td><td>৳{o['total']}</td><td><span style='padding:4px 8px;border-radius:6px;background:{bg};font-size:12px'>{o['status']}</span></td></tr>"
+        html = html.replace("{% for o in recent_orders %}", "")
+        html = html.replace("{% endfor %}", "")
+        # Remove the template loop line and insert rows
+        import re
+        html = re.sub(r'<tr>.*recent_orders.*?</tr>', recent_rows, html, flags=re.DOTALL)
+        
+        # Build products rows
+        prod_rows = ""
+        for p in products:
+            name_esc = (p.get('name') or '').replace("'", "\\'")
+            desc_esc = (p.get('description') or '').replace("'", "\\'")
+            pid = p['id']
+            prod_rows += "<tr><td>#" + str(pid) + "</td><td>" + str(p['name']) + "</td><td>৳" + str(p['price']) + "</td><td>" + str(p['stock']) + "</td><td><button class='btn btn-sm btn-success' onclick=\"editProduct(" + str(pid) + ",'" + name_esc + "'," + str(p['price']) + "," + str(p['stock']) + ",'" + desc_esc + "')\">✏️</button> <button class='btn btn-sm btn-danger' onclick='deleteProduct(" + str(pid) + ")'>🗑️</button></td></tr>"
+        html = html.replace("{% for p in products %}", "")
+        html = html.replace("{% endfor %}", "")
+        html = re.sub(r'<tr>.*products.*?</tr>', prod_rows, html, flags=re.DOTALL)
+        
+        # Build orders rows
+        order_rows = ""
+        for o in orders:
+            oid = o['id']
+            status = o.get('status', 'pending')
+            sel = lambda v: "selected" if status == v else ""
+            order_rows += "<tr data-phone='" + str(o['phone']) + "' data-name='" + str(o.get('name') or '') + "'><td>#" + str(oid) + "</td><td>" + str(o.get('name') or 'N/A') + "</td><td>" + str(o['phone']) + "</td><td>" + str(o.get('address') or 'N/A') + "</td><td>৳" + str(o['total']) + "</td><td><select onchange=\"updateOrderStatus(" + str(oid) + ",this.value)\" style='padding:4px 8px;border-radius:6px;border:1px solid #d1d5db'><option value='pending' " + sel('pending') + ">Pending</option><option value='created' " + sel('created') + ">Created</option><option value='confirmed' " + sel('confirmed') + ">Confirmed</option><option value='shipped' " + sel('shipped') + ">Shipped</option><option value='delivered' " + sel('delivered') + ">Delivered</option><option value='cancelled' " + sel('cancelled') + ">Cancelled</option></select></td><td><button class='btn btn-sm btn-danger' onclick='deleteOrder(" + str(oid) + ")'>🗑️</button></td></tr>"
+        html = html.replace("{% for o in orders %}", "")
+        html = html.replace("{% endfor %}", "")
+        html = re.sub(r'<tr>.*orders.*?</tr>', order_rows, html, flags=re.DOTALL)
+        
+        # Build users rows
+        user_rows = ""
+        for u in users_list:
+            user_rows += f"<tr><td>{u['phone']}</td><td>{u.get('name') or 'N/A'}</td><td>{u['total_orders']}</td><td>৳{u['total_spent']}</td></tr>"
+        html = html.replace("{% for u in users %}", "")
+        html = html.replace("{% endfor %}", "")
+        html = re.sub(r'<tr>.*users.*?</tr>', user_rows, html, flags=re.DOTALL)
+        
+        # Build conversation list for Messages tab
+        conv_rows = ""
+        msg_rows = db_query("""
+            SELECT from_number as phone, content, msg_type, created_at,
+                   ROW_NUMBER() OVER (PARTITION BY from_number ORDER BY created_at DESC) as rn
+            FROM messages ORDER BY created_at DESC
+        """, fetchall=True) or []
+        seen_conv = set()
+        for r in msg_rows:
+            phone = r["phone"]
+            if phone in seen_conv:
+                continue
+            seen_conv.add(phone)
+            user = db_query("SELECT name FROM users WHERE phone = ?", (phone,), fetchone=True)
+            name = user["name"] if user else None
+            display = name or phone
+            last_msg = (r["content"] or "")[:40]
+            last_time = r["created_at"][11:16] if r["created_at"] else ""
+            conv_rows += "<div class='conv-row' id='conv-" + phone + "' onclick=\"loadConversation('" + phone + "','" + (name or "") + "')\" style='padding:12px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer;transition:.2s'><div style='font-weight:600;font-size:14px;color:#111827'>" + display + "</div><div style='font-size:12px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + last_msg + "</div><div style='font-size:11px;color:#9ca3af;margin-top:2px'>" + last_time + "</div></div>"
+        if not conv_rows:
+            conv_rows = "<div style='padding:20px;text-align:center;color:#9ca3af'>কোনো মেসেজ নেই</div>"
+        html = html.replace("{{CONVERSATION_LIST}}", conv_rows)
+        
+        return html
     except Exception as e:
         logger.exception("Admin dashboard error")
         return f"<h3>Admin Panel Error:</h3><pre>{str(e)}</pre>", 500
@@ -1712,6 +1826,45 @@ def admin_sync_catalog():
             db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, stock, desc, image), commit=True)
             added += 1
     return jsonify({"success": True, "added": added, "updated": updated, "message": f"✅ {added} নতুন + {updated} আপডেট = মোট {added+updated} প্রোডাক্ট সিঙ্ক হয়েছে!"})
+
+
+# =====================================================================
+# 15. ADMIN API — CONVERSATIONS & REPLY
+# =====================================================================
+
+@app.route("/admin/api/conversations/<phone>", methods=["GET"])
+@login_required
+def admin_get_conversation(phone):
+    try:
+        msgs = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY created_at ASC", (phone,), fetchall=True) or []
+        messages = []
+        for m in msgs:
+            messages.append({
+                "content": m["content"] or "",
+                "direction": "out" if (m["msg_type"] == "out" or m.get("direction") == "out") else "in",
+                "time": m["created_at"][11:16] if m["created_at"] else ""
+            })
+        return jsonify({"success": True, "messages": messages})
+    except Exception as e:
+        logger.exception("Conversation API error")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/admin/api/reply", methods=["POST"])
+@login_required
+def admin_reply():
+    data = request.get_json() or {}
+    phone = data.get("phone", "").strip()
+    msg = data.get("message", "").strip()
+    if not phone or not msg:
+        return jsonify({"error": "Phone or message missing"}), 400
+    try:
+        send_text(phone, msg)
+        db_query("INSERT INTO messages (msg_id, from_number, content, msg_type) VALUES (?, ?, ?, ?)",
+                 (f"admin_{int(time.time())}", phone, msg, "out"), commit=True)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.exception("Admin reply error")
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
