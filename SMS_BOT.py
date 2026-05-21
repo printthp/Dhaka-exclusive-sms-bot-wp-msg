@@ -8,11 +8,10 @@ import hmac
 import hashlib
 import logging
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
-from google import genai
-from google.genai import types
-from threading import Thread, Lock, Timer
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
+from threading import Thread, Lock
 import requests
+
 
 # =====================================================================
 # 🔧 ০. লগিং
