@@ -106,6 +106,7 @@ def get_all_settings():
 
 
 def parse_fb_price(price_str):
+    """Parse Facebook price like '1299.00 BDT' or '1299 BDT' -> int"""
     if not price_str:
         return 0
     match = re.search(r"(\d+)", str(price_str).replace(",", ""))
@@ -113,6 +114,7 @@ def parse_fb_price(price_str):
 
 
 def fetch_facebook_catalog(catalog_id, access_token):
+    """Fetch products from Facebook Commerce Catalog"""
     if not catalog_id or not access_token:
         return None, "Facebook Catalog ID বা Access Token নেই"
 
@@ -246,6 +248,7 @@ tr:hover { background: #f9fafb; }
 
 <div class="container">
 
+<!-- DASHBOARD -->
 <div class="section active" id="dashboard">
     <div class="stats-grid">
         <div class="stat-card orders"><h3>মোট অর্ডার</h3><div class="value">{{ stats.total_orders }}</div></div>
@@ -273,6 +276,7 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<!-- PRODUCTS -->
 <div class="section" id="products">
     <div class="fb-sync-box">
         <h3>📘 Facebook/Instagram Catalog Sync</h3>
@@ -291,22 +295,15 @@ tr:hover { background: #f9fafb; }
         </div>
         <div class="table-wrap">
             <table>
-                <tr><th>ID</th><th>ছবি</th><th>নাম</th><th>দাম</th><th>স্টক</th><th>অ্যাকশন</th></tr>
+                <tr><th>ID</th><th>নাম</th><th>দাম</th><th>স্টক</th><th>অ্যাকশন</th></tr>
                 {% for p in products %}
                 <tr>
                     <td>#{{ p.id }}</td>
-                    <td>
-                        {% if p.image_url %}
-                        <img src="{{ p.image_url }}" style="width:50px;height:50px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;">
-                        {% else %}
-                        <div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;">📦</div>
-                        {% endif %}
-                    </td>
                     <td>{{ p.name }}</td>
                     <td>৳{{ p.price }}</td>
                     <td>{{ p.stock }}</td>
                     <td>
-                        <button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }}, '{{ p.name|replace("'", "\\'") }}', {{ p.price }}, {{ p.stock }}, '{{ p.description|replace("'", "\\'") }}', '{{ p.image_url|replace("'", "\\'") if p.image_url else '' }}')">✏️</button>
+                        <button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }}, '{{ p.name|replace("'", "\\'") }}', {{ p.price }}, {{ p.stock }}, '{{ p.description|replace("'", "\\'") }}')">✏️</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteProduct({{ p.id }})">🗑️</button>
                     </td>
                 </tr>
@@ -316,6 +313,7 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<!-- ORDERS -->
 <div class="section" id="orders">
     <div class="card">
         <div class="card-header">
@@ -350,6 +348,7 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<!-- USERS -->
 <div class="section" id="users">
     <div class="card">
         <div class="card-header"><h2>👤 কাস্টমার লিস্ট</h2></div>
@@ -369,6 +368,7 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<!-- TOOLS -->
 <div class="section" id="tools">
     <div class="card">
         <div class="card-header"><h2>📢 ব্রডকাস্ট মেসেজ</h2></div>
@@ -383,6 +383,7 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<!-- SETTINGS -->
 <div class="section" id="settings">
     <div class="card">
         <div class="card-header"><h2>⚙️ Appearance & Branding</h2></div>
@@ -445,15 +446,16 @@ tr:hover { background: #f9fafb; }
 
 </div>
 
+<!-- Import Modal -->
 <div class="modal-overlay" id="importModal">
     <div class="modal">
         <div class="modal-header"><h3>📥 Bulk CSV Import</h3><button class="modal-close" onclick="closeModal('importModal')">&times;</button></div>
         <div class="modal-body">
             <div class="form-group">
-                <label>CSV Data (নাম, দাম, স্টক, বর্ণনা, ছবিURL)</label>
+                <label>CSV Data (নাম, দাম, স্টক, বর্ণনা)</label>
                 <textarea id="csvInput" rows="10" placeholder="প্রতি লাইনে একটা প্রোডাক্ট:
-পেস্টেল কুর্তি, 1299, 15, সুন্দর পেস্টেল কালার, https://example.com/img1.jpg
-ব্ল্যাক শার্ট, 999, 20, ক্লাসিক ব্ল্যাক, https://example.com/img2.jpg"></textarea>
+পেস্টেল কুর্তি, 1299, 15, সুন্দর পেস্টেল কালার
+ব্ল্যাক শার্ট, 999, 20, ক্লাসিক ব্ল্যাক"></textarea>
             </div>
             <button class="btn btn-success" onclick="importCSV()">📥 ইমপোর্ট করুন</button>
             <div id="importResult" style="margin-top:12px;font-size:14px;"></div>
@@ -461,6 +463,7 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<!-- Product Modal -->
 <div class="modal-overlay" id="productModal">
     <div class="modal">
         <div class="modal-header"><h3>📦 প্রোডাক্ট যোগ/এডিট</h3><button class="modal-close" onclick="closeModal('productModal')">&times;</button></div>
@@ -472,7 +475,6 @@ tr:hover { background: #f9fafb; }
                 <div class="form-group"><label>স্টক</label><input type="number" id="productStock" placeholder="10"></div>
             </div>
             <div class="form-group"><label>বর্ণনা</label><textarea id="productDesc" rows="3" placeholder="প্রোডাক্টের বর্ণনা..."></textarea></div>
-            <div class="form-group"><label>ছবির লিংক (Image URL)</label><input type="text" id="productImage" placeholder="https://...jpg"></div>
             <button class="btn btn-primary" onclick="saveProduct()">💾 সেভ করুন</button>
         </div>
     </div>
@@ -488,13 +490,12 @@ function showSection(id) {
 function openModal(id) { document.getElementById(id).classList.add('active'); }
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
-function editProduct(id, name, price, stock, desc, image) {
+function editProduct(id, name, price, stock, desc) {
     document.getElementById('productId').value = id;
     document.getElementById('productName').value = name;
     document.getElementById('productPrice').value = price;
     document.getElementById('productStock').value = stock;
     document.getElementById('productDesc').value = desc;
-    document.getElementById('productImage').value = image || '';
     openModal('productModal');
 }
 
@@ -504,8 +505,7 @@ function saveProduct() {
         name: document.getElementById('productName').value,
         price: parseInt(document.getElementById('productPrice').value),
         stock: parseInt(document.getElementById('productStock').value),
-        description: document.getElementById('productDesc').value,
-        image_url: document.getElementById('productImage').value
+        description: document.getElementById('productDesc').value
     };
     fetch('/admin/api/product', {
         method: 'POST',
