@@ -157,7 +157,6 @@ def init_db():
             conn.commit()
             conn.close()
             logger.info("Database initialized: %s", DB_FILE)
-            ensure_employee_tables()
     except Exception as e:
         logger.error("Database init failed: %s", e)
         raise
@@ -476,6 +475,10 @@ def ensure_employee_tables():
             conn.close()
     except Exception as e:
         logger.error("ensure_employee_tables: %s", e)
+
+
+# Run employee table migration after DB init
+ensure_employee_tables()
 
 
 def hash_pwd(text):
