@@ -220,7 +220,10 @@ tr:hover { background: #f9fafb; }
     <div class="card">
         <div class="card-header">
             <h2>📦 প্রোডাক্ট ম্যানেজমেন্ট</h2>
-            <button class="btn btn-primary" onclick="openModal('productModal')">➕ নতুন প্রোডাক্ট</button>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-success" onclick="openModal('importModal')">📥 Bulk CSV</button>
+                <button class="btn btn-primary" onclick="openModal('productModal')">➕ নতুন প্রোডাক্ট</button>
+            </div>
         </div>
         <div class="table-wrap">
             <table>
@@ -356,6 +359,28 @@ tr:hover { background: #f9fafb; }
 
 </div>
 
+<!-- CSV Import Modal -->
+<div class="modal-overlay" id="importModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>📥 Bulk CSV Import</h3>
+            <button class="modal-close" onclick="closeModal('importModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>CSV Data (নাম, দাম, স্টক, বর্ণনা)</label>
+                <textarea id="csvInput" rows="10" placeholder="প্রতি লাইনে একটা প্রোডাক্ট:
+পেস্টেল কুর্তি, 1299, 15, সুন্দর পেস্টেল কালার
+ব্ল্যাক শার্ট, 999, 20, ক্লাসিক ব্ল্যাক
+..."></textarea>
+            </div>
+            <button class="btn btn-success" onclick="importCSV()">📥 ইমপোর্ট করুন</button>
+            <div id="importResult" style="margin-top:12px;font-size:14px;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Product Modal -->
 <div class="modal-overlay" id="productModal">
     <div class="modal">
         <div class="modal-header">
@@ -445,6 +470,19 @@ function sendBroadcast() {
         body: JSON.stringify({message: text})
     }).then(r => r.json()).then(d => {
         document.getElementById('broadcastResult').textContent = d.message;
+    });
+}
+
+function importCSV() {
+    const text = document.getElementById('csvInput').value.trim();
+    if (!text) return;
+    fetch('/admin/api/products/import', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({csv: text})
+    }).then(r => r.json()).then(d => {
+        document.getElementById('importResult').textContent = d.message || d.error || 'Done';
+        if (d.success) setTimeout(() => { closeModal('importModal'); location.reload(); }, 1500);
     });
 }
 
@@ -582,5 +620,43 @@ def init_admin_routes(app):
     @login_required
     def admin_get_settings():
         return jsonify(get_all_settings())
+    
+    @app.route("/admin/api/products/import", methods=["POST"])
+    @login_required
+    def admin_bulk_import():
+        data = request.get_json() or {}
+        csv_text = data.get("csv", "").strip()
+        if not csv_text:
+            return jsonify({"error": "Empty CSV"}), 400
+        
+        lines = csv_text.splitlines()
+        if not lines:
+            return jsonify({"error": "No lines"}), 400
+        
+        added = 0
+        skipped = 0
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 2:
+                skipped += 1
+                continue
+            name = parts[0]
+            try:
+                price = int(parts[1])
+            except:
+                skipped += 1
+                continue
+            stock = int(parts[2]) if len(parts) > 2 and parts[2].strip() else 10
+            desc = parts[3] if len(parts) > 3 else ""
+            try:
+                db_query("INSERT INTO products (name, price, stock, description) VALUES (?, ?, ?, ?)",
+                         (name, price, stock, desc), commit=True)
+                added += 1
+            except Exception as e:
+                skipped += 1
+        return jsonify({"success": True, "added": added, "skipped": skipped, "message": f"{added} প্রোডাক্ট যোগ হয়েছে, {skipped} স্কিপ"})
     
     print("✅ Dynamic Admin Panel initialized at /admin")
