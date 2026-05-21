@@ -12,30 +12,33 @@ import requests
 from datetime import datetime
 from flask import request, render_template_string, jsonify
 from functools import wraps
+from threading import Lock
 
 DB_FILE = "bot_v3.db"
+admin_db_lock = Lock()
 
 ADMIN_PANEL_USER = os.environ.get("ADMIN_PANEL_USER", "admin")
 ADMIN_PANEL_PASS = os.environ.get("ADMIN_PANEL_PASS", "admin123")
 
 
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    try:
-        c.execute(query, params)
-        if commit:
-            conn.commit(); conn.close(); return True
-        if fetchone:
-            row = c.fetchone(); conn.close(); return dict(row) if row else None
-        if fetchall:
-            rows = c.fetchall(); conn.close(); return [dict(r) for r in rows]
-        conn.close(); return None
-    except Exception as e:
-        print(f"DB Error: {e}")
-        conn.close()
-        raise
+    with admin_db_lock:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        try:
+            c.execute(query, params)
+            if commit:
+                conn.commit(); conn.close(); return True
+            if fetchone:
+                row = c.fetchone(); conn.close(); return dict(row) if row else None
+            if fetchall:
+                rows = c.fetchall(); conn.close(); return [dict(r) for r in rows]
+            conn.close(); return None
+        except Exception as e:
+            print(f"DB Error: {e}")
+            conn.close()
+            raise
 
 
 def login_required(f):
@@ -43,7 +46,7 @@ def login_required(f):
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or auth.username != ADMIN_PANEL_USER or auth.password != ADMIN_PANEL_PASS:
-            return ('<<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+            return ('<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
         return f(*args, **kwargs)
     return decorated
 
@@ -303,7 +306,7 @@ tr:hover { background: #f9fafb; }
                     <td>৳{{ p.price }}</td>
                     <td>{{ p.stock }}</td>
                     <td>
-                        <button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }}, '{{ p.name|replace("'", "\\'") }}', {{ p.price }}, {{ p.stock }}, '{{ p.description|replace("'", "\\'") }}')">✏️</button>
+                        <button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }}, '{{ (p.name or '')|replace("'", "\\'") }}', {{ p.price }}, {{ p.stock }}, '{{ (p.description or '')|replace("'", "\\'") }}')">✏️</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteProduct({{ p.id }})">🗑️</button>
                     </td>
                 </tr>
@@ -511,12 +514,12 @@ function saveProduct() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
-    }).then(() => { closeModal('productModal'); location.reload(); });
+    }).then(() => { closeModal('productModal'); location.reload(); }).catch(err => alert('❌ Error: ' + err));
 }
 
 function deleteProduct(id) {
     if (!confirm('ডিলিট করবেন?')) return;
-    fetch('/admin/api/product/' + id, {method: 'DELETE'}).then(() => location.reload());
+    fetch('/admin/api/product/' + id, {method: 'DELETE'}).then(() => location.reload()).catch(err => alert('❌ Error: ' + err));
 }
 
 function updateOrderStatus(id, status) {
@@ -524,12 +527,12 @@ function updateOrderStatus(id, status) {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({status: status})
-    }).then(r => r.json()).then(d => alert(d.message || 'Updated'));
+    }).then(r => r.json()).then(d => alert(d.message || 'Updated')).catch(err => alert('❌ Error: ' + err));
 }
 
 function deleteOrder(id) {
     if (!confirm('অর্ডার ডিলিট করবেন?')) return;
-    fetch('/admin/api/order/' + id, {method: 'DELETE'}).then(() => location.reload());
+    fetch('/admin/api/order/' + id, {method: 'DELETE'}).then(() => location.reload()).catch(err => alert('❌ Error: ' + err));
 }
 
 function searchOrders() {
@@ -550,7 +553,7 @@ function sendBroadcast() {
         body: JSON.stringify({message: text})
     }).then(r => r.json()).then(d => {
         document.getElementById('broadcastResult').textContent = d.message;
-    });
+    }).catch(err => alert('❌ Error: ' + err));
 }
 
 function importCSV() {
@@ -563,7 +566,7 @@ function importCSV() {
     }).then(r => r.json()).then(d => {
         document.getElementById('importResult').textContent = d.message || d.error || 'Done';
         if (d.success) setTimeout(() => { closeModal('importModal'); location.reload(); }, 1500);
-    });
+    }).catch(err => alert('❌ Error: ' + err));
 }
 
 function syncFacebookCatalog() {
@@ -607,7 +610,7 @@ function saveSettings() {
     }).then(r => r.json()).then(d => {
         document.getElementById('settingsResult').textContent = d.message || 'সেভ হয়েছে! পেজ reload করুন।';
         if (d.success) setTimeout(() => location.reload(), 800);
-    });
+    }).catch(err => alert('❌ Error: ' + err));
 }
 </script>
 
@@ -634,16 +637,18 @@ def init_admin_routes(app):
     @app.route("/admin", methods=["GET"])
     @login_required
     def admin_dashboard():
-        stats = get_dashboard_stats()
-        products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
-        orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
-        users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
-        recent_orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
-        settings = get_all_settings()
-
-        return render_template_string(make_admin_html(settings),
-            stats=stats, products=products, orders=orders, users=users,
-            recent_orders=recent_orders, settings=settings)
+        try:
+            stats = get_dashboard_stats()
+            products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+            orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
+            users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
+            recent_orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
+            settings = get_all_settings()
+            return render_template_string(make_admin_html(settings),
+                stats=stats, products=products, orders=orders, users=users,
+                recent_orders=recent_orders, settings=settings)
+        except Exception as e:
+            return f"<h3>Admin Panel Error:</h3><pre>{str(e)}</pre>", 500
 
     @app.route("/admin/api/product", methods=["POST"])
     @login_required
@@ -808,5 +813,15 @@ def init_admin_routes(app):
             "updated": updated,
             "message": f"✅ {added} নতুন + {updated} আপডেট = মোট {added+updated} প্রোডাক্ট সিঙ্ক হয়েছে!"
         })
+
+    # Seed a demo product if table is empty so panel isn't blank on first run
+    try:
+        has_products = db_query("SELECT 1 FROM products LIMIT 1", fetchone=True)
+        if not has_products:
+            db_query("INSERT INTO products (name, price, description, stock, image_url) VALUES (?, ?, ?, ?, ?)",
+                     ("পেস্টেল কুর্তি", 1299, "সুন্দর পেস্টেল কালার কুর্তি, প্রিমিয়াম কোয়ালিটি ফেব্রিক", 15, ""), commit=True)
+            print("✅ Demo product seeded")
+    except Exception as e:
+        print(f"Seed error: {e}")
 
     print("✅ Dynamic Admin Panel initialized at /admin")
