@@ -49,7 +49,6 @@ BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
 
 
-
 # =====================================================================
 # 1.5 GEMINI
 # =====================================================================
@@ -1449,7 +1448,9 @@ INLINE ADMIN PANEL — pasted into SMS_BOT.py
 def login_required(f):
     def decorated(*args, **kwargs):
         auth = request.authorization
-        if not auth or auth.username != ADMIN_PANEL_USER or auth.password != ADMIN_PANEL_PASS:
+        admin_user = os.environ.get("ADMIN_PANEL_USER", "admin")
+        admin_pass = os.environ.get("ADMIN_PANEL_PASS", "admin123")
+        if not auth or auth.username != admin_user or auth.password != admin_pass:
             return ('<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
         return f(*args, **kwargs)
     decorated.__name__ = f.__name__
@@ -1720,5 +1721,7 @@ def admin_sync_catalog():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
+
 
 
