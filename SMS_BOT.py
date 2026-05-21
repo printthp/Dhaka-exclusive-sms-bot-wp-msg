@@ -1445,7 +1445,6 @@ INLINE ADMIN PANEL — pasted into SMS_BOT.py
 # 14. DYNAMIC ADMIN PANEL — INLINED
 # =====================================================================
 def login_required(f):
-    @wraps(f)
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or auth.username != ADMIN_PANEL_USER or auth.password != ADMIN_PANEL_PASS:
