@@ -51,10 +51,6 @@ BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
 client = genai.Client(api_key=GEMINI_KEY)
 MODEL_NAME = "gemini-2.5-flash"
 
-
-
-
-=====
 # =====================================================================
 # 1.5 GEMINI
 # =====================================================================
