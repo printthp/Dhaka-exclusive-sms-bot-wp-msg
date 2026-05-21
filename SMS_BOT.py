@@ -1502,7 +1502,17 @@ def parse_fb_price(val):
 
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Dhaka Exclusive</title>
+<link rel="apple-touch-icon" href="https://www.dhakaexclusive.org/wp-content/uploads/2023/10/Dhaka-Exclusive-Logo-1.png">
+<link rel="icon" type="image/png" href="https://www.dhakaexclusive.org/wp-content/uploads/2023/10/Dhaka-Exclusive-Logo-1.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dhaka Exclusive">
+<meta name="theme-color" content="{{ settings.header_color }}">
 <title>Admin Panel | {{ settings.business_name }}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937}
