@@ -48,7 +48,6 @@ PATHAO_MERCHANT_PASSWORD = os.environ.get("PATHAO_MERCHANT_PASSWORD", "trustedaA
 BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
 
-
 # =====================================================================
 # 1.5 GEMINI
 # =====================================================================
@@ -155,6 +154,25 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            defaults = [
+                ("business_name", BUSINESS_NAME),
+                ("logo_url", ""),
+                ("primary_color", "#667eea"),
+                ("header_color", "#1f2937"),
+                ("sidebar_color", "#374151"),
+                ("accent_color", "#10b981"),
+                ("fb_catalog_id", os.environ.get("FB_CATALOG_ID", "")),
+                ("fb_access_token", os.environ.get("FB_ACCESS_TOKEN", "")),
+            ]
+            for k, v in defaults:
+                c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
             conn.commit()
             conn.close()
             logger.info("Database initialized: %s", DB_FILE)
