@@ -254,6 +254,7 @@ def verify_meta_signature(payload, signature):
 # =====================================================================
 # 5. PATHAO API
 # =====================================================================
+
 def api_post_retry(url, payload, headers, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -272,22 +273,31 @@ def api_post_retry(url, payload, headers, max_retries=3):
 def get_pathao_token():
     if not all([PATHAO_CLIENT_ID, PATHAO_CLIENT_SECRET, PATHAO_MERCHANT_EMAIL, PATHAO_MERCHANT_PASSWORD]):
         return None, "Pathao credentials missing"
+    
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/issue-token"
     headers = {
-        "accept": "application/json", "content-type": "application/json",
-        "X-API-KEY": PATHAO_CLIENT_ID, "X-SECRET-KEY": PATHAO_CLIENT_SECRET
+        "accept": "application/json",
+        "content-type": "application/json"
     }
     payload = {
-        "client_id": PATHAO_CLIENT_ID, "client_secret": PATHAO_CLIENT_SECRET,
-        "username": PATHAO_MERCHANT_EMAIL, "password": PATHAO_MERCHANT_PASSWORD
+        "client_id": PATHAO_CLIENT_ID,
+        "client_secret": PATHAO_CLIENT_SECRET,
+        "username": PATHAO_MERCHANT_EMAIL,
+        "password": PATHAO_MERCHANT_PASSWORD,
+        "grant_type": "password"
     }
-    res = api_post_retry(url, payload, headers)
-    if not res:
-        return None, "Network error"
-    data = res.json()
-    if res.status_code == 200 and data.get("status") == 200:
-        return data.get("token"), None
-    return None, data.get("message", res.text)
+    
+    try:
+        res = requests.post(url, json=payload, headers=headers, timeout=15)
+        data = res.json()
+        if res.status_code == 200:
+            token = data.get("token") or data.get("access_token") or data.get("data", {}).get("token")
+            if token:
+                return token, None
+            return None, data.get("message", "Token not found in response")
+        return None, data.get("message", f"HTTP {res.status_code}: {res.text[:100]}")
+    except Exception as e:
+        return None, str(e)
 
 def get_pathao_cities():
     token, _ = get_pathao_token()
