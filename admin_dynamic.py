@@ -6,8 +6,8 @@ Use: from admin_dynamic import init_admin_routes
 import os
 import sqlite3
 import json
-from datetime import datetime, timedelta
-from flask import request, render_template_string, jsonify, redirect
+from datetime import datetime
+from flask import request, render_template_string, jsonify
 from functools import wraps
 
 DB_FILE = "bot_v3.db"
@@ -42,29 +42,76 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-ADMIN_HTML = """
+def init_settings_db():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    defaults = [
+        ("business_name", os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")),
+        ("logo_url", ""),
+        ("primary_color", "#667eea"),
+        ("header_color", "#1f2937"),
+        ("sidebar_color", "#374151"),
+        ("accent_color", "#10b981"),
+    ]
+    for k, v in defaults:
+        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+    conn.commit()
+    conn.close()
+
+init_settings_db()
+
+def get_setting(key, default=""):
+    row = db_query("SELECT value FROM settings WHERE key = ?", (key,), fetchone=True)
+    return row["value"] if row else default
+
+def set_setting(key, value):
+    db_query("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+             (key, value), commit=True)
+
+def get_all_settings():
+    rows = db_query("SELECT * FROM settings", fetchall=True) or []
+    return {r["key"]: r["value"] for r in rows}
+
+def make_admin_html(settings):
+    primary = settings.get("primary_color", "#667eea")
+    header = settings.get("header_color", "#1f2937")
+    accent = settings.get("accent_color", "#10b981")
+    logo = settings.get("logo_url", "")
+    name = settings.get("business_name", "Dhaka Exclusive")
+    
+    return """
 <!DOCTYPE html>
 <html lang="bn">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Panel | Dhaka Exclusive</title>
+<title>Admin Panel | """ + name + """</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', sans-serif; background: #f3f4f6; color: #1f2937; }
-.header { background: #1f2937; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 60px; }
+.header { background: """ + header + """; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 60px; }
+.header .logo-area { display: flex; align-items: center; gap: 12px; }
+.header .logo-area img { height: 36px; border-radius: 6px; background: white; padding: 2px; }
 .header h1 { font-size: 20px; }
 .nav { display: flex; gap: 8px; }
-.nav-btn { padding: 8px 16px; background: #374151; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
-.nav-btn.active { background: #667eea; }
+.nav-btn { padding: 8px 16px; background: rgba(255,255,255,0.15); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.nav-btn:hover { background: rgba(255,255,255,0.25); }
+.nav-btn.active { background: """ + primary + """; }
 .container { margin-top: 60px; padding: 24px; max-width: 1400px; margin-left: auto; margin-right: auto; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
 .stat-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .stat-card h3 { font-size: 13px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px; }
 .stat-card .value { font-size: 28px; font-weight: 700; color: #1f2937; }
-.stat-card.orders { border-left: 4px solid #667eea; }
-.stat-card.revenue { border-left: 4px solid #10b981; }
+.stat-card.orders { border-left: 4px solid """ + primary + """; }
+.stat-card.revenue { border-left: 4px solid """ + accent + """; }
 .stat-card.users { border-left: 4px solid #f59e0b; }
 .stat-card.pending { border-left: 4px solid #ef4444; }
 
@@ -75,7 +122,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #f3f4f6; color: #1f2937;
 .card-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
 .card-header h2 { font-size: 18px; }
 .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
-.btn-primary { background: #667eea; color: white; }
+.btn-primary { background: """ + primary + """; color: white; }
 .btn-success { background: #10b981; color: white; }
 .btn-danger { background: #ef4444; color: white; }
 .btn-sm { padding: 6px 12px; font-size: 12px; }
@@ -91,16 +138,16 @@ tr:hover { background: #f9fafb; }
 .status-delivered { background: #d1fae5; color: #065f46; }
 .status-cancelled { background: #fee2e2; color: #991b1b; }
 
-.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; padding: 20px; }
-.form-group { display: flex; flex-direction: column; }
+.form-group { display: flex; flex-direction: column; margin-bottom: 14px; }
 .form-group label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 6px; }
 .form-group input, .form-group select, .form-group textarea {
     padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: inherit;
 }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-    outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+    outline: none; border-color: """ + primary + """; box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
 }
-.form-actions { padding: 0 20px 20px; display: flex; gap: 10px; }
+.color-picker-wrapper { display: flex; align-items: center; gap: 10px; }
+.color-preview { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #e5e7eb; }
 
 .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 200; align-items: center; justify-content: center; }
 .modal-overlay.active { display: flex; }
@@ -111,25 +158,32 @@ tr:hover { background: #f9fafb; }
 .modal-body { padding: 20px; }
 
 .search-box { padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; width: 250px; }
-.empty-state { text-align: center; padding: 60px 20px; color: #9ca3af; }
+.settings-preview { padding: 20px; background: #f9fafb; border-radius: 12px; margin-bottom: 20px; text-align: center; }
+.settings-preview .demo-header { padding: 16px; border-radius: 8px; margin-bottom: 12px; color: white; font-weight: 600; }
+.settings-preview .demo-btn { padding: 10px 20px; border-radius: 8px; color: white; display: inline-block; font-weight: 600; }
 
 @media (max-width: 768px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .nav { flex-wrap: wrap; }
     .container { padding: 12px; }
+    .header h1 { font-size: 16px; }
 }
 </style>
 </head>
 <body>
 
 <div class="header">
-    <h1>🔧 Admin Panel | {{ business_name }}</h1>
+    <div class="logo-area">
+        """ + (('<img src="' + logo + '" alt="logo">' if logo else '')) + """
+        <h1>🔧 Admin Panel | """ + name + """</h1>
+    </div>
     <div class="nav">
         <button class="nav-btn active" onclick="showSection('dashboard')">📊 Dashboard</button>
         <button class="nav-btn" onclick="showSection('products')">📦 Products</button>
         <button class="nav-btn" onclick="showSection('orders')">🛒 Orders</button>
         <button class="nav-btn" onclick="showSection('users')">👤 Users</button>
         <button class="nav-btn" onclick="showSection('tools')">🛠️ Tools</button>
+        <button class="nav-btn" onclick="showSection('settings')">⚙️ Settings</button>
     </div>
 </div>
 
@@ -137,24 +191,11 @@ tr:hover { background: #f9fafb; }
 
 <div class="section active" id="dashboard">
     <div class="stats-grid">
-        <div class="stat-card orders">
-            <h3>মোট অর্ডার</h3>
-            <div class="value">{{ stats.total_orders }}</div>
-        </div>
-        <div class="stat-card revenue">
-            <h3>মোট রেভেনিউ</h3>
-            <div class="value">৳{{ stats.revenue }}</div>
-        </div>
-        <div class="stat-card users">
-            <h3>মোট ইউজার</h3>
-            <div class="value">{{ stats.users }}</div>
-        </div>
-        <div class="stat-card pending">
-            <h3>পেন্ডিং</h3>
-            <div class="value">{{ stats.pending }}</div>
-        </div>
+        <div class="stat-card orders"><h3>মোট অর্ডার</h3><div class="value">{{ stats.total_orders }}</div></div>
+        <div class="stat-card revenue"><h3>মোট রেভেনিউ</h3><div class="value">৳{{ stats.revenue }}</div></div>
+        <div class="stat-card users"><h3>মোট ইউজার</h3><div class="value">{{ stats.users }}</div></div>
+        <div class="stat-card pending"><h3>পেন্ডিং</h3><div class="value">{{ stats.pending }}</div></div>
     </div>
-    
     <div class="card">
         <div class="card-header"><h2>📈 সর্বশেষ ৫টি অর্ডার</h2></div>
         <div class="table-wrap">
@@ -237,9 +278,7 @@ tr:hover { background: #f9fafb; }
 
 <div class="section" id="users">
     <div class="card">
-        <div class="card-header">
-            <h2>👤 কাস্টমার লিস্ট</h2>
-        </div>
+        <div class="card-header"><h2>👤 কাস্টমার লিস্ট</h2></div>
         <div class="table-wrap">
             <table>
                 <tr><th>ফোন</th><th>নাম</th><th>মোট অর্ডার</th><th>মোট খরচ</th></tr>
@@ -270,6 +309,51 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
+<div class="section" id="settings">
+    <div class="card">
+        <div class="card-header"><h2>⚙️ Appearance & Branding</h2></div>
+        <div style="padding:20px;max-width:600px;">
+            <div class="settings-preview">
+                <div class="demo-header" id="previewHeader" style="background:{{ settings.header_color }}">Header Preview</div>
+                <div class="demo-btn" id="previewBtn" style="background:{{ settings.primary_color }}">Button Preview</div>
+            </div>
+            
+            <div class="form-group">
+                <label>বিজনেস নাম</label>
+                <input type="text" id="settingName" value="{{ settings.business_name }}">
+            </div>
+            <div class="form-group">
+                <label>লোগো URL (ছবির লিংক)</label>
+                <input type="text" id="settingLogo" value="{{ settings.logo_url }}" placeholder="https://...">
+                <small style="color:#6b7280">লোগো ছবির লিংক দিন (ঐচ্ছিক)</small>
+            </div>
+            <div class="form-group">
+                <label>প্রাইমারি কালার (বাটন, লিংক)</label>
+                <div class="color-picker-wrapper">
+                    <input type="color" id="settingPrimary" value="{{ settings.primary_color }}" onchange="updatePreview()">
+                    <input type="text" id="settingPrimaryText" value="{{ settings.primary_color }}" style="width:120px;" onchange="document.getElementById('settingPrimary').value=this.value;updatePreview()">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>হেডার কালার (Top bar)</label>
+                <div class="color-picker-wrapper">
+                    <input type="color" id="settingHeader" value="{{ settings.header_color }}" onchange="updatePreview()">
+                    <input type="text" id="settingHeaderText" value="{{ settings.header_color }}" style="width:120px;" onchange="document.getElementById('settingHeader').value=this.value;updatePreview()">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>অ্যাকসেন্ট কালার (Success, Revenue)</label>
+                <div class="color-picker-wrapper">
+                    <input type="color" id="settingAccent" value="{{ settings.accent_color }}" onchange="updatePreview()">
+                    <input type="text" id="settingAccentText" value="{{ settings.accent_color }}" style="width:120px;" onchange="document.getElementById('settingAccent').value=this.value;updatePreview()">
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="saveSettings()">💾 সেভ করুন</button>
+            <div id="settingsResult" style="margin-top:12px;"></div>
+        </div>
+    </div>
+</div>
+
 </div>
 
 <div class="modal-overlay" id="productModal">
@@ -280,24 +364,12 @@ tr:hover { background: #f9fafb; }
         </div>
         <div class="modal-body">
             <input type="hidden" id="productId">
-            <div class="form-group" style="margin-bottom:12px;">
-                <label>প্রোডাক্ট নাম</label>
-                <input type="text" id="productName" placeholder="যেমন: পেস্টেল কুর্তি">
+            <div class="form-group"><label>প্রোডাক্ট নাম</label><input type="text" id="productName" placeholder="যেমন: পেস্টেল কুর্তি"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-group"><label>দাম (৳)</label><input type="number" id="productPrice" placeholder="1299"></div>
+                <div class="form-group"><label>স্টক</label><input type="number" id="productStock" placeholder="10"></div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-                <div class="form-group">
-                    <label>দাম (৳)</label>
-                    <input type="number" id="productPrice" placeholder="1299">
-                </div>
-                <div class="form-group">
-                    <label>স্টক</label>
-                    <input type="number" id="productStock" placeholder="10">
-                </div>
-            </div>
-            <div class="form-group" style="margin-bottom:12px;">
-                <label>বর্ণনা</label>
-                <textarea id="productDesc" rows="3" placeholder="প্রোডাক্টের বর্ণনা..."></textarea>
-            </div>
+            <div class="form-group"><label>বর্ণনা</label><textarea id="productDesc" rows="3" placeholder="প্রোডাক্টের বর্ণনা..."></textarea></div>
             <button class="btn btn-primary" onclick="saveProduct()">💾 সেভ করুন</button>
         </div>
     </div>
@@ -375,14 +447,36 @@ function sendBroadcast() {
         document.getElementById('broadcastResult').textContent = d.message;
     });
 }
+
+function updatePreview() {
+    document.getElementById('previewHeader').style.background = document.getElementById('settingHeader').value;
+    document.getElementById('previewBtn').style.background = document.getElementById('settingPrimary').value;
+}
+
+function saveSettings() {
+    const data = {
+        business_name: document.getElementById('settingName').value,
+        logo_url: document.getElementById('settingLogo').value,
+        primary_color: document.getElementById('settingPrimary').value,
+        header_color: document.getElementById('settingHeader').value,
+        accent_color: document.getElementById('settingAccent').value,
+    };
+    fetch('/admin/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(d => {
+        document.getElementById('settingsResult').textContent = d.message || 'সেভ হয়েছে! পেজ reload করুন।';
+        if (d.success) setTimeout(() => location.reload(), 800);
+    });
+}
 </script>
 
 </body>
 </html>
-"""
+    """
 
 def get_dashboard_stats():
-    today = datetime.now().strftime("%Y-%m-%d")
     total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)
     revenue = db_query("SELECT COALESCE(SUM(total), 0) as s FROM orders WHERE status != 'cancelled'", fetchone=True)
     users = db_query("SELECT COUNT(*) as c FROM users", fetchone=True)
@@ -404,11 +498,11 @@ def init_admin_routes(app):
         orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
         users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
         recent_orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
+        settings = get_all_settings()
         
-        return render_template_string(ADMIN_HTML,
+        return render_template_string(make_admin_html(settings),
             stats=stats, products=products, orders=orders, users=users,
-            recent_orders=recent_orders,
-            business_name=os.environ.get("BUSINESS_NAME", "Dhaka Exclusive"))
+            recent_orders=recent_orders, settings=settings)
     
     @app.route("/admin/api/product", methods=["POST"])
     @login_required
@@ -474,5 +568,19 @@ def init_admin_routes(app):
             return jsonify({"success": True, "message": f"{sent} জনকে পাঠানো হয়েছে"})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+    
+    @app.route("/admin/api/settings", methods=["POST"])
+    @login_required
+    def admin_save_settings():
+        data = request.get_json() or {}
+        for key in ["business_name", "logo_url", "primary_color", "header_color", "accent_color", "sidebar_color"]:
+            if key in data:
+                set_setting(key, data[key])
+        return jsonify({"success": True, "message": "Settings saved! Reload to see changes."})
+    
+    @app.route("/admin/api/settings", methods=["GET"])
+    @login_required
+    def admin_get_settings():
+        return jsonify(get_all_settings())
     
     print("✅ Dynamic Admin Panel initialized at /admin")
