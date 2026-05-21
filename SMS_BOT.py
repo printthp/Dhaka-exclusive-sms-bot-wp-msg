@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
 from threading import Thread, Lock
+from functools import wraps
 import requests
 
 # =====================================================================
@@ -45,6 +46,7 @@ PATHAO_MERCHANT_PASSWORD = os.environ.get("PATHAO_MERCHANT_PASSWORD", "trustedaA
 
 BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
+
 
 # =====================================================================
 # 1.5 GEMINI
@@ -152,25 +154,6 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            defaults = [
-                ("business_name", BUSINESS_NAME),
-                ("logo_url", ""),
-                ("primary_color", "#667eea"),
-                ("header_color", "#1f2937"),
-                ("sidebar_color", "#374151"),
-                ("accent_color", "#10b981"),
-                ("fb_catalog_id", os.environ.get("FB_CATALOG_ID", "")),
-                ("fb_access_token", os.environ.get("FB_ACCESS_TOKEN", "")),
-            ]
-            for k, v in defaults:
-                c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
             conn.commit()
             conn.close()
             logger.info("Database initialized: %s", DB_FILE)
@@ -1464,12 +1447,9 @@ INLINE ADMIN PANEL — pasted into SMS_BOT.py
 def login_required(f):
     def decorated(*args, **kwargs):
         auth = request.authorization
-        admin_user = os.environ.get("ADMIN_PANEL_USER", "admin")
-        admin_pass = os.environ.get("ADMIN_PANEL_PASS", "admin123")
-        if not auth or auth.username != admin_user or auth.password != admin_pass:
+        if not auth or auth.username != ADMIN_PANEL_USER or auth.password != ADMIN_PANEL_PASS:
             return ('<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
         return f(*args, **kwargs)
-    decorated.__name__ = f.__name__
     return decorated
 
 def get_setting(key, default=""):
@@ -1502,17 +1482,7 @@ def parse_fb_price(val):
 
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Dhaka Exclusive</title>
-<link rel="apple-touch-icon" href="https://www.dhakaexclusive.org/wp-content/uploads/2023/10/Dhaka-Exclusive-Logo-1.png">
-<link rel="icon" type="image/png" href="https://www.dhakaexclusive.org/wp-content/uploads/2023/10/Dhaka-Exclusive-Logo-1.png">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Dhaka Exclusive">
-<meta name="theme-color" content="{{ settings.header_color }}">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Panel | {{ settings.business_name }}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937}
@@ -1623,61 +1593,7 @@ def admin_dashboard():
         if not products:
             db_query("INSERT INTO products (name, price, description, stock, image_url) VALUES (?, ?, ?, ?, ?)", ("পেস্টেল কুর্তি", 1299, "সুন্দর পেস্টেল কালার কুর্তি, প্রিমিয়াম কোয়ালিটি ফেব্রিক", 15, ""), commit=True)
             products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
-        html = ADMIN_HTML
-        html = html.replace("{{ settings.business_name }}", settings.get("business_name", "Dhaka Exclusive"))
-        html = html.replace("{{ settings.header_color }}", settings.get("header_color", "#1f2937"))
-        html = html.replace("{{ settings.primary_color }}", settings.get("primary_color", "#667eea"))
-        html = html.replace("{{ settings.accent_color }}", settings.get("accent_color", "#10b981"))
-        html = html.replace("{{ settings.logo_url }}", settings.get("logo_url", ""))
-        html = html.replace("{{ settings.fb_catalog_id }}", settings.get("fb_catalog_id", ""))
-        html = html.replace("{{ settings.fb_access_token }}", settings.get("fb_access_token", ""))
-        html = html.replace("{{ stats.total_orders }}", str(stats["total_orders"]))
-        html = html.replace("{{ stats.revenue }}", str(stats["revenue"]))
-        html = html.replace("{{ stats.users }}", str(stats["users"]))
-        html = html.replace("{{ stats.pending }}", str(stats["pending"]))
-        
-        # Build recent orders rows
-        recent_rows = ""
-        for o in recent_orders:
-            bg = "#d1fae5" if o.get("status") == "delivered" else ("#fee2e2" if o.get("status") == "cancelled" else "#fef3c7")
-            recent_rows += f"<tr><td>#{o['id']}</td><td>{o.get('name') or 'N/A'}</td><td>{o['phone']}</td><td>৳{o['total']}</td><td><span style='padding:4px 8px;border-radius:6px;background:{bg};font-size:12px'>{o['status']}</span></td></tr>"
-        html = html.replace("{% for o in recent_orders %}", "")
-        html = html.replace("{% endfor %}", "")
-        # Remove the template loop line and insert rows
-        import re
-        html = re.sub(r'<tr>.*recent_orders.*?</tr>', recent_rows, html, flags=re.DOTALL)
-        
-        # Build products rows
-        prod_rows = ""
-        for p in products:
-            name_esc = (p.get('name') or '').replace("'", "\\'")
-            desc_esc = (p.get('description') or '').replace("'", "\\'")
-            pid = p['id']
-            prod_rows += "<tr><td>#" + str(pid) + "</td><td>" + str(p['name']) + "</td><td>৳" + str(p['price']) + "</td><td>" + str(p['stock']) + "</td><td><button class='btn btn-sm btn-success' onclick=\"editProduct(" + str(pid) + ",'" + name_esc + "'," + str(p['price']) + "," + str(p['stock']) + ",'" + desc_esc + "')\">✏️</button> <button class='btn btn-sm btn-danger' onclick='deleteProduct(" + str(pid) + ")'>🗑️</button></td></tr>"
-        html = html.replace("{% for p in products %}", "")
-        html = html.replace("{% endfor %}", "")
-        html = re.sub(r'<tr>.*products.*?</tr>', prod_rows, html, flags=re.DOTALL)
-        
-        # Build orders rows
-        order_rows = ""
-        for o in orders:
-            oid = o['id']
-            status = o.get('status', 'pending')
-            sel = lambda v: "selected" if status == v else ""
-            order_rows += "<tr data-phone='" + str(o['phone']) + "' data-name='" + str(o.get('name') or '') + "'><td>#" + str(oid) + "</td><td>" + str(o.get('name') or 'N/A') + "</td><td>" + str(o['phone']) + "</td><td>" + str(o.get('address') or 'N/A') + "</td><td>৳" + str(o['total']) + "</td><td><select onchange=\"updateOrderStatus(" + str(oid) + ",this.value)\" style='padding:4px 8px;border-radius:6px;border:1px solid #d1d5db'><option value='pending' " + sel('pending') + ">Pending</option><option value='created' " + sel('created') + ">Created</option><option value='confirmed' " + sel('confirmed') + ">Confirmed</option><option value='shipped' " + sel('shipped') + ">Shipped</option><option value='delivered' " + sel('delivered') + ">Delivered</option><option value='cancelled' " + sel('cancelled') + ">Cancelled</option></select></td><td><button class='btn btn-sm btn-danger' onclick='deleteOrder(" + str(oid) + ")'>🗑️</button></td></tr>"
-        html = html.replace("{% for o in orders %}", "")
-        html = html.replace("{% endfor %}", "")
-        html = re.sub(r'<tr>.*orders.*?</tr>', order_rows, html, flags=re.DOTALL)
-        
-        # Build users rows
-        user_rows = ""
-        for u in users_list:
-            user_rows += f"<tr><td>{u['phone']}</td><td>{u.get('name') or 'N/A'}</td><td>{u['total_orders']}</td><td>৳{u['total_spent']}</td></tr>"
-        html = html.replace("{% for u in users %}", "")
-        html = html.replace("{% endfor %}", "")
-        html = re.sub(r'<tr>.*users.*?</tr>', user_rows, html, flags=re.DOTALL)
-        
-        return html
+        return render_template_string(ADMIN_HTML, stats=stats, products=products, orders=orders, users=users_list, recent_orders=recent_orders, settings=settings)
     except Exception as e:
         logger.exception("Admin dashboard error")
         return f"<h3>Admin Panel Error:</h3><pre>{str(e)}</pre>", 500
