@@ -1,11 +1,14 @@
 """
 Dynamic Admin Panel for Dhaka Exclusive WhatsApp Bot
 Use: from admin_dynamic import init_admin_routes
+Features: Product CRUD, Order mgmt, User list, Broadcast, Settings, CSV Import, Facebook Catalog Sync
 """
 
 import os
 import sqlite3
 import json
+import re
+import requests
 from datetime import datetime
 from flask import request, render_template_string, jsonify
 from functools import wraps
@@ -14,6 +17,7 @@ DB_FILE = "bot_v3.db"
 
 ADMIN_PANEL_USER = os.environ.get("ADMIN_PANEL_USER", "admin")
 ADMIN_PANEL_PASS = os.environ.get("ADMIN_PANEL_PASS", "admin123")
+
 
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -33,6 +37,7 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
         conn.close()
         raise
 
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -41,6 +46,19 @@ def login_required(f):
             return ('<<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
         return f(*args, **kwargs)
     return decorated
+
+
+def ensure_columns():
+    """Add missing columns to existing tables"""
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+    try:
+        c.execute("ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''")
+    except:
+        pass
+    conn.commit()
+    conn.close()
+
 
 def init_settings_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -59,25 +77,60 @@ def init_settings_db():
         ("header_color", "#1f2937"),
         ("sidebar_color", "#374151"),
         ("accent_color", "#10b981"),
+        ("fb_catalog_id", os.environ.get("FB_CATALOG_ID", "")),
+        ("fb_access_token", os.environ.get("FB_ACCESS_TOKEN", "")),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     conn.commit()
     conn.close()
 
+
+ensure_columns()
 init_settings_db()
+
 
 def get_setting(key, default=""):
     row = db_query("SELECT value FROM settings WHERE key = ?", (key,), fetchone=True)
     return row["value"] if row else default
 
+
 def set_setting(key, value):
     db_query("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
              (key, value), commit=True)
 
+
 def get_all_settings():
     rows = db_query("SELECT * FROM settings", fetchall=True) or []
     return {r["key"]: r["value"] for r in rows}
+
+
+def parse_fb_price(price_str):
+    if not price_str:
+        return 0
+    match = re.search(r"(\d+)", str(price_str).replace(",", ""))
+    return int(match.group(1)) if match else 0
+
+
+def fetch_facebook_catalog(catalog_id, access_token):
+    if not catalog_id or not access_token:
+        return None, "Facebook Catalog ID বা Access Token নেই"
+
+    url = f"https://graph.facebook.com/v18.0/{catalog_id}/products"
+    params = {
+        "fields": "name,price,description,availability,image_url",
+        "access_token": access_token,
+        "limit": 250,
+    }
+    try:
+        r = requests.get(url, params=params, timeout=30)
+        data = r.json()
+        if "error" in data:
+            return None, data["error"].get("message", "Facebook API error")
+        return data.get("data", []), None
+    except Exception as e:
+        return None, str(e)
+
 
 def make_admin_html(settings):
     primary = settings.get("primary_color", "#667eea")
@@ -85,7 +138,7 @@ def make_admin_html(settings):
     accent = settings.get("accent_color", "#10b981")
     logo = settings.get("logo_url", "")
     name = settings.get("business_name", "Dhaka Exclusive")
-    
+
     return """
 <!DOCTYPE html>
 <html lang="bn">
@@ -124,6 +177,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #f3f4f6; color: #1f2937;
 .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
 .btn-primary { background: """ + primary + """; color: white; }
 .btn-success { background: #10b981; color: white; }
+.btn-info { background: #3b82f6; color: white; }
 .btn-danger { background: #ef4444; color: white; }
 .btn-sm { padding: 6px 12px; font-size: 12px; }
 
@@ -161,6 +215,9 @@ tr:hover { background: #f9fafb; }
 .settings-preview { padding: 20px; background: #f9fafb; border-radius: 12px; margin-bottom: 20px; text-align: center; }
 .settings-preview .demo-header { padding: 16px; border-radius: 8px; margin-bottom: 12px; color: white; font-weight: 600; }
 .settings-preview .demo-btn { padding: 10px 20px; border-radius: 8px; color: white; display: inline-block; font-weight: 600; }
+.fb-sync-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+.fb-sync-box h3 { color: #1e40af; margin-bottom: 8px; }
+.fb-sync-box p { color: #3b82f6; font-size: 14px; margin-bottom: 12px; }
 
 @media (max-width: 768px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -217,6 +274,13 @@ tr:hover { background: #f9fafb; }
 </div>
 
 <div class="section" id="products">
+    <div class="fb-sync-box">
+        <h3>📘 Facebook/Instagram Catalog Sync</h3>
+        <p>Facebook Shop থেকে প্রোডাক্ট অটো ইমপোর্ট করুন। এক ক্লিকে সব প্রোডাক্ট এখানে চলে আসবে!</p>
+        <button class="btn btn-info" onclick="syncFacebookCatalog()">🔄 Facebook Catalog Sync</button>
+        <div id="fbSyncResult" style="margin-top:10px;font-size:14px;color:#1e40af;font-weight:600;"></div>
+    </div>
+
     <div class="card">
         <div class="card-header">
             <h2>📦 প্রোডাক্ট ম্যানেজমেন্ট</h2>
@@ -227,15 +291,22 @@ tr:hover { background: #f9fafb; }
         </div>
         <div class="table-wrap">
             <table>
-                <tr><th>ID</th><th>নাম</th><th>দাম</th><th>স্টক</th><th>অ্যাকশন</th></tr>
+                <tr><th>ID</th><th>ছবি</th><th>নাম</th><th>দাম</th><th>স্টক</th><th>অ্যাকশন</th></tr>
                 {% for p in products %}
                 <tr>
                     <td>#{{ p.id }}</td>
+                    <td>
+                        {% if p.image_url %}
+                        <img src="{{ p.image_url }}" style="width:50px;height:50px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;">
+                        {% else %}
+                        <div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;">📦</div>
+                        {% endif %}
+                    </td>
                     <td>{{ p.name }}</td>
                     <td>৳{{ p.price }}</td>
                     <td>{{ p.stock }}</td>
                     <td>
-                        <button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }}, '{{ p.name|replace("'", "\\'") }}', {{ p.price }}, {{ p.stock }}, '{{ p.description|replace("'", "\\'") }}')">✏️</button>
+                        <button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }}, '{{ p.name|replace("'", "\\'") }}', {{ p.price }}, {{ p.stock }}, '{{ p.description|replace("'", "\\'") }}', '{{ p.image_url|replace("'", "\\'") if p.image_url else '' }}')">✏️</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteProduct({{ p.id }})">🗑️</button>
                     </td>
                 </tr>
@@ -320,7 +391,6 @@ tr:hover { background: #f9fafb; }
                 <div class="demo-header" id="previewHeader" style="background:{{ settings.header_color }}">Header Preview</div>
                 <div class="demo-btn" id="previewBtn" style="background:{{ settings.primary_color }}">Button Preview</div>
             </div>
-            
             <div class="form-group">
                 <label>বিজনেস নাম</label>
                 <input type="text" id="settingName" value="{{ settings.business_name }}">
@@ -351,7 +421,23 @@ tr:hover { background: #f9fafb; }
                     <input type="text" id="settingAccentText" value="{{ settings.accent_color }}" style="width:120px;" onchange="document.getElementById('settingAccent').value=this.value;updatePreview()">
                 </div>
             </div>
-            <button class="btn btn-primary" onclick="saveSettings()">💾 সেভ করুন</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2>📘 Facebook Catalog Integration</h2></div>
+        <div style="padding:20px;max-width:600px;">
+            <div class="form-group">
+                <label>Facebook Catalog ID</label>
+                <input type="text" id="settingFbCatalog" value="{{ settings.fb_catalog_id }}" placeholder="যেমন: 1234567890">
+                <small style="color:#6b7280">Facebook Commerce Manager → Catalog → ID কপি করুন</small>
+            </div>
+            <div class="form-group">
+                <label>Facebook Access Token</label>
+                <input type="text" id="settingFbToken" value="{{ settings.fb_access_token }}" placeholder="EAABsbC...">
+                <small style="color:#6b7280">Facebook Developer → Access Token (catalog_management permission)</small>
+            </div>
+            <button class="btn btn-primary" onclick="saveSettings()">💾 সব Settings সেভ করুন</button>
             <div id="settingsResult" style="margin-top:12px;"></div>
         </div>
     </div>
@@ -359,20 +445,15 @@ tr:hover { background: #f9fafb; }
 
 </div>
 
-<!-- CSV Import Modal -->
 <div class="modal-overlay" id="importModal">
     <div class="modal">
-        <div class="modal-header">
-            <h3>📥 Bulk CSV Import</h3>
-            <button class="modal-close" onclick="closeModal('importModal')">&times;</button>
-        </div>
+        <div class="modal-header"><h3>📥 Bulk CSV Import</h3><button class="modal-close" onclick="closeModal('importModal')">&times;</button></div>
         <div class="modal-body">
             <div class="form-group">
-                <label>CSV Data (নাম, দাম, স্টক, বর্ণনা)</label>
+                <label>CSV Data (নাম, দাম, স্টক, বর্ণনা, ছবিURL)</label>
                 <textarea id="csvInput" rows="10" placeholder="প্রতি লাইনে একটা প্রোডাক্ট:
-পেস্টেল কুর্তি, 1299, 15, সুন্দর পেস্টেল কালার
-ব্ল্যাক শার্ট, 999, 20, ক্লাসিক ব্ল্যাক
-..."></textarea>
+পেস্টেল কুর্তি, 1299, 15, সুন্দর পেস্টেল কালার, https://example.com/img1.jpg
+ব্ল্যাক শার্ট, 999, 20, ক্লাসিক ব্ল্যাক, https://example.com/img2.jpg"></textarea>
             </div>
             <button class="btn btn-success" onclick="importCSV()">📥 ইমপোর্ট করুন</button>
             <div id="importResult" style="margin-top:12px;font-size:14px;"></div>
@@ -380,13 +461,9 @@ tr:hover { background: #f9fafb; }
     </div>
 </div>
 
-<!-- Product Modal -->
 <div class="modal-overlay" id="productModal">
     <div class="modal">
-        <div class="modal-header">
-            <h3>📦 প্রোডাক্ট যোগ/এডিট</h3>
-            <button class="modal-close" onclick="closeModal('productModal')">&times;</button>
-        </div>
+        <div class="modal-header"><h3>📦 প্রোডাক্ট যোগ/এডিট</h3><button class="modal-close" onclick="closeModal('productModal')">&times;</button></div>
         <div class="modal-body">
             <input type="hidden" id="productId">
             <div class="form-group"><label>প্রোডাক্ট নাম</label><input type="text" id="productName" placeholder="যেমন: পেস্টেল কুর্তি"></div>
@@ -395,6 +472,7 @@ tr:hover { background: #f9fafb; }
                 <div class="form-group"><label>স্টক</label><input type="number" id="productStock" placeholder="10"></div>
             </div>
             <div class="form-group"><label>বর্ণনা</label><textarea id="productDesc" rows="3" placeholder="প্রোডাক্টের বর্ণনা..."></textarea></div>
+            <div class="form-group"><label>ছবির লিংক (Image URL)</label><input type="text" id="productImage" placeholder="https://...jpg"></div>
             <button class="btn btn-primary" onclick="saveProduct()">💾 সেভ করুন</button>
         </div>
     </div>
@@ -410,12 +488,13 @@ function showSection(id) {
 function openModal(id) { document.getElementById(id).classList.add('active'); }
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
-function editProduct(id, name, price, stock, desc) {
+function editProduct(id, name, price, stock, desc, image) {
     document.getElementById('productId').value = id;
     document.getElementById('productName').value = name;
     document.getElementById('productPrice').value = price;
     document.getElementById('productStock').value = stock;
     document.getElementById('productDesc').value = desc;
+    document.getElementById('productImage').value = image || '';
     openModal('productModal');
 }
 
@@ -425,7 +504,8 @@ function saveProduct() {
         name: document.getElementById('productName').value,
         price: parseInt(document.getElementById('productPrice').value),
         stock: parseInt(document.getElementById('productStock').value),
-        description: document.getElementById('productDesc').value
+        description: document.getElementById('productDesc').value,
+        image_url: document.getElementById('productImage').value
     };
     fetch('/admin/api/product', {
         method: 'POST',
@@ -486,6 +566,25 @@ function importCSV() {
     });
 }
 
+function syncFacebookCatalog() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '⏳ সিঙ্ক হচ্ছে...';
+    fetch('/admin/api/catalog/sync', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('fbSyncResult').textContent = d.message || d.error || 'Done';
+            if (d.success) setTimeout(() => location.reload(), 1500);
+        })
+        .catch(e => {
+            document.getElementById('fbSyncResult').textContent = 'Error: ' + e;
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = '🔄 Facebook Catalog Sync';
+        });
+}
+
 function updatePreview() {
     document.getElementById('previewHeader').style.background = document.getElementById('settingHeader').value;
     document.getElementById('previewBtn').style.background = document.getElementById('settingPrimary').value;
@@ -498,6 +597,8 @@ function saveSettings() {
         primary_color: document.getElementById('settingPrimary').value,
         header_color: document.getElementById('settingHeader').value,
         accent_color: document.getElementById('settingAccent').value,
+        fb_catalog_id: document.getElementById('settingFbCatalog').value,
+        fb_access_token: document.getElementById('settingFbToken').value,
     };
     fetch('/admin/api/settings', {
         method: 'POST',
@@ -514,6 +615,7 @@ function saveSettings() {
 </html>
     """
 
+
 def get_dashboard_stats():
     total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)
     revenue = db_query("SELECT COALESCE(SUM(total), 0) as s FROM orders WHERE status != 'cancelled'", fetchone=True)
@@ -526,8 +628,9 @@ def get_dashboard_stats():
         "pending": pending["c"] if pending else 0,
     }
 
+
 def init_admin_routes(app):
-    
+
     @app.route("/admin", methods=["GET"])
     @login_required
     def admin_dashboard():
@@ -537,11 +640,11 @@ def init_admin_routes(app):
         users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
         recent_orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
         settings = get_all_settings()
-        
+
         return render_template_string(make_admin_html(settings),
             stats=stats, products=products, orders=orders, users=users,
             recent_orders=recent_orders, settings=settings)
-    
+
     @app.route("/admin/api/product", methods=["POST"])
     @login_required
     def admin_add_product():
@@ -551,25 +654,26 @@ def init_admin_routes(app):
         price = data.get("price", 0)
         stock = data.get("stock", 0)
         desc = data.get("description", "").strip()
-        
+        image = data.get("image_url", "").strip()
+
         if not name or price <= 0:
             return jsonify({"error": "Invalid data"}), 400
-        
+
         if pid:
-            db_query("UPDATE products SET name=?, price=?, stock=?, description=? WHERE id=?",
-                     (name, price, stock, desc, pid), commit=True)
+            db_query("UPDATE products SET name=?, price=?, stock=?, description=?, image_url=? WHERE id=?",
+                     (name, price, stock, desc, image, pid), commit=True)
             return jsonify({"success": True, "message": "Updated"})
         else:
-            db_query("INSERT INTO products (name, price, stock, description) VALUES (?, ?, ?, ?)",
-                     (name, price, stock, desc), commit=True)
+            db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)",
+                     (name, price, stock, desc, image), commit=True)
             return jsonify({"success": True, "message": "Added"})
-    
+
     @app.route("/admin/api/product/<int:pid>", methods=["DELETE"])
     @login_required
     def admin_delete_product(pid):
         db_query("DELETE FROM products WHERE id = ?", (pid,), commit=True)
         return jsonify({"success": True})
-    
+
     @app.route("/admin/api/order/<int:oid>/status", methods=["POST"])
     @login_required
     def admin_update_order_status(oid):
@@ -578,13 +682,13 @@ def init_admin_routes(app):
         if status:
             db_query("UPDATE orders SET status = ? WHERE id = ?", (status, oid), commit=True)
         return jsonify({"success": True, "message": "Status updated"})
-    
+
     @app.route("/admin/api/order/<int:oid>", methods=["DELETE"])
     @login_required
     def admin_delete_order(oid):
         db_query("DELETE FROM orders WHERE id = ?", (oid,), commit=True)
         return jsonify({"success": True})
-    
+
     @app.route("/admin/api/broadcast", methods=["POST"])
     @login_required
     def admin_broadcast():
@@ -592,7 +696,7 @@ def init_admin_routes(app):
         msg = data.get("message", "").strip()
         if not msg:
             return jsonify({"error": "Empty message"}), 400
-        
+
         try:
             from SMS_BOT import send_text
             users = db_query("SELECT phone FROM users", fetchall=True) or []
@@ -606,21 +710,22 @@ def init_admin_routes(app):
             return jsonify({"success": True, "message": f"{sent} জনকে পাঠানো হয়েছে"})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-    
+
     @app.route("/admin/api/settings", methods=["POST"])
     @login_required
     def admin_save_settings():
         data = request.get_json() or {}
-        for key in ["business_name", "logo_url", "primary_color", "header_color", "accent_color", "sidebar_color"]:
+        for key in ["business_name", "logo_url", "primary_color", "header_color",
+                    "accent_color", "sidebar_color", "fb_catalog_id", "fb_access_token"]:
             if key in data:
                 set_setting(key, data[key])
         return jsonify({"success": True, "message": "Settings saved! Reload to see changes."})
-    
+
     @app.route("/admin/api/settings", methods=["GET"])
     @login_required
     def admin_get_settings():
         return jsonify(get_all_settings())
-    
+
     @app.route("/admin/api/products/import", methods=["POST"])
     @login_required
     def admin_bulk_import():
@@ -628,11 +733,11 @@ def init_admin_routes(app):
         csv_text = data.get("csv", "").strip()
         if not csv_text:
             return jsonify({"error": "Empty CSV"}), 400
-        
+
         lines = csv_text.splitlines()
         if not lines:
             return jsonify({"error": "No lines"}), 400
-        
+
         added = 0
         skipped = 0
         for line in lines:
@@ -651,12 +756,57 @@ def init_admin_routes(app):
                 continue
             stock = int(parts[2]) if len(parts) > 2 and parts[2].strip() else 10
             desc = parts[3] if len(parts) > 3 else ""
+            image = parts[4] if len(parts) > 4 else ""
             try:
-                db_query("INSERT INTO products (name, price, stock, description) VALUES (?, ?, ?, ?)",
-                         (name, price, stock, desc), commit=True)
+                db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)",
+                         (name, price, stock, desc, image), commit=True)
                 added += 1
             except Exception as e:
                 skipped += 1
-        return jsonify({"success": True, "added": added, "skipped": skipped, "message": f"{added} প্রোডাক্ট যোগ হয়েছে, {skipped} স্কিপ"})
-    
+        return jsonify({"success": True, "added": added, "skipped": skipped,
+                        "message": f"{added} প্রোডাক্ট যোগ হয়েছে, {skipped} স্কিপ"})
+
+    @app.route("/admin/api/catalog/sync", methods=["POST"])
+    @login_required
+    def admin_sync_catalog():
+        catalog_id = get_setting("fb_catalog_id", "")
+        access_token = get_setting("fb_access_token", "")
+
+        if not catalog_id or not access_token:
+            return jsonify({"error": "Facebook Catalog ID বা Access Token সেটিংসে যোগ করুন"}), 400
+
+        fb_products, error = fetch_facebook_catalog(catalog_id, access_token)
+        if error:
+            return jsonify({"error": error}), 400
+
+        added = 0
+        updated = 0
+        for item in fb_products:
+            name = item.get("name", "").strip()
+            price = parse_fb_price(item.get("price"))
+            desc = item.get("description", "")
+            image = item.get("image_url", "") or item.get("imageUrl", "")
+            avail = item.get("availability", "")
+            stock = 50 if avail and "in_stock" in avail.lower() else 0
+
+            if not name or price <= 0:
+                continue
+
+            existing = db_query("SELECT id FROM products WHERE name = ?", (name,), fetchone=True)
+            if existing:
+                db_query("UPDATE products SET price=?, stock=?, description=?, image_url=? WHERE id=?",
+                         (price, stock, desc, image, existing["id"]), commit=True)
+                updated += 1
+            else:
+                db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)",
+                         (name, price, stock, desc, image), commit=True)
+                added += 1
+
+        return jsonify({
+            "success": True,
+            "added": added,
+            "updated": updated,
+            "message": f"✅ {added} নতুন + {updated} আপডেট = মোট {added+updated} প্রোডাক্ট সিঙ্ক হয়েছে!"
+        })
+
     print("✅ Dynamic Admin Panel initialized at /admin")
