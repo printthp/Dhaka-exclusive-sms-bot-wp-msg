@@ -1437,14 +1437,283 @@ def webhook():
 # =====================================================================
 application = app
 
+"""
+INLINE ADMIN PANEL — pasted into SMS_BOT.py
+"""
+
 # =====================================================================
-# 14. DYNAMIC ADMIN PANEL
+# 14. DYNAMIC ADMIN PANEL — INLINED
 # =====================================================================
-try:
-    from admin_dynamic import init_admin_routes
-    init_admin_routes(app)
-except Exception as e:
-    logger.warning("Admin panel init failed: %s", e)
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or auth.username != ADMIN_PANEL_USER or auth.password != ADMIN_PANEL_PASS:
+            return ('<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+        return f(*args, **kwargs)
+    return decorated
+
+def get_setting(key, default=""):
+    row = db_query("SELECT value FROM settings WHERE key = ?", (key,), fetchone=True)
+    return row["value"] if row else default
+
+def set_setting(key, value):
+    db_query("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (key, value), commit=True)
+
+def get_all_settings():
+    rows = db_query("SELECT key, value FROM settings", fetchall=True) or []
+    return {r["key"]: r["value"] for r in rows}
+
+def fetch_facebook_catalog(catalog_id, access_token):
+    try:
+        url = f"https://graph.facebook.com/v18.0/{catalog_id}/products"
+        r = requests.get(url, params={"access_token": access_token, "fields": "name,price,description,image_url,availability", "limit": "100"})
+        data = r.json()
+        if "error" in data: return [], data["error"].get("message", "Facebook API error")
+        return data.get("data", []), None
+    except Exception as e: return [], str(e)
+
+def parse_fb_price(val):
+    if isinstance(val, (int, float)): return int(val)
+    if isinstance(val, str):
+        val = val.replace("BDT", "").replace("৳", "").replace(",", "").strip()
+        try: return int(float(val))
+        except: pass
+    return 0
+
+ADMIN_HTML = """<!DOCTYPE html>
+<html lang="bn">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel | {{ settings.business_name }}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937}
+.header{background:{{ settings.header_color }};color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.header h1{font-size:18px}.tabs{display:flex;gap:8px}
+.tab-btn{padding:8px 16px;border:none;border-radius:8px;background:rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:13px}
+.tab-btn.active{background:#fff;color:{{ settings.header_color }};font-weight:600}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:#fff;padding:20px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat-card h3{font-size:13px;color:#6b7280;text-transform:uppercase;margin-bottom:8px}
+.stat-card .num{font-size:28px;font-weight:700;color:{{ settings.primary_color }}}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:20px;overflow:hidden}
+.card-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between}
+.card-header h2{font-size:16px}.btn{padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500}
+.btn-primary{background:{{ settings.primary_color }};color:#fff}.btn-success{background:#10b981;color:#fff}
+.btn-danger{background:#ef4444;color:#fff}.btn-sm{padding:6px 12px;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:12px 16px;text-align:left;border-bottom:1px solid #e5e7eb}
+th{background:#f9fafb;font-weight:600;font-size:12px;text-transform:uppercase;color:#6b7280}tr:hover{background:#f9fafb}
+.form-group{margin-bottom:12px}.form-group label{display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:#374151}
+.form-group input,.form-group textarea{width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
+.search-box{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;width:240px}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}.modal{background:#fff;padding:24px;border-radius:12px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto}
+.section{display:none}.section.active{display:block}
+.color-picker-wrapper{display:flex;align-items:center;gap:8px}
+.settings-preview{display:flex;gap:12px;margin-bottom:16px;padding:12px;background:#f3f4f6;border-radius:8px}
+.demo-header{padding:8px 16px;border-radius:6px;color:#fff;font-weight:600}
+.demo-btn{padding:8px 16px;border-radius:6px;color:#fff;font-weight:600}
+</style>
+</head>
+<body>
+<div class="header"><h1>🔧 Admin Panel | {{ settings.business_name }}</h1>
+<div class="tabs"><button class="tab-btn active" onclick="showTab('dashboard')">📊 Dashboard</button><button class="tab-btn" onclick="showTab('products')">📦 Products</button><button class="tab-btn" onclick="showTab('orders')">🛒 Orders</button><button class="tab-btn" onclick="showTab('users')">👤 Users</button><button class="tab-btn" onclick="showTab('tools')">📢 Tools</button><button class="tab-btn" onclick="showTab('settings')">⚙️ Settings</button></div></div>
+<div class="container">
+<div id="dashboard" class="section active">
+<div class="stats"><div class="stat-card"><h3>মোট অর্ডার</h3><div class="num">{{ stats.total_orders }}</div></div><div class="stat-card"><h3>মোট রেভেনিউ</h3><div class="num">৳{{ stats.revenue }}</div></div><div class="stat-card"><h3>মোট ইউজার</h3><div class="num">{{ stats.users }}</div></div><div class="stat-card"><h3>পেন্ডিং</h3><div class="num">{{ stats.pending }}</div></div></div>
+<div class="card"><div class="card-header"><h2>📝 সর্বশেষ ৫টি অর্ডার</h2></div>
+<table><tr><th>ID</th><th>কাস্টমার</th><th>ফোন</th><th>টোটাল</th><th>স্ট্যাটাস</th></tr>
+{% for o in recent_orders %}<tr><td>#{{ o.id }}</td><td>{{ o.name or 'N/A' }}</td><td>{{ o.phone }}</td><td>৳{{ o.total }}</td><td><span style="padding:4px 8px;border-radius:6px;background:{% if o.status=='delivered' %}#d1fae5{% elif o.status=='cancelled' %}#fee2e2{% else %}#fef3c7{% endif %};font-size:12px">{{ o.status }}</span></td></tr>{% endfor %}
+</table></div></div>
+<div id="products" class="section"><div class="card"><div class="card-header"><h2>📦 প্রোডাক্ট ম্যানেজমেন্ট</h2><div><button class="btn btn-primary" onclick="openModal('productModal')">➕ যোগ করুন</button> <button class="btn btn-success" onclick="openModal('importModal')">📥 CSV Import</button></div></div>
+<table><tr><th>ID</th><th>নাম</th><th>দাম</th><th>স্টক</th><th>অ্যাকশন</th></tr>
+{% for p in products %}<tr><td>#{{ p.id }}</td><td>{{ p.name }}</td><td>৳{{ p.price }}</td><td>{{ p.stock }}</td><td><button class="btn btn-sm btn-success" onclick="editProduct({{ p.id }},'{{ (p.name or '')|replace(\"'\",\\\"'\\\") }}',{{ p.price }},{{ p.stock }},'{{ (p.description or '')|replace(\"'\",\\\"'\\\") }}')">✏️</button> <button class="btn btn-sm btn-danger" onclick="deleteProduct({{ p.id }})">🗑️</button></td></tr>{% endfor %}
+</table></div></div>
+<div id="orders" class="section"><div class="card"><div class="card-header"><h2>🛒 অর্ডার ম্যানেজমেন্ট</h2><input type="text" class="search-box" id="orderSearch" placeholder="ফোন/নামে সার্চ..." onkeyup="searchOrders()"></div>
+<table><tr><th>ID</th><th>কাস্টমার</th><th>ফোন</th><th>ঠিকানা</th><th>টোটাল</th><th>স্ট্যাটাস</th><th>অ্যাকশন</th></tr>
+{% for o in orders %}<tr data-phone="{{ o.phone }}" data-name="{{ o.name or '' }}"><td>#{{ o.id }}</td><td>{{ o.name or 'N/A' }}</td><td>{{ o.phone }}</td><td>{{ o.address or 'N/A' }}</td><td>৳{{ o.total }}</td><td><select onchange="updateOrderStatus({{ o.id }},this.value)" style="padding:4px 8px;border-radius:6px;border:1px solid #d1d5db"><option value="pending" {{ 'selected' if o.status=='pending' else '' }}>Pending</option><option value="created" {{ 'selected' if o.status=='created' else '' }}>Created</option><option value="confirmed" {{ 'selected' if o.status=='confirmed' else '' }}>Confirmed</option><option value="shipped" {{ 'selected' if o.status=='shipped' else '' }}>Shipped</option><option value="delivered" {{ 'selected' if o.status=='delivered' else '' }}>Delivered</option><option value="cancelled" {{ 'selected' if o.status=='cancelled' else '' }}>Cancelled</option></select></td><td><button class="btn btn-sm btn-danger" onclick="deleteOrder({{ o.id }})">🗑️</button></td></tr>{% endfor %}
+</table></div></div>
+<div id="users" class="section"><div class="card"><div class="card-header"><h2>👤 কাস্টমার লিস্ট</h2></div>
+<table><tr><th>ফোন</th><th>নাম</th><th>মোট অর্ডার</th><th>মোট খরচ</th></tr>
+{% for u in users %}<tr><td>{{ u.phone }}</td><td>{{ u.name or 'N/A' }}</td><td>{{ u.total_orders }}</td><td>৳{{ u.total_spent }}</td></tr>{% endfor %}
+</table></div></div>
+<div id="tools" class="section"><div class="card"><div class="card-header"><h2>📢 ব্রডকাস্ট মেসেজ</h2></div><div style="padding:20px"><div class="form-group"><label>সব কাস্টমারকে মেসেজ পাঠান:</label><textarea id="broadcastText" rows="4" placeholder="মেসেজ লিখুন..."></textarea></div><button class="btn btn-primary" onclick="sendBroadcast()">📤 পাঠান</button><div id="broadcastResult" style="margin-top:12px;font-size:14px"></div></div></div></div>
+<div id="settings" class="section">
+<div class="card"><div class="card-header"><h2>⚙️ Appearance & Branding</h2></div><div style="padding:20px;max-width:600px">
+<div class="settings-preview"><div class="demo-header" id="previewHeader" style="background:{{ settings.header_color }}">Header Preview</div><div class="demo-btn" id="previewBtn" style="background:{{ settings.primary_color }}">Button Preview</div></div>
+<div class="form-group"><label>বিজনেস নাম</label><input type="text" id="settingName" value="{{ settings.business_name }}"></div>
+<div class="form-group"><label>লোগো URL</label><input type="text" id="settingLogo" value="{{ settings.logo_url }}" placeholder="https://..."></div>
+<div class="form-group"><label>প্রাইমারি কালার</label><div class="color-picker-wrapper"><input type="color" id="settingPrimary" value="{{ settings.primary_color }}" onchange="updatePreview()"><input type="text" id="settingPrimaryText" value="{{ settings.primary_color }}" style="width:120px" onchange="document.getElementById('settingPrimary').value=this.value;updatePreview()"></div></div>
+<div class="form-group"><label>হেডার কালার</label><div class="color-picker-wrapper"><input type="color" id="settingHeader" value="{{ settings.header_color }}" onchange="updatePreview()"><input type="text" id="settingHeaderText" value="{{ settings.header_color }}" style="width:120px" onchange="document.getElementById('settingHeader').value=this.value;updatePreview()"></div></div>
+<div class="form-group"><label>অ্যাকসেন্ট কালার</label><div class="color-picker-wrapper"><input type="color" id="settingAccent" value="{{ settings.accent_color }}" onchange="updatePreview()"><input type="text" id="settingAccentText" value="{{ settings.accent_color }}" style="width:120px" onchange="document.getElementById('settingAccent').value=this.value;updatePreview()"></div></div>
+</div></div>
+<div class="card"><div class="card-header"><h2>📘 Facebook Catalog</h2></div><div style="padding:20px;max-width:600px">
+<div class="form-group"><label>Facebook Catalog ID</label><input type="text" id="settingFbCatalog" value="{{ settings.fb_catalog_id }}"></div>
+<div class="form-group"><label>Facebook Access Token</label><input type="text" id="settingFbToken" value="{{ settings.fb_access_token }}"></div>
+<button class="btn btn-primary" onclick="saveSettings()">💾 সব Settings সেভ করুন</button>
+<div id="settingsResult" style="margin-top:12px"></div>
+</div></div></div>
+</div>
+<div class="modal-overlay" id="productModal"><div class="modal"><h3>➕ প্রোডাক্ট</h3><input type="hidden" id="prodId"><div class="form-group"><label>নাম</label><input type="text" id="prodName"></div><div class="form-group"><label>দাম (৳)</label><input type="number" id="prodPrice"></div><div class="form-group"><label>স্টক</label><input type="number" id="prodStock" value="10"></div><div class="form-group"><label>বিবরণ</label><textarea id="prodDesc" rows="3"></textarea></div><div class="form-group"><label>ছবি URL</label><input type="text" id="prodImage" placeholder="https://..."></div><div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="saveProduct()">💾 সেভ</button><button class="btn" onclick="closeModal('productModal')" style="background:#e5e7eb">বাতিল</button></div></div></div>
+<div class="modal-overlay" id="importModal"><div class="modal"><h3>📥 CSV Import</h3><p style="font-size:13px;color:#6b7280;margin-bottom:8px">Format: নাম,দাম,স্টক,বিবরণ,ছবি_URL</p><textarea id="csvInput" rows="8" style="width:100%;font-family:monospace;font-size:13px" placeholder="পেস্টেল কুর্তি,1299,15,সুন্দর কুর্তি,https://..."></textarea><div id="importResult" style="margin:8px 0;font-size:14px"></div><div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="importCSV()">📥 Import</button><button class="btn" onclick="closeModal('importModal')" style="background:#e5e7eb">বাতিল</button></div></div></div>
+<script>
+function showTab(id){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active')}
+function openModal(id){document.getElementById(id).classList.add('active')}
+function closeModal(id){document.getElementById(id).classList.remove('active')}
+function editProduct(id,name,price,stock,desc){document.getElementById('prodId').value=id;document.getElementById('prodName').value=name;document.getElementById('prodPrice').value=price;document.getElementById('prodStock').value=stock;document.getElementById('prodDesc').value=desc;openModal('productModal')}
+function saveProduct(){const id=document.getElementById('prodId').value;const data={id:id||null,name:document.getElementById('prodName').value,price:parseInt(document.getElementById('prodPrice').value)||0,stock:parseInt(document.getElementById('prodStock').value)||0,description:document.getElementById('prodDesc').value,image_url:document.getElementById('prodImage').value};fetch('/admin/api/product',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(()=>{closeModal('productModal');location.reload()}).catch(err=>alert('❌ Error: '+err))}
+function deleteProduct(id){if(!confirm('ডিলিট করবেন?'))return;fetch('/admin/api/product/'+id,{method:'DELETE'}).then(()=>location.reload()).catch(err=>alert('❌ Error: '+err))}
+function updateOrderStatus(id,status){fetch('/admin/api/order/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status})}).then(r=>r.json()).then(d=>alert(d.message||'Updated')).catch(err=>alert('❌ Error: '+err))}
+function deleteOrder(id){if(!confirm('অর্ডার ডিলিট করবেন?'))return;fetch('/admin/api/order/'+id,{method:'DELETE'}).then(()=>location.reload()).catch(err=>alert('❌ Error: '+err))}
+function searchOrders(){const q=document.getElementById('orderSearch').value.toLowerCase();document.querySelectorAll('#orders tr[data-phone]').forEach(tr=>{const phone=tr.dataset.phone.toLowerCase();const name=tr.dataset.name.toLowerCase();tr.style.display=(phone.includes(q)||name.includes(q))?'':'none'})}
+function sendBroadcast(){const text=document.getElementById('broadcastText').value.trim();if(!text)return;fetch('/admin/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})}).then(r=>r.json()).then(d=>{document.getElementById('broadcastResult').textContent=d.message||'পাঠানো হয়েছে'}).catch(err=>alert('❌ Error: '+err))}
+function importCSV(){const text=document.getElementById('csvInput').value.trim();if(!text)return;fetch('/admin/api/products/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv:text})}).then(r=>r.json()).then(d=>{document.getElementById('importResult').textContent=d.message||d.error||'Done';if(d.success)setTimeout(()=>{closeModal('importModal');location.reload()},1500)}).catch(err=>alert('❌ Error: '+err))}
+function updatePreview(){document.getElementById('previewHeader').style.background=document.getElementById('settingHeader').value;document.getElementById('previewBtn').style.background=document.getElementById('settingPrimary').value}
+function saveSettings(){const data={business_name:document.getElementById('settingName').value,logo_url:document.getElementById('settingLogo').value,primary_color:document.getElementById('settingPrimary').value,header_color:document.getElementById('settingHeader').value,accent_color:document.getElementById('settingAccent').value,fb_catalog_id:document.getElementById('settingFbCatalog').value,fb_access_token:document.getElementById('settingFbToken').value};fetch('/admin/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(r=>r.json()).then(d=>{document.getElementById('settingsResult').textContent=d.message||'সেভ হয়েছে!';if(d.success)setTimeout(()=>location.reload(),800)}).catch(err=>alert('❌ Error: '+err))}
+</script>
+</body></html>"""
+
+@app.route("/admin", methods=["GET"])
+@login_required
+def admin_dashboard():
+    try:
+        settings = get_all_settings()
+        stats = {"total_orders": 0, "revenue": 0, "users": 0, "pending": 0}
+        total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)
+        revenue = db_query("SELECT COALESCE(SUM(total), 0) as s FROM orders WHERE status != 'cancelled'", fetchone=True)
+        users = db_query("SELECT COUNT(*) as c FROM users", fetchone=True)
+        pending = db_query("SELECT COUNT(*) as c FROM orders WHERE status IN ('pending', 'created')", fetchone=True)
+        if total_orders: stats["total_orders"] = total_orders["c"]
+        if revenue: stats["revenue"] = revenue["s"]
+        if users: stats["users"] = users["c"]
+        if pending: stats["pending"] = pending["c"]
+        products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+        orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
+        users_list = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
+        recent_orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
+        if not products:
+            db_query("INSERT INTO products (name, price, description, stock, image_url) VALUES (?, ?, ?, ?, ?)", ("পেস্টেল কুর্তি", 1299, "সুন্দর পেস্টেল কালার কুর্তি, প্রিমিয়াম কোয়ালিটি ফেব্রিক", 15, ""), commit=True)
+            products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+        return render_template_string(ADMIN_HTML, stats=stats, products=products, orders=orders, users=users_list, recent_orders=recent_orders, settings=settings)
+    except Exception as e:
+        logger.exception("Admin dashboard error")
+        return f"<h3>Admin Panel Error:</h3><pre>{str(e)}</pre>", 500
+
+@app.route("/admin/api/product", methods=["POST"])
+@login_required
+def admin_add_product():
+    data = request.get_json() or {}
+    pid = data.get("id")
+    name = data.get("name", "").strip()
+    price = data.get("price", 0)
+    stock = data.get("stock", 0)
+    desc = data.get("description", "").strip()
+    image = data.get("image_url", "").strip()
+    if not name or price <= 0: return jsonify({"error": "Invalid data"}), 400
+    if pid:
+        db_query("UPDATE products SET name=?, price=?, stock=?, description=?, image_url=? WHERE id=?", (name, price, stock, desc, image, pid), commit=True)
+        return jsonify({"success": True, "message": "Updated"})
+    db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, stock, desc, image), commit=True)
+    return jsonify({"success": True, "message": "Added"})
+
+@app.route("/admin/api/product/<int:pid>", methods=["DELETE"])
+@login_required
+def admin_delete_product(pid):
+    db_query("DELETE FROM products WHERE id = ?", (pid,), commit=True)
+    return jsonify({"success": True})
+
+@app.route("/admin/api/order/<int:oid>/status", methods=["POST"])
+@login_required
+def admin_update_order_status(oid):
+    data = request.get_json() or {}
+    status = data.get("status", "").strip()
+    if status: db_query("UPDATE orders SET status = ? WHERE id = ?", (status, oid), commit=True)
+    return jsonify({"success": True, "message": "Status updated"})
+
+@app.route("/admin/api/order/<int:oid>", methods=["DELETE"])
+@login_required
+def admin_delete_order(oid):
+    db_query("DELETE FROM orders WHERE id = ?", (oid,), commit=True)
+    return jsonify({"success": True})
+
+@app.route("/admin/api/broadcast", methods=["POST"])
+@login_required
+def admin_broadcast():
+    data = request.get_json() or {}
+    msg = data.get("message", "").strip()
+    if not msg: return jsonify({"error": "Empty message"}), 400
+    users = db_query("SELECT phone FROM users", fetchall=True) or []
+    sent = 0
+    for u in users:
+        try: send_text(u["phone"], msg); sent += 1
+        except: pass
+    return jsonify({"success": True, "message": f"{sent} জনকে পাঠানো হয়েছে"})
+
+@app.route("/admin/api/settings", methods=["POST"])
+@login_required
+def admin_save_settings():
+    data = request.get_json() or {}
+    for key in ["business_name", "logo_url", "primary_color", "header_color", "accent_color", "sidebar_color", "fb_catalog_id", "fb_access_token"]:
+        if key in data: set_setting(key, data[key])
+    return jsonify({"success": True, "message": "Settings saved! Reload to see changes."})
+
+@app.route("/admin/api/settings", methods=["GET"])
+@login_required
+def admin_get_settings():
+    return jsonify(get_all_settings())
+
+@app.route("/admin/api/products/import", methods=["POST"])
+@login_required
+def admin_bulk_import():
+    data = request.get_json() or {}
+    csv_text = data.get("csv", "").strip()
+    if not csv_text: return jsonify({"error": "Empty CSV"}), 400
+    lines = csv_text.splitlines()
+    if not lines: return jsonify({"error": "No lines"}), 400
+    added = 0; skipped = 0
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2: skipped += 1; continue
+        name = parts[0]
+        try: price = int(parts[1])
+        except: skipped += 1; continue
+        stock = int(parts[2]) if len(parts) > 2 and parts[2].strip() else 10
+        desc = parts[3] if len(parts) > 3 else ""
+        image = parts[4] if len(parts) > 4 else ""
+        try:
+            db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, stock, desc, image), commit=True)
+            added += 1
+        except: skipped += 1
+    return jsonify({"success": True, "added": added, "skipped": skipped, "message": f"{added} প্রোডাক্ট যোগ হয়েছে, {skipped} স্কিপ"})
+
+@app.route("/admin/api/catalog/sync", methods=["POST"])
+@login_required
+def admin_sync_catalog():
+    catalog_id = get_setting("fb_catalog_id", "")
+    access_token = get_setting("fb_access_token", "")
+    if not catalog_id or not access_token: return jsonify({"error": "Facebook Catalog ID বা Access Token সেটিংসে যোগ করুন"}), 400
+    fb_products, error = fetch_facebook_catalog(catalog_id, access_token)
+    if error: return jsonify({"error": error}), 400
+    added = 0; updated = 0
+    for item in fb_products:
+        name = item.get("name", "").strip()
+        price = parse_fb_price(item.get("price"))
+        desc = item.get("description", "")
+        image = item.get("image_url", "") or item.get("imageUrl", "")
+        avail = item.get("availability", "")
+        stock = 50 if avail and "in_stock" in avail.lower() else 0
+        if not name or price <= 0: continue
+        existing = db_query("SELECT id FROM products WHERE name = ?", (name,), fetchone=True)
+        if existing:
+            db_query("UPDATE products SET price=?, stock=?, description=?, image_url=? WHERE id=?", (price, stock, desc, image, existing["id"]), commit=True)
+            updated += 1
+        else:
+            db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, stock, desc, image), commit=True)
+            added += 1
+    return jsonify({"success": True, "added": added, "updated": updated, "message": f"✅ {added} নতুন + {updated} আপডেট = মোট {added+updated} প্রোডাক্ট সিঙ্ক হয়েছে!"})
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
