@@ -1508,8 +1508,8 @@ ADMIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Dhaka Admin</title>
-<link rel="apple-touch-icon" href="https://i.postimg.cc/Wz4hS7GP/logo.jpg">
-<link rel="icon" type="image/jpeg" href="https://i.postimg.cc/Wz4hS7GP/logo.jpg">
+<link rel="apple-touch-icon" href="https://i.postimg.cc/ydG2D187/Adobe-Express-file.png">
+<link rel="icon" type="image/png" href="https://i.postimg.cc/ydG2D187/Adobe-Express-file.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1840,7 +1840,7 @@ def admin_get_conversation(phone):
         messages = []
         for m in msgs:
             messages.append({
-                "content": (eval(m["content"]).get("text", {}).get("body", m["content"]) if (m["content"] and m["content"].startswith("{")) else m["content"]) or "",
+                "content": m["content"] or "",
                 "direction": "out" if (m["msg_type"] == "out" or m.get("direction") == "out") else "in",
                 "time": m["created_at"][11:16] if m["created_at"] else ""
             })
