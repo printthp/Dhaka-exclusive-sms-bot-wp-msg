@@ -1212,6 +1212,14 @@ def webhook():
 # =====================================================================
 application = app
 
+application = app
+
+# Chatwoot Dashboard
+from chatwoot_dashboard import init_chatwoot_routes
+init_chatwoot_routes(app)
+
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
