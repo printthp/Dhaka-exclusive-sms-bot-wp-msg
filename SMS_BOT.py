@@ -1757,7 +1757,7 @@ def admin_get_conversation(phone):
         messages = []
         for m in msgs:
             messages.append({
-                "content": m["content"] or "",
+                "content": (eval(m["content"]).get("text", {}).get("body", m["content"]) if (m["content"] and m["content"].startswith("{")) else m["content"]) or "",
                 "direction": "out" if (m["msg_type"] == "out" or m.get("direction") == "out") else "in",
                 "time": m["created_at"][11:16] if m["created_at"] else ""
             })
