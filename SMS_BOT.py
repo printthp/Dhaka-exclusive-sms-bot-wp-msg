@@ -1438,16 +1438,7 @@ def webhook():
 application = app
 
 # =====================================================================
-# 14. CHATWOOT DASHBOARD
-# =====================================================================
-try:
-    from chatwoot_dashboard import init_chatwoot_routes
-    init_chatwoot_routes(app)
-except Exception as e:
-    logger.warning("Chatwoot dashboard init failed: %s", e)
-
-# =====================================================================
-# 15. DYNAMIC ADMIN PANEL
+# 14. DYNAMIC ADMIN PANEL
 # =====================================================================
 try:
     from admin_dynamic import init_admin_routes
