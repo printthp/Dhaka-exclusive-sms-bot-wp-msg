@@ -854,3 +854,184 @@ def process_webhook_async(msg, from_number):
         # সাধারণ এআই মেসেজ পাঠানো
         send_text(from_number, ai_reply)
         return
+
+# =====================================================================
+# 12. MAIN PROCESSOR (BULLETPROOF & FIXED)
+# =====================================================================
+def process_incoming_message(phone, msg_id, text_content, msg_type="text"):
+    """
+    হোয়াটসঅ্যাপ মেসেজ প্রসেস করার মেইন পাইপলাইন।
+    রেট লিমিট চেক, এআই রেসপন্স তৈরি এবং পাঠাও অর্ডার এক্সট্রাকশন হ্যান্ডেল করে।
+    """
+    ensure_user(phone)
+    log_message(msg_id, phone, text_content, msg_type)
+    
+    if is_rate_limited(phone):
+        logger.warning(f"Rate limit triggered for: {phone}")
+        # অতিরিক্ত মেসেজ দিলে বট কোনো রেসপন্স পাঠাবে না
+        return
+
+    # বিজনেস আওয়ার চেক এবং সেশন অ্যাসাইনমেন্ট
+    if is_within_business_hours():
+        assign_employee_to_conversation(phone)
+    
+    # সেশন কনটেক্সট লোড করা
+    ctx = get_context(phone)
+    
+    # Gemini AI থেকে উত্তর নেওয়া
+    ai_response = get_ai_answer(text_content, session_context=ctx)
+    
+    # ১. কাস্টম এআই ট্যাগ চেক: ORDER_DATA এক্সট্রাকশন লজিক
+    if "||ORDER_DATA||" in ai_response:
+        try:
+            parts = ai_response.split("||ORDER_DATA||")
+            clean_reply = parts[0].strip()
+            json_str = extract_json_block(parts[1])
+            
+            if json_str:
+                order_info = json.loads(json_str)
+                name = order_info.get("name")
+                addr = order_info.get("address")
+                user_phone = order_info.get("phone", phone)
+                
+                # ক্যাটালগ থেকে প্রথম একটি ডেমো প্রোডাক্ট ধরে অর্ডার বুকিং ট্রাই করা
+                # প্রোডাকশন গাইডে কনটেক্সট থেকে product_id ট্র্যাক করা উচিত
+                products = get_products()
+                if products:
+                    prod = products[0]
+                    # পাঠাও এপিআই-তে রিয়েলটাইম অর্ডার পুশ
+                    success, consignment_id = create_pathao_order(
+                        name=name, phone=user_phone, address=addr, cod_amount=prod['price']
+                    )
+                    
+                    if success:
+                        # ডাটাবেজে অর্ডার এন্ট্রি সংরক্ষণ
+                        db_query("""
+                            INSERT INTO orders (phone, name, address, product_id, price, total, pathao_consignment_id, status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                        """, (user_phone, name, addr, prod['id'], prod['price'], prod['price'], consignment_id), commit=True)
+                        
+                        # অর্ডারের লাস্ট আইডি বের করে এমপ্লয়ি লগ করা
+                        last_order = db_query("SELECT id FROM orders WHERE phone = ? ORDER BY id DESC LIMIT 1", (user_phone,), fetchone=True)
+                        if last_order:
+                            log_employee_order(user_phone, last_order['id'])
+                            
+                        clean_reply += f"\n\n🎉 আপনার অর্ডারটি সফলভাবে বুক করা হয়েছে!\n📦 ট্র্যাকিং আইডি: {consignment_id}"
+                    else:
+                        clean_reply += f"\n\n⚠️ কুরিয়ার এপিআই সমস্যার কারণে অর্ডারটি অটো-বুক করা যায়নি। আমাদের প্রতিনিধি ম্যানুয়ালি প্রসেস করছেন।"
+            
+            send_text(phone, clean_reply)
+            return
+        except Exception as e:
+            logger.error(f"Order data parsing failed: {e}")
+
+    # ২. কাস্টম এআই ট্যাগ চেক: TRACK_DATA এক্সট্রাকশন লজিক
+    if "||TRACK_DATA||" in ai_response:
+        try:
+            parts = ai_response.split("||TRACK_DATA||")
+            clean_reply = parts[0].strip()
+            json_str = extract_json_block(parts[1])
+            
+            if json_str:
+                track_info = json.loads(json_str)
+                key = track_info.get("key")
+                
+                # পাঠাও ট্র্যাক এপিআই কল করা
+                tracking_status = track_pathao_order(key)
+                clean_reply += f"\n\n📍 আপনার পার্সেল স্ট্যাটাস: {tracking_status}"
+                
+            send_text(phone, clean_reply)
+            return
+        except Exception as e:
+            logger.error(f"Tracking data parsing failed: {e}")
+
+    # কোনো স্পেশাল ট্যাগ না থাকলে ডিরেক্ট টেক্সট রিপ্লাই পাঠানো
+    send_text(phone, ai_response)
+
+# =====================================================================
+# 13. FLASK WEBHOOK ROUTES & RUNNER
+# =====================================================================
+@app.route("/webhook", methods=["GET"])
+def meta_verify():
+    """মেটা (ফেসবুক/হোয়াটসঅ্যাপ) ক্লাউড এপিআই কোড ভেরিফিকেশন এন্ডপয়েন্ট"""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    
+    if mode and token:
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            logger.info("Webhook verified by Meta successfully.")
+            return challenge, 200
+        return "Verification token mismatch", 403
+    return "Bad Request", 400
+
+@app.route("/webhook", methods=["POST"])
+def meta_webhook():
+    """মেটার কাছ থেকে আসা রিয়েল-টাইম মেসেজ রিসিভার"""
+    payload = request.data
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    
+    if not verify_meta_signature(payload, signature):
+        logger.warning("Unauthorized webhook payload signature.")
+        return jsonify({"status": "unauthorized"}), 401
+
+    data = request.json
+    if not data or "entry" not in data:
+        return jsonify({"status": "no data"}), 200
+
+    try:
+        for entry in data["entry"]:
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                if "messages" in value:
+                    for msg in value["messages"]:
+                        phone = msg.get("from")
+                        msg_id = msg.get("id")
+                        msg_type = msg.get("type", "text")
+                        
+                        text_body = ""
+                        if msg_type == "text":
+                            text_body = msg.get("text", {}).get("body", "")
+                        elif msg_type == "interactive":
+                            # বাটন বা লিস্ট থেকে রেসপন্স হ্যান্ডেল
+                            interactive_type = msg.get("interactive", {}).get("type")
+                            if interactive_type == "button_reply":
+                                text_body = msg["interactive"]["button_reply"].get("title", "")
+                            elif interactive_type == "list_reply":
+                                text_body = msg["interactive"]["list_reply"].get("title", "")
+
+                        if text_body and phone:
+                            # মেটা ৩ সেকেন্ডের মধ্যে ২০০ রেসপন্স চায়, তাই থ্রেড দিয়ে ব্যাকগ্রাউন্ডে প্রসেস করা হলো
+                            Thread(
+                                target=process_incoming_message,
+                                args=(phone, msg_id, text_body, msg_type)
+                            ).start()
+                            
+    except Exception as e:
+        logger.error(f"Error parsing Meta webhook JSON: {e}")
+
+    return jsonify({"status": "success"}), 200
+
+@app.route("/status", methods=["GET"])
+def system_status():
+    """বটের বর্তমান ড্যাশবোর্ড ডেটা এবং স্ট্যাটাস দেখার জন্য"""
+    stats = get_dashboard_stats()
+    return jsonify({
+        "status": "online",
+        "business_name": BUSINESS_NAME,
+        "gemini_connected": genai_available,
+        "metrics": stats
+    }), 200
+
+if __name__ == "__main__":
+    # প্রোডাকশনে রান করার আগে ডাটাবেজে ডেমো প্রোডাক্ট না থাকলে অ্যাড করে নেওয়া
+    existing_prods = get_products()
+    if not existing_prods:
+        add_product("Premium Frypan", 1850, "Non-stick premium quality kitchen frypan.", stock=20)
+        add_product("Smart Blender", 3200, "High speed 750w kitchen blender.", stock=15)
+        logger.info("Demo products inserted into empty database.")
+
+    # সার্ভার পোর্ট কনফিগারেশন
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting Dhaka Exclusive Bot Server on port {port}...")
+    app.run(host="0.0.0.0", port=port, debug=False)
