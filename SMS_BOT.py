@@ -1212,12 +1212,20 @@ def webhook():
 # =====================================================================
 application = app
 
-application = app
-
 # Chatwoot Dashboard
-from chatwoot_dashboard import init_chatwoot_routes
-init_chatwoot_routes(app)
 
+try:
+    from chatwoot_dashboard import init_chatwoot_routes
+    init_chatwoot_routes(app)
+except Exception as e:
+    logger.warning("Chatwoot dashboard init failed: %s", e)
+
+# Admin Panel
+try:
+    from admin_dynamic import init_admin_routes
+    init_admin_routes(app)
+except Exception as e:
+    logger.warning("Admin panel init failed: %s", e)
 
 
 if __name__ == "__main__":
