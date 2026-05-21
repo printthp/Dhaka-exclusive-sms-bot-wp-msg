@@ -47,7 +47,6 @@ PATHAO_MERCHANT_PASSWORD = os.environ.get("PATHAO_MERCHANT_PASSWORD", "trustedaA
 BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
 
-
 # =====================================================================
 # 1.5 GEMINI
 # =====================================================================
@@ -272,30 +271,113 @@ def api_post_retry(url, payload, headers, max_retries=3):
 def get_pathao_token():
     if not all([PATHAO_CLIENT_ID, PATHAO_CLIENT_SECRET, PATHAO_MERCHANT_EMAIL, PATHAO_MERCHANT_PASSWORD]):
         return None, "Pathao credentials missing"
-    
     url = f"{PATHAO_BASE_URL}/aladdin/api/v1/issue-token"
     headers = {
-        "accept": "application/json", 
-        "content-type": "application/json"
+        "accept": "application/json", "content-type": "application/json",
+        "X-API-KEY": PATHAO_CLIENT_ID, "X-SECRET-KEY": PATHAO_CLIENT_SECRET
     }
     payload = {
-        "client_id": PATHAO_CLIENT_ID, 
-        "client_secret": PATHAO_CLIENT_SECRET,
-        "username": PATHAO_MERCHANT_EMAIL, 
-        "password": PATHAO_MERCHANT_PASSWORD
+        "client_id": PATHAO_CLIENT_ID, "client_secret": PATHAO_CLIENT_SECRET,
+        "username": PATHAO_MERCHANT_EMAIL, "password": PATHAO_MERCHANT_PASSWORD
     }
-    
+    res = api_post_retry(url, payload, headers)
+    if not res:
+        return None, "Network error"
+    data = res.json()
+    if res.status_code == 200 and data.get("status") == 200:
+        return data.get("token"), None
+    return None, data.get("message", res.text)
+
+def get_pathao_cities():
+    token, _ = get_pathao_token()
+    if not token:
+        return []
     try:
-        res = requests.post(url, json=payload, headers=headers, timeout=15)
+        res = requests.get(
+            f"{PATHAO_BASE_URL}/aladdin/api/v1/countries/1/city-list",
+            headers={"authorization": f"Bearer {token}", "accept": "application/json"},
+            timeout=10
+        )
+        return res.json().get("data", {}).get("data", [])
+    except:
+        return []
+
+def get_pathao_zones(city_id):
+    token, _ = get_pathao_token()
+    if not token:
+        return []
+    try:
+        res = requests.get(
+            f"{PATHAO_BASE_URL}/aladdin/api/v1/cities/{city_id}/zone-list",
+            headers={"authorization": f"Bearer {token}", "accept": "application/json"},
+            timeout=10
+        )
+        return res.json().get("data", {}).get("data", [])
+    except:
+        return []
+
+def get_pathao_areas(zone_id):
+    token, _ = get_pathao_token()
+    if not token:
+        return []
+    try:
+        res = requests.get(
+            f"{PATHAO_BASE_URL}/aladdin/api/v1/zones/{zone_id}/area-list",
+            headers={"authorization": f"Bearer {token}", "accept": "application/json"},
+            timeout=10
+        )
+        return res.json().get("data", {}).get("data", [])
+    except:
+        return []
+
+def create_pathao_order(name, phone, address, city_id=1, zone_id=1, area_id=1, item_desc="Premium Kitchenware", cod_amount=0):
+    token, err = get_pathao_token()
+    if not token:
+        return False, err
+    url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders"
+    headers = {
+        "authorization": f"Bearer {token}", "accept": "application/json",
+        "content-type": "application/json"
+    }
+    phone = format_phone(phone)
+    payload = {
+        "store_id": int(PATHAO_STORE_ID) if PATHAO_STORE_ID else 0,
+        "recipient_name": str(name), "recipient_phone": phone,
+        "recipient_address": str(address), "recipient_city": int(city_id),
+        "recipient_zone": int(zone_id), "recipient_area": int(area_id),
+        "delivery_type": 48, "item_type": 2,
+        "special_instruction": "WhatsApp Bot Order", "item_quantity": 1,
+        "amount_to_collect": int(cod_amount), "item_description": str(item_desc)
+    }
+    res = api_post_retry(url, payload, headers)
+    if not res:
+        return False, "API timeout"
+    data = res.json()
+    if res.status_code == 200 and data.get("status") == 200:
+        return True, data.get("data", {}).get("consignment_id")
+    return False, data.get("message", res.text)
+
+def track_pathao_order(tracking_key):
+    token, err = get_pathao_token()
+    if not token:
+        return f"Token Error: {err}"
+    tracking_key = str(tracking_key).strip().replace("+", "")
+    url = f"{PATHAO_BASE_URL}/aladdin/api/v1/orders/{tracking_key}/tracking"
+    headers = {"authorization": f"Bearer {token}", "accept": "application/json"}
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
         data = res.json()
-        if res.status_code == 200:
-            # Pathao returns 'access_token' or 'token'
-            token = data.get("access_token") or data.get("token") or (data.get("data", {}).get("token"))
-            if token:
-                return token, None
-        return None, data.get("message", "Login Failed")
-    except Exception as e:
-        return None, str(e)
+        if res.status_code == 200 and data.get("status") == 200:
+            status = data.get("data", {}).get("order_status", "unknown").lower()
+            status_map = {
+                "pending": "পেন্ডিং", "picked": "কুরিয়ারে হস্তান্তরিত",
+                "in_transit": "ডেলিভারির পথে", "delivered": "ডেলিভারি সম্পন্ন 🎉",
+                "cancelled": "বাতিল", "returned": "রিটার্ন"
+            }
+            return status_map.get(status, f"Status: {status.upper()}")
+        return "অর্ডার পাওয়া যায়নি।"
+    except:
+        return "ট্র্যাকিং ত্রুটি।"
 
 # =====================================================================
 # 6. WHATSAPP SEND
@@ -1757,7 +1839,7 @@ def admin_get_conversation(phone):
         messages = []
         for m in msgs:
             messages.append({
-                "content": (eval(m["content"]).get("text", {}).get("body", m["content"]) if (m["content"] and m["content"].startswith("{")) else m["content"]) or "",
+                "content": m["content"] or "",
                 "direction": "out" if (m["msg_type"] == "out" or m.get("direction") == "out") else "in",
                 "time": m["created_at"][11:16] if m["created_at"] else ""
             })
