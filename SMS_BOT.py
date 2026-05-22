@@ -54,7 +54,8 @@ def init_db():
                 "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, description TEXT, stock INTEGER DEFAULT 0, active INTEGER DEFAULT 1, image_url TEXT DEFAULT '')",
                 "CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT, language TEXT DEFAULT 'bn', first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, total_orders INTEGER DEFAULT 0, total_spent INTEGER DEFAULT 0)",
                 "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-                "CREATE TABLE IF NOT EXISTS pathao_webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT, consignment_id TEXT, order_id TEXT, status TEXT, raw_payload TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+                "CREATE TABLE IF NOT EXISTS pathao_webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT, consignment_id TEXT, order_id TEXT, status TEXT, raw_payload TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                "CREATE TABLE IF NOT EXISTS call_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, reason TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
             ]
             for t in tables:
                 c.execute(t)
@@ -63,7 +64,7 @@ def init_db():
                 c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
             conn.commit()
             conn.close()
-            logger.info("Database initialized")
+            logger.info("Database initialized successfully with call_requests support")
     except Exception as e:
         logger.error("Database init failed: %s", e)
         raise
@@ -210,7 +211,7 @@ def send_text(to, body):
 def send_buttons(to, body, buttons):
     if not PERMANENT_TOKEN or not PHONE_NUMBER_ID: return False
     try:
-        r = requests.post(f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages", json={"messaging_product": "whatsapp", "to": format_phone(to), "type": "interactive", "interactive": {"type": "button", "body": {"text": body}, "action": {"buttons": [{"type": "reply", "reply": {"id": b["id"], "title": b["title"]}} for b in buttons[:3]]}}}, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}, timeout=15)
+        r = requests.post(f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages", json={"messaging_product": "whatsapp", "to": format_phone(to), "type": "interactive", "interactive": {"type": "button", "body": {"text": body}, "action": {"buttons text": [{"type": "reply", "reply": {"id": b["id"], "title": b["title"]}} for b in buttons[:3]]}}}, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}, timeout=15)
         return r.status_code in (200, 201)
     except: return False
 
@@ -288,6 +289,14 @@ def is_rate_limited(phone):
         return c and c["cnt"] >= 10
     except: return False
 
+def verify_meta_signature(payload, signature):
+    if not APP_SECRET: return True
+    if not signature: return False
+    sha_name, signature_val = signature.split('=')
+    if sha_name != 'sha256': return False
+    mac = hmac.new(APP_SECRET.encode('utf-8'), payload, hashlib.sha256)
+    return hmac.compare_digest(mac.hexdigest(), signature_val)
+
 # =====================================================================
 # AI
 # =====================================================================
@@ -350,9 +359,8 @@ def process_webhook_async(msg, from_number):
         name = user["name"] if user else "অজানা"
         db_query("INSERT INTO call_requests (phone, name, reason, status) VALUES (?, ?, ?, ?)", (from_number, name, user_text[:100], "pending"), commit=True)
         send_text(from_number, "📞 প্রিয় গ্রাহক, আপনার কল রিকোয়েস্ট গ্রহণ করা হয়েছে!\n\nআমাদের প্রতিনিধি শীঘ্রই আপনাকে কল ব্যাক করবেন (সাধারণত ১০-৩০ মিনিটের মধ্যে)।\n\nজরুরি প্রয়োজনে সরাসরি কল করুন:\n📲 ০১৭৪২২৬৭৮৫৬")
-        # Notify admin
         for admin in ADMIN_NUMBERS:
-            send_text(admin, f"📞 নতুন কল রিকোয়েস্ট!\n👤 {name}\n📱 {from_number}\n📝 কারণ: {user_text[:80]}\n\nএডমিন প্যানেলে দেখুন: /call-requests")
+            send_text(admin, f"📞 নতুন কল রিকোয়েস্ট!\n👤 {name}\n📱 {from_number}\n📝 কারণ: {user_text[:80]}\n\nএডমিন প্যানেলে দেখুন: /admin")
         return
 
     if user_text.lower().startswith("admin:"):
@@ -533,7 +541,7 @@ def process_webhook_async(msg, from_number):
     if any(k in user_text.lower() for k in ["কিনব", "অর্ডার", "চাই", "buy", "order", "দাম"]):
         products = get_products()
         if products:
-            sections = [{"title": "প্রোডাক্ট", "rows": [{"id": f"product_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳"} for p in products[:10]]}]
+            sections = [{"title": "প্রোداشت", "rows": [{"id": f"product_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳"} for p in products[:10]]}]
             set_session(from_number, "selecting_product", {})
             send_list_menu(from_number, "কোন প্রোডাক্টটি দেখতে চান?", "প্রোডাক্ট", sections)
             return
@@ -542,6 +550,229 @@ def process_webhook_async(msg, from_number):
 def send_payment_options(to, ctx):
     sub = ctx.get("subtotal", 0)
     send_buttons(to, f"💰 সাবটোটাল: {sub}৳\n\nপেমেন্ট মেথড:", [{"id": "pay_cod", "title": "💵 COD"}, {"id": "pay_bkash", "title": "📱 bKash"}, {"id": "pay_nagad", "title": "💳 Nagad"}])
+
+
+# =====================================================================
+# UPDATED ADMIN PANEL VIEWS & DASHBOARD UI HTML
+# =====================================================================
+
+ADMIN_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ settings.get('business_name', 'Admin Panel') }} - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 font-sans">
+    <div class="min-h-screen flex">
+        <!-- Sidebar -->
+        <div class="w-64 bg-slate-900 text-white flex flex-col">
+            <div class="p-5 text-xl font-bold border-b border-slate-800 flex items-center gap-2">
+                <i class="fa-solid fa-robot text-emerald-400"></i>
+                <span>{{ settings.get('business_name', 'Dhaka Exclusive') }}</span>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <a href="/admin" class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-medium">
+                    <i class="fa-solid fa-chart-pie w-5"></i> Dashboard
+                </a>
+                <a href="#orders" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition">
+                    <i class="fa-solid fa-box w-5"></i> Orders
+                </a>
+                <a href="#calls" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition">
+                    <i class="fa-solid fa-headset w-5"></i> Call Requests
+                </a>
+                <a href="#settings" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition">
+                    <i class="fa-solid fa-sliders w-5"></i> System Settings
+                </a>
+            </nav>
+            <div class="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">
+                v4.0-Dynamic &copy; 2026
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col max-h-screen overflow-y-auto p-8">
+            <div class="flex justify-between items-center mb-8">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-800">Overview Dashboard</h1>
+                    <p class="text-sm text-slate-500">Live summary of your WhatsApp Bot & Pathao Orders</p>
+                </div>
+                <div class="flex items-center gap-4 bg-white px-4 py-2 rounded-xl shadow-sm border">
+                    <span class="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    <span class="text-sm font-medium text-slate-600">Bot Service: Active</span>
+                </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-500 font-medium">Total Orders</p>
+                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.total_orders }}</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-shopping-cart"></i></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-500 font-medium">Total Revenue</p>
+                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.total_revenue or 0 }}৳</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-bangladeshi-taka-sign"></i></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-500 font-medium">Pending Calls</p>
+                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.pending_calls }}</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-phone-volume"></i></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-slate-500 font-medium">Active Products</p>
+                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.total_products }}</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-boxes-stacked"></i></div>
+                </div>
+            </div>
+
+            <!-- Sections Container -->
+            <div class="space-y-8">
+                <!-- Call Requests Table -->
+                <div id="calls" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-headset text-amber-500"></i> Active Call Back Requests</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-100">
+                                    <th class="p-4">Customer</th>
+                                    <th class="p-4">Phone</th>
+                                    <th class="p-4">Reason/Query</th>
+                                    <th class="p-4">Time</th>
+                                    <th class="p-4">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm text-slate-700 divide-y divide-slate-100">
+                                {% for call in calls %}
+                                <tr class="hover:bg-slate-50/80 transition">
+                                    <td class="p-4 font-medium text-slate-900">{{ call.name }}</td>
+                                    <td class="p-4">{{ call.phone }}</td>
+                                    <td class="p-4 text-slate-500 italic">"{{ call.reason }}"</td>
+                                    <td class="p-4 text-xs text-slate-400">{{ call.created_at }}</td>
+                                    <td class="p-4">
+                                        <form action="/admin/call/complete/{{ call.id }}" method="POST" class="inline">
+                                            <button type="submit" class="bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1 rounded-lg text-xs font-medium hover:bg-emerald-600 hover:text-white transition">
+                                                <i class="fa-solid fa-check mr-1"></i> Done
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="5" class="p-8 text-center text-slate-400">কোনো পেন্ডিং কল রিকোয়েস্ট নেই।</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recent Orders Table -->
+                <div id="orders" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-receipt text-blue-500"></i> Recent Orders</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-100">
+                                    <th class="p-4">Order ID</th>
+                                    <th class="p-4">Customer</th>
+                                    <th class="p-4">Details</th>
+                                    <th class="p-4">Total Amount</th>
+                                    <th class="p-4">Pathao Consignment</th>
+                                    <th class="p-4">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm text-slate-700 divide-y divide-slate-100">
+                                {% for order in orders %}
+                                <tr class="hover:bg-slate-50/80 transition">
+                                    <td class="p-4 font-semibold text-blue-600">#{{ order.id }}</td>
+                                    <td class="p-4">
+                                        <div class="font-medium text-slate-900">{{ order.name }}</div>
+                                        <div class="text-xs text-slate-400">{{ order.phone }}</div>
+                                    </td>
+                                    <td class="p-4">
+                                        <div class="text-slate-800">Product ID: {{ order.product_id }} (Qty: {{ order.quantity }})</div>
+                                        <div class="text-xs text-slate-400 max-w-xs truncate">{{ order.address }}</div>
+                                    </td>
+                                    <td class="p-4 font-medium">{{ order.total }}৳</td>
+                                    <td class="p-4">
+                                        {% if order.pathao_consignment_id %}
+                                        <span class="bg-slate-100 text-slate-800 font-mono px-2 py-1 rounded text-xs border">{{ order.pathao_consignment_id }}</span>
+                                        {% else %}
+                                        <span class="text-xs text-amber-500 font-medium"><i class="fa-solid fa-triangle-exclamation"></i> Manual Entry</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="p-4">
+                                        <span class="px-2.5 py-1 rounded-full text-xs font-medium 
+                                            {% if order.status in ['created', 'pending'] %} bg-blue-50 text-blue-600
+                                            {% elif order.status == 'manual_pending' %} bg-amber-50 text-amber-600
+                                            {% else %} bg-emerald-50 text-emerald-600 {% endif %}">
+                                            {{ order.status }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="p-8 text-center text-slate-400">এখনো কোনো অর্ডার পাওয়া যায়নি।</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Configuration Settings Form -->
+                <div id="settings" class="bg-white rounded-2xl shadow-sm border border-slate-100">
+                    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-sliders text-emerald-500"></i> Live Dynamic Configuration</h2>
+                        <p class="text-xs text-slate-400 mt-1">কোর সেটিংস ও আইডি সরাসরি এখান থেকে ব্রাউজারে আপডেট করতে পারবেন।</p>
+                    </div>
+                    <form action="/admin/settings/save" method="POST" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Business Name</label>
+                            <input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pathao Client ID</label>
+                            <input type="text" name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pathao Store ID</label>
+                            <input type="text" name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pathao Base URL</label>
+                            <input type="text" name="pathao_base_url" value="{{ settings.get('pathao_base_url', 'https://api-hermes.pathao.com') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
+                        </div>
+                        <div class="md:col-span-2 flex justify-end border-t pt-4 mt-2">
+                            <button type="submit" class="bg-slate-900 text-white font-medium px-6 py-2.5 rounded-xl hover:bg-slate-800 transition shadow-sm">
+                                <i class="fa-solid fa-floppy-disk mr-2"></i> Save Configurations
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
 
 # =====================================================================
 # FLASK ROUTES
@@ -554,6 +785,41 @@ def home():
 def health():
     try: db_query("SELECT 1", fetchone=True); return jsonify({"status": "healthy", "database": True})
     except: return jsonify({"status": "unhealthy", "database": False})
+
+@app.route("/admin", methods=["GET"])
+@login_required
+def admin_dashboard():
+    total_orders = db_query("SELECT COUNT(*) as cnt FROM orders", fetchone=True)["cnt"]
+    total_revenue = db_query("SELECT SUM(total) as rev FROM orders WHERE status NOT IN ('cancelled', 'returned')", fetchone=True)["rev"]
+    pending_calls = db_query("SELECT COUNT(*) as cnt FROM call_requests WHERE status = 'pending'", fetchone=True)["cnt"]
+    total_products = db_query("SELECT COUNT(*) as cnt FROM products WHERE active = 1", fetchone=True)["cnt"]
+    
+    stats = {
+        "total_orders": total_orders,
+        "total_revenue": total_revenue,
+        "pending_calls": pending_calls,
+        "total_products": total_products
+    }
+    
+    calls = db_query("SELECT * FROM call_requests WHERE status = 'pending' ORDER BY created_at DESC", fetchall=True) or []
+    orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10", fetchall=True) or []
+    settings = get_all_settings()
+    
+    return render_template_string(ADMIN_HTML, stats=stats, calls=calls, orders=orders, settings=settings)
+
+@app.route("/admin/call/complete/<int:call_id>", methods=["POST"])
+@login_required
+def complete_call(call_id):
+    db_query("UPDATE call_requests SET status = 'completed' WHERE id = ?", (call_id,), commit=True)
+    return redirect(url_for('admin_dashboard'))
+
+@app.route("/admin/settings/save", methods=["POST"])
+@login_required
+def save_settings():
+    for key, value in request.form.items():
+        if value.strip():
+            set_setting(key, value.strip())
+    return redirect(url_for('admin_dashboard'))
 
 @app.route("/webhook", methods=["GET"])
 def verify():
@@ -575,654 +841,11 @@ def webhook():
         value = changes.get("value", {})
         if "messages" in value:
             msg = value["messages"][0]
-            msg_id = msg.get("id")
             from_number = msg.get("from")
-            if msg_id and from_number: Thread(target=process_webhook_async, args=(msg, from_number)).start()
-    except Exception as e: logger.error("Webhook error: %s", e)
-    return "ok", 200
-
-def verify_meta_signature(payload, signature):
-    if not APP_SECRET: return True
-    if not signature: return False
-    try:
-        expected = hmac.new(APP_SECRET.encode("utf-8"), payload, hashlib.sha256).hexdigest()
-        received = signature.replace("sha256=", "")
-        return hmac.compare_digest(expected, received)
-    except: return False
-
-# =====================================================================
-# FACEBOOK CATALOG SYNC
-# =====================================================================
-def fetch_facebook_catalog(catalog_id, access_token):
-    try:
-        url = f"https://graph.facebook.com/v21.0/{catalog_id}/products"
-        headers = {"Authorization": f"Bearer {access_token}"}
-        params = {"limit": "100", "fields": "id,name,description,price,availability,image_url"}
-        all_items = []
-        while url:
-            r = requests.get(url, headers=headers, params=params if 'graph.facebook.com' in url else None, timeout=15)
-            if r.status_code != 200:
-                error_msg = r.json().get("error", {}).get("message", r.text)
-                return [], error_msg
-            data = r.json()
-            items = data.get("data", [])
-            all_items.extend(items)
-            url = data.get("paging", {}).get("next")
-            params = None
-        return all_items, None
+            Thread(target=process_webhook_async, args=(msg, from_number)).start()
     except Exception as e:
-        return [], str(e)
-
-def parse_fb_price(price_str):
-    try:
-        price_str = str(price_str).strip().upper().replace(" ", "")
-        if price_str.endswith("BDT"):
-            return int(float(price_str.replace("BDT", "")))
-        if price_str.endswith("USD"):
-            return int(float(price_str.replace("USD", "")) * 110)
-        return int(float(price_str))
-    except:
-        return 0
-
-# =====================================================================
-# PATHAO WEBHOOK
-# =====================================================================
-@app.route("/pathao/webhook", methods=["POST"])
-def pathao_webhook():
-    try:
-        raw = request.get_data(as_text=True)
-        payload = request.get_json(silent=True) or {}
-        signature = request.headers.get("X-PATHAO-Signature", "")
-        # Forward to user existing website webhook
-        try:
-            requests.post(
-                "https://www.dhakaexclusive.org/api/pathao/callback",
-                json=payload,
-                headers={"X-PATHAO-Signature": signature, "Content-Type": "application/json"},
-                timeout=8
-            )
-        except Exception as e:
-            logger.warning("Forward to website failed: %s", e)
-
-        if PATHAO_WEBHOOK_SECRET and signature != PATHAO_WEBHOOK_SECRET: return jsonify({"error": "Invalid signature"}), 401
-        event_type = payload.get("event_type", "")
-        consignment_id = str(payload.get("consignment_id", "")).strip()
-        order_id = str(payload.get("order_id", "")).strip()
-        status = payload.get("order_status", "") or payload.get("status", "")
-        db_query("INSERT INTO pathao_webhook_logs (event_type, consignment_id, order_id, status, raw_payload) VALUES (?, ?, ?, ?, ?)", (event_type, consignment_id, order_id, status, raw), commit=True)
-        if consignment_id:
-            existing = db_query("SELECT id, phone FROM orders WHERE pathao_consignment_id = ?", (consignment_id,), fetchone=True)
-            if existing:
-                db_query("UPDATE orders SET status = ? WHERE id = ?", (status.lower() if status else "unknown", existing["id"]), commit=True)
-                if status and status.lower() in ["delivered", "picked", "in_transit"]:
-                    msg_map = {"delivered": "🎉 প্রিয় গ্রাহক, আপনার অর্ডার সফলভাবে ডেলিভারি হয়েছে!", "picked": "📦 আপনার অর্ডার কুরিয়ারে হস্তান্তরিত হয়েছে।", "in_transit": "🚚 আপনার অর্ডার ডেলিভারির পথে।"}
-                    send_text(existing["phone"], msg_map.get(status.lower(), f"📦 অর্ডার স্ট্যাটাস: {status}"))
-        return jsonify({"success": True}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-# =====================================================================
-# DYNAMIC ADMIN PANEL — API ENDPOINTS
-# =====================================================================
-@app.route("/admin/api/stats", methods=["GET"])
-@login_required
-def api_stats():
-    total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)
-    revenue = db_query("SELECT COALESCE(SUM(total), 0) as s FROM orders WHERE status != 'cancelled'", fetchone=True)
-    users = db_query("SELECT COUNT(*) as c FROM users", fetchone=True)
-    pending = db_query("SELECT COUNT(*) as c FROM orders WHERE status IN ('pending', 'created')", fetchone=True)
-    today_orders = db_query("SELECT COUNT(*) as c FROM orders WHERE date(created_at) = date('now')", fetchone=True)
-    return jsonify({
-        "total_orders": total_orders["c"] if total_orders else 0,
-        "revenue": revenue["s"] if revenue else 0,
-        "users": users["c"] if users else 0,
-        "pending": pending["c"] if pending else 0,
-        "today_orders": today_orders["c"] if today_orders else 0
-    })
-
-@app.route("/admin/api/products", methods=["GET"])
-@login_required
-def api_products():
-    products = db_query("SELECT * FROM products WHERE active = 1 ORDER BY id DESC", fetchall=True) or []
-    return jsonify({"products": products})
-
-@app.route("/admin/api/product", methods=["POST"])
-@login_required
-def api_add_product():
-    data = request.get_json() or {}
-    name = data.get("name", "").strip()
-    price = data.get("price", 0)
-    if not name or price <= 0: return jsonify({"error": "Invalid data"}), 400
-    db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, data.get("stock", 0), data.get("description", ""), data.get("image_url", "")), commit=True)
-    return jsonify({"success": True, "message": "Product added"})
-
-@app.route("/admin/api/product/<int:pid>", methods=["DELETE"])
-@login_required
-def api_delete_product(pid):
-    db_query("UPDATE products SET active = 0 WHERE id = ?", (pid,), commit=True)
-    return jsonify({"success": True})
-
-@app.route("/admin/api/orders", methods=["GET"])
-@login_required
-def api_orders():
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
-    return jsonify({"orders": orders})
-
-@app.route("/admin/api/order/<int:oid>/status", methods=["POST"])
-@login_required
-def api_order_status(oid):
-    data = request.get_json() or {}
-    status = data.get("status", "").strip()
-    if status: db_query("UPDATE orders SET status = ? WHERE id = ?", (status, oid), commit=True)
-    return jsonify({"success": True})
-
-@app.route("/admin/api/messages/phones", methods=["GET"])
-@login_required
-def api_message_phones():
-    rows = db_query("""
-        SELECT from_number as phone, MAX(created_at) as last_time,
-               (SELECT content FROM messages m2 WHERE m2.from_number = m1.from_number ORDER BY created_at DESC LIMIT 1) as last_msg
-        FROM messages m1
-        GROUP BY from_number
-        ORDER BY last_time DESC
-    """, fetchall=True) or []
-    result = []
-    for r in rows:
-        user = db_query("SELECT name FROM users WHERE phone = ?", (r["phone"],), fetchone=True)
-        result.append({"phone": r["phone"], "name": user["name"] if user else None, "last_msg": (r["last_msg"] or "")[:50], "last_time": r["last_time"]})
-    return jsonify({"conversations": result})
-
-@app.route("/admin/api/conversations/<phone>", methods=["GET"])
-@login_required
-def api_conversation(phone):
-    msgs = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY created_at ASC", (phone,), fetchall=True) or []
-    messages = []
-    for m in msgs:
-        content = m["content"] or ""
-        try:
-            msg_data = eval(content)
-            if isinstance(msg_data, dict): content = msg_data.get("text", {}).get("body", content)
-        except: pass
-        messages.append({"content": content, "direction": "out" if m["msg_type"] == "out" else "in", "time": m["created_at"][11:16] if m["created_at"] else ""})
-    return jsonify({"messages": messages})
-
-@app.route("/admin/api/reply", methods=["POST"])
-@login_required
-def api_reply():
-    data = request.get_json() or {}
-    phone = data.get("phone", "").strip()
-    msg = data.get("message", "").strip()
-    if not phone or not msg: return jsonify({"error": "Missing data"}), 400
-    try:
-        send_text(phone, msg)
-        db_query("INSERT INTO messages (msg_id, from_number, content, msg_type) VALUES (?, ?, ?, ?)", (f"admin_{int(time.time())}", phone, msg, "out"), commit=True)
-        return jsonify({"success": True})
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-@app.route("/admin/api/pathao/logs", methods=["GET"])
-@login_required
-def api_pathao_logs():
-    logs = db_query("SELECT * FROM pathao_webhook_logs ORDER BY created_at DESC LIMIT 100", fetchall=True) or []
-    return jsonify({"logs": logs})
-
-@app.route("/admin/api/settings", methods=["GET"])
-@login_required
-def api_get_settings():
-    return jsonify(get_all_settings())
-
-@app.route("/admin/api/catalog/sync", methods=["POST"])
-@login_required
-def api_sync_catalog():
-    catalog_id = get_setting("fb_catalog_id", "")
-    access_token = get_setting("fb_access_token", "")
-    if not catalog_id or not access_token:
-        return jsonify({"error": "Facebook Catalog ID এবং Access Token সেটিংসে যোগ করুন"}), 400
-    fb_products, error = fetch_facebook_catalog(catalog_id, access_token)
-    if error: return jsonify({"error": error}), 400
-    added = 0; updated = 0
-    for item in fb_products:
-        name = item.get("name", "").strip()
-        price = parse_fb_price(item.get("price"))
-        desc = item.get("description", "")
-        image = item.get("image_url", "") or item.get("imageUrl", "")
-        avail = item.get("availability", "")
-        stock = 50 if avail and "in_stock" in str(avail).lower() else 0
-        if not name or price <= 0: continue
-        existing = db_query("SELECT id FROM products WHERE name = ?", (name,), fetchone=True)
-        if existing:
-            db_query("UPDATE products SET price=?, stock=?, description=?, image_url=? WHERE id=?", (price, stock, desc, image, existing["id"]), commit=True)
-            updated += 1
-        else:
-            db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, stock, desc, image), commit=True)
-            added += 1
-    return jsonify({"success": True, "added": added, "updated": updated, "message": f"✅ {added} নতুন + {updated} আপডেট = মোট {added+updated} প্রোডাক্ট সিঙ্ক হয়েছে!"})
-
-@app.route("/admin/api/calls", methods=["GET"])
-@login_required
-def api_calls():
-    status_filter = request.args.get("status", "pending")
-    calls = db_query("SELECT * FROM call_requests WHERE status = ? ORDER BY created_at DESC", (status_filter,), fetchall=True) or []
-    return jsonify({"calls": calls})
-
-@app.route("/admin/api/call/<int:call_id>/status", methods=["POST"])
-@login_required
-def api_call_status(call_id):
-    data = request.get_json() or {}
-    status = data.get("status", "").strip()
-    notes = data.get("notes", "").strip()
-    if status: db_query("UPDATE call_requests SET status = ?, notes = ?, called_at = CURRENT_TIMESTAMP WHERE id = ?", (status, notes, call_id), commit=True)
-    return jsonify({"success": True})
-
-@app.route("/admin/api/settings", methods=["POST"])
-@login_required
-def api_save_settings():
-    data = request.get_json() or {}
-    for key in ["business_name", "logo_url", "primary_color", "header_color", "accent_color", "fb_catalog_id", "fb_access_token", "pathao_client_id", "pathao_client_secret", "pathao_merchant_email", "pathao_merchant_password", "pathao_store_id", "pathao_base_url"]:
-        if key in data: set_setting(key, data[key])
-    return jsonify({"success": True, "message": "Settings saved"})
-
-# =====================================================================
-# DYNAMIC ADMIN PANEL — SINGLE PAGE SHELL
-# =====================================================================
-ADMIN_SHELL = """<!DOCTYPE html>
-<html lang="bn">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Dhaka Admin</title>
-<link rel="apple-touch-icon" href="https://i.postimg.cc/ydG2D187/Adobe-Express-file.png">
-<link rel="icon" type="image/png" href="https://i.postimg.cc/ydG2D187/Adobe-Express-file.png">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Dhaka Admin">
-<style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-body{background:#f3f4f6;color:#1f2937;overflow-x:hidden}
-.header{background:#1f2937;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.header h1{font-size:16px;font-weight:600}
-.tabs{display:flex;gap:6px;overflow-x:auto;padding:0 4px}
-.tab-btn{padding:8px 14px;border:none;border-radius:8px;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-size:12px;white-space:nowrap;transition:.2s}
-.tab-btn.active{background:#fff;color:#1f2937;font-weight:600}
-.container{max-width:1200px;margin:0 auto;padding:12px}
-.section{display:none;animation:fadeIn .3s ease}
-.section.active{display:block}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:16px;overflow:hidden}
-.card-header{padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between}
-.card-header h2{font-size:15px;font-weight:600}
-.btn{padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;background:#667eea;color:#fff;transition:.2s}
-.btn:hover{opacity:.9}
-.btn-sm{padding:6px 12px;font-size:12px}
-.btn-danger{background:#ef4444}
-.btn-success{background:#10b981}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #e5e7eb}
-th{background:#f9fafb;font-weight:600;font-size:11px;text-transform:uppercase;color:#6b7280}
-tr:hover{background:#f9fafb}
-.status-badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:500}
-.status-pending{background:#fef3c7;color:#92400e}
-.status-created{background:#dbeafe;color:#1e40af}
-.status-confirmed{background:#e0e7ff;color:#3730a3}
-.status-shipped{background:#ddd6fe;color:#5b21b6}
-.status-delivered{background:#d1fae5;color:#065f46}
-.status-cancelled{background:#fee2e2;color:#991b1b}
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
-.stat-card{background:#fff;padding:16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.stat-label{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px}
-.stat-value{font-size:24px;font-weight:700;color:#667eea;margin-top:4px}
-.form-group{margin-bottom:12px}
-.form-group label{display:block;font-size:12px;font-weight:500;margin-bottom:4px;color:#374151}
-.form-group input,.form-group textarea,.form-group select{width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;transition:.2s}
-.form-group input:focus,.form-group textarea:focus{border-color:#667eea;outline:none}
-.search-box{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;width:100%;max-width:300px}
-.conv-sidebar{width:100%;max-width:320px;border-right:1px solid #e5e7eb;overflow-y:auto;max-height:calc(100vh - 200px)}
-.conv-row{padding:12px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer;transition:.2s}
-.conv-row:hover{background:#f9fafb}
-.conv-row.active{background:#eef2ff;border-left:3px solid #667eea}
-.conv-name{font-weight:600;font-size:13px;color:#111827}
-.conv-preview{font-size:12px;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.conv-time{font-size:10px;color:#9ca3af;margin-top:2px}
-.chat-area{flex:1;display:flex;flex-direction:column;background:#f9fafb;min-height:500px}
-.chat-messages{flex:1;padding:16px;overflow-y:auto}
-.chat-bubble{max-width:70%;padding:10px 14px;border-radius:14px;margin-bottom:8px;font-size:14px;line-height:1.5}
-.chat-in{background:#fff;align-self:flex-start;border-bottom-left-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.chat-out{background:#667eea;color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
-.chat-time{font-size:10px;opacity:.7;margin-top:4px;text-align:right}
-.chat-input{padding:12px;border-top:1px solid #e5e7eb;display:flex;gap:8px;background:#fff}
-.chat-input input{flex:1;padding:10px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
-.empty-state{text-align:center;color:#9ca3af;padding:60px 20px}
-.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center}
-.modal-overlay.active{display:flex}
-.modal{background:#fff;padding:24px;border-radius:12px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto;margin:20px}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #f3f4f6;border-top-color:#667eea;border-radius:50%;animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.toast{position:fixed;bottom:20px;right:20px;background:#1f2937;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;z-index:300;animation:slideUp .3s ease}
-@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
-</style>
-</head>
-<body>
-<div class="header">
-<h1 id="businessName">Dhaka Exclusive</h1>
-<div class="tabs">
-<button class="tab-btn active" onclick="switchTab('dashboard')">📊 Dashboard</button>
-<button class="tab-btn" onclick="switchTab('products')">📦 Products</button>
-<button class="tab-btn" onclick="switchTab('orders')">🛒 Orders</button>
-<button class="tab-btn" onclick="switchTab('messages')">💬 Messages</button>
-<button class="tab-btn" onclick="switchTab('calls')">📞 Calls</button>
-<button class="tab-btn" onclick="switchTab('pathao')">🚚 Pathao</button>
-<button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
-</div>
-</div>
-<div class="container">
-<!-- DASHBOARD -->
-<div id="dashboard" class="section active">
-<div class="stat-grid">
-<div class="stat-card"><div class="stat-label">মোট অর্ডার</div><div class="stat-value" id="statOrders">0</div></div>
-<div class="stat-card"><div class="stat-label">মোট কাস্টমার</div><div class="stat-value" id="statUsers">0</div></div>
-<div class="stat-card"><div class="stat-label">পেন্ডিং</div><div class="stat-value" id="statPending">0</div></div>
-<div class="stat-card"><div class="stat-label">আজকের অর্ডার</div><div class="stat-value" id="statToday">0</div></div>
-<div class="stat-card"><div class="stat-label">রেভেনিউ</div><div class="stat-value" id="statRevenue">৳0</div></div>
-</div>
-</div>
-<!-- PRODUCTS -->
-<div id="products" class="section">
-<div class="card"><div class="card-header"><h2>📦 প্রোডাক্ট</h2><button class="btn btn-sm" onclick="openProductModal()">➕ যোগ করুন</button></div>
-<div style="padding:16px"><input type="text" class="search-box" id="productSearch" placeholder="সার্চ..." onkeyup="filterProducts()"></div>
-<table><thead><tr><th>ID</th><th>নাম</th><th>দাম</th><th>স্টক</th><th>অ্যাকশন</th></tr></thead>
-<tbody id="productTable"></tbody></table></div>
-</div>
-<!-- ORDERS -->
-<div id="orders" class="section">
-<div class="card"><div class="card-header"><h2>🛒 অর্ডার</h2></div>
-<div style="padding:16px"><input type="text" class="search-box" id="orderSearch" placeholder="ফোন/নামে সার্চ..." onkeyup="filterOrders()"></div>
-<table><thead><tr><th>ID</th><th>কাস্টমার</th><th>ফোন</th><th>টোটাল</th><th>স্ট্যাটাস</th><th>Tracking</th><th>অ্যাকশন</th></tr></thead>
-<tbody id="orderTable"></tbody></table></div>
-</div>
-<!-- MESSAGES -->
-<div id="messages" class="section">
-<div style="display:flex;gap:0;height:calc(100vh - 160px)">
-<div class="conv-sidebar" id="convList"></div>
-<div class="chat-area">
-<div class="chat-messages" id="chatMessages"><div class="empty-state">কোনো কাস্টমার সিলেক্ট করুন</div></div>
-<div class="chat-input"><input type="text" id="replyInput" placeholder="মেসেজ লিখুন..." onkeypress="if(event.key==='Enter')sendReply()"><button class="btn" onclick="sendReply()">পাঠান</button></div>
-</div>
-</div>
-</div>
-<!-- PATHAO -->
-<div id="pathao" class="section">
-<div class="card"><div class="card-header"><h2>🚚 Pathao Webhook Logs</h2></div>
-<table><thead><tr><th>Time</th><th>Event</th><th>Consignment</th><th>Order ID</th><th>Status</th></tr></thead>
-<tbody id="pathaoTable"></tbody></table></div>
-</div>
-<!-- CALL REQUESTS -->
-<div id="calls" class="section">
-<div class="card"><div class="card-header"><h2>📞 কল রিকোয়েস্ট</h2>
-<div style="display:flex;gap:8px">
-<button class="btn btn-sm" onclick="loadCalls('pending')" style="background:#fef3c7;color:#92400e">⏳ Pending</button>
-<button class="btn btn-sm" onclick="loadCalls('called')" style="background:#d1fae5;color:#065f46">✅ Called</button>
-<button class="btn btn-sm" onclick="loadCalls('cancelled')" style="background:#fee2e2;color:#991b1b">❌ Cancelled</button>
-</div></div>
-<table><thead><tr><th>ID</th><th>নাম</th><th>ফোন</th><th>কারণ</th><th>সময়</th><th>স্ট্যাটাস</th><th>অ্যাকশন</th></tr></thead>
-<tbody id="callTable"></tbody></table></div>
-</div>
-<!-- SETTINGS -->
-<div id="settings" class="section">
-<div class="card"><div class="card-header"><h2>⚙️ Appearance</h2></div>
-<div style="padding:20px;max-width:600px">
-<div class="form-group"><label>বিজনেস নাম</label><input type="text" id="sName"></div>
-<div class="form-group"><label>লোগো URL</label><input type="text" id="sLogo"></div>
-<div class="form-group"><label>প্রাইমারি কালার</label><input type="color" id="sPrimary"></div>
-<div class="form-group"><label>হেডার কালার</label><input type="color" id="sHeader"></div>
-<div class="form-group"><label>অ্যাকসেন্ট কালার</label><input type="color" id="sAccent"></div>
-</div></div>
-<div class="card"><div class="card-header"><h2>📘 Facebook Catalog</h2><button class="btn btn-sm" onclick="syncCatalog()">🔄 Sync</button></div>
-<div style="padding:20px;max-width:600px">
-<div class="form-group"><label>Facebook Catalog ID</label><input type="text" id="sFbCatalog"></div>
-<div class="form-group"><label>Facebook Access Token</label><input type="text" id="sFbToken"></div>
-<div id="syncResult" style="margin:8px 0;font-size:14px"></div>
-</div></div>
-<div class="card"><div class="card-header"><h2>🚚 Pathao Courier API</h2></div>
-<div style="padding:20px;max-width:600px">
-<div class="form-group"><label>Client ID</label><input type="text" id="sPathaoId"></div>
-<div class="form-group"><label>Client Secret</label><input type="text" id="sPathaoSecret"></div>
-<div class="form-group"><label>Merchant Email</label><input type="text" id="sPathaoEmail"></div>
-<div class="form-group"><label>Merchant Password</label><input type="password" id="sPathaoPass"></div>
-<div class="form-group"><label>Store ID</label><input type="text" id="sPathaoStore"></div>
-<div class="form-group"><label>Base URL</label><input type="text" id="sPathaoBase" placeholder="https://api-hermes.pathao.com"></div>
-<button class="btn" onclick="saveSettings()">💾 সব Settings সেভ করুন</button>
-<div id="saveResult" style="margin-top:12px;font-size:14px"></div>
-</div></div>
-</div>
-</div>
-<!-- MODALS -->
-<div class="modal-overlay" id="productModal">
-<div class="modal">
-<h3>➕ প্রোডাক্ট যোগ করুন</h3>
-<div class="form-group"><label>নাম</label><input type="text" id="pName"></div>
-<div class="form-group"><label>দাম (৳)</label><input type="number" id="pPrice"></div>
-<div class="form-group"><label>স্টক</label><input type="number" id="pStock" value="10"></div>
-<div class="form-group"><label>বিবরণ</label><textarea id="pDesc" rows="3"></textarea></div>
-<div class="form-group"><label>ছবি URL</label><input type="text" id="pImage" placeholder="https://..."></div>
-<div style="display:flex;gap:8px;margin-top:16px">
-<button class="btn" onclick="saveProduct()">💾 সেভ</button>
-<button class="btn" style="background:#e5e7eb;color:#374151" onclick="closeModal('productModal')">বাতিল</button>
-</div></div></div>
-<script>
-let activePhone='';
-let allProducts=[];
-let allOrders=[];
-let currentSettings={};
-
-function switchTab(id){
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-  event.target.classList.add('active');
-  if(id==='dashboard') loadDashboard();
-  if(id==='products') loadProducts();
-  if(id==='orders') loadOrders();
-  if(id==='messages') loadConversations();
-  if(id==='pathao') loadPathaoLogs();
-  if(id==='settings') loadSettings();
-}
-
-async function api(url,opts={}){
-  try{
-    const r=await fetch(url,{...opts,headers:{'Content-Type':'application/json',...opts.headers}});
-    return await r.json();
-  }catch(e){console.error(e);return{error:e.message};}
-}
-
-function showToast(msg){
-  const t=document.createElement('div');t.className='toast';t.textContent=msg;
-  document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
-}
-
-// DASHBOARD
-async function loadDashboard(){
-  const d=await api('/admin/api/stats');
-  if(d.error)return;
-  document.getElementById('statOrders').textContent=d.total_orders;
-  document.getElementById('statUsers').textContent=d.users;
-  document.getElementById('statPending').textContent=d.pending;
-  document.getElementById('statToday').textContent=d.today_orders;
-  document.getElementById('statRevenue').textContent='৳'+d.revenue;
-}
-
-// PRODUCTS
-async function loadProducts(){
-  const d=await api('/admin/api/products');
-  allProducts=d.products||[];
-  renderProducts();
-}
-function renderProducts(){
-  const q=document.getElementById('productSearch').value.toLowerCase();
-  const tbody=document.getElementById('productTable');
-  tbody.innerHTML=allProducts.filter(p=>!q||p.name.toLowerCase().includes(q)).map(p=>`
-    <tr><td>#${p.id}</td><td>${p.name}</td><td>৳${p.price}</td><td>${p.stock}</td>
-    <td><button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">🗑️</button></td></tr>
-  `).join('')||'<tr><td colspan="5" style="text-align:center;color:#9ca3af">কোনো প্রোডাক্ট নেই</td></tr>';
-}
-function filterProducts(){renderProducts();}
-function openProductModal(){document.getElementById('productModal').classList.add('active');}
-function closeModal(id){document.getElementById(id).classList.remove('active');}
-async function saveProduct(){
-  const data={name:document.getElementById('pName').value,price:parseInt(document.getElementById('pPrice').value)||0,stock:parseInt(document.getElementById('pStock').value)||0,description:document.getElementById('pDesc').value,image_url:document.getElementById('pImage').value};
-  if(!data.name||data.price<=0){alert('নাম ও দাম দিন');return;}
-  const r=await api('/admin/api/product',{method:'POST',body:JSON.stringify(data)});
-  if(r.success){closeModal('productModal');showToast('প্রোডাক্ট যোগ হয়েছে!');loadProducts();}
-  else alert(r.error||'ত্রুটি');
-}
-async function deleteProduct(id){if(!confirm('ডিলিট করবেন?'))return;await api('/admin/api/product/'+id,{method:'DELETE'});showToast('ডিলিট হয়েছে');loadProducts();}
-
-// ORDERS
-async function loadOrders(){
-  const d=await api('/admin/api/orders');
-  allOrders=d.orders||[];
-  renderOrders();
-}
-function renderOrders(){
-  const q=document.getElementById('orderSearch').value.toLowerCase();
-  const tbody=document.getElementById('orderTable');
-  const filtered=allOrders.filter(o=>!q||(o.phone||'').toLowerCase().includes(q)||(o.name||'').toLowerCase().includes(q));
-  tbody.innerHTML=filtered.map(o=>`
-    <tr><td>#${o.id}</td><td>${o.name||'N/A'}</td><td>${o.phone}</td><td>৳${o.total}</td>
-    <td><span class="status-badge status-${o.status}">${o.status}</span></td>
-    <td>${o.pathao_consignment_id||'N/A'}</td>
-    <td><select onchange="updateOrderStatus(${o.id},this.value)" style="padding:4px 8px;border-radius:6px;border:1px solid #d1d5db">
-      <option value="pending" ${o.status==='pending'?'selected':''}>Pending</option>
-      <option value="created" ${o.status==='created'?'selected':''}>Created</option>
-      <option value="confirmed" ${o.status==='confirmed'?'selected':''}>Confirmed</option>
-      <option value="shipped" ${o.status==='shipped'?'selected':''}>Shipped</option>
-      <option value="delivered" ${o.status==='delivered'?'selected':''}>Delivered</option>
-      <option value="cancelled" ${o.status==='cancelled'?'selected':''}>Cancelled</option>
-    </select></td></tr>
-  `).join('')||'<tr><td colspan="7" style="text-align:center;color:#9ca3af">কোনো অর্ডার নেই</td></tr>';
-}
-function filterOrders(){renderOrders();}
-async function updateOrderStatus(id,status){
-  await api('/admin/api/order/'+id+'/status',{method:'POST',body:JSON.stringify({status})});
-  showToast('স্ট্যাটাস আপডেট');loadOrders();
-}
-
-// MESSAGES
-async function loadConversations(){
-  const d=await api('/admin/api/messages/phones');
-  const list=document.getElementById('convList');
-  list.innerHTML=(d.conversations||[]).map(c=>`
-    <div class="conv-row" id="conv-${c.phone}" onclick="openConversation('${c.phone}','${(c.name||'').replace(/'/g,"\\'")}')">
-      <div class="conv-name">${c.name||c.phone}</div>
-      <div class="conv-preview">${escapeHtml(c.last_msg)}</div>
-      <div class="conv-time">${c.last_time?c.last_time.substring(11,16):''}</div>
-    </div>
-  `).join('')||'<div style="padding:20px;text-align:center;color:#9ca3af">কোনো মেসেজ নেই</div>';
-}
-async function openConversation(phone,name){
-  activePhone=phone;
-  document.querySelectorAll('.conv-row').forEach(r=>r.classList.remove('active'));
-  document.getElementById('conv-'+phone)?.classList.add('active');
-  const d=await api('/admin/api/conversations/'+encodeURIComponent(phone));
-  const box=document.getElementById('chatMessages');
-  if(!d.messages||!d.messages.length){box.innerHTML='<div class="empty-state">কোনো মেসেজ নেই</div>';return;}
-  box.innerHTML='<div style="display:flex;flex-direction:column;gap:8px">'+d.messages.map(m=>`
-    <div class="chat-bubble ${m.direction==='out'?'chat-out':'chat-in'}">${escapeHtml(m.content)}<div class="chat-time">${m.time}</div></div>
-  `).join('')+'</div>';
-  box.scrollTop=box.scrollHeight;
-}
-async function sendReply(){
-  const text=document.getElementById('replyInput').value.trim();
-  if(!text||!activePhone)return;
-  const r=await api('/admin/api/reply',{method:'POST',body:JSON.stringify({phone:activePhone,message:text})});
-  if(r.success){document.getElementById('replyInput').value='';openConversation(activePhone,'');showToast('পাঠানো হয়েছে');}
-  else alert(r.error||'ত্রুটি');
-}
-function escapeHtml(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
-
-// PATHAO LOGS
-async function loadPathaoLogs(){
-  const d=await api('/admin/api/pathao/logs');
-  const tbody=document.getElementById('pathaoTable');
-  tbody.innerHTML=(d.logs||[]).map(w=>`
-    <tr><td>${w.created_at}</td><td>${w.event_type}</td><td>${w.consignment_id}</td><td>${w.order_id||'N/A'}</td>
-    <td><span class="status-badge status-${w.status||'unknown'}">${w.status||'N/A'}</span></td></tr>
-  `).join('')||'<tr><td colspan="5" style="text-align:center;color:#9ca3af">কোনো webhook লগ নেই</td></tr>';
-}
-
-// SETTINGS
-async function loadSettings(){
-  const s=await api('/admin/api/settings');
-  currentSettings=s;
-  document.getElementById('businessName').textContent=s.business_name||'Dhaka Exclusive';
-  document.getElementById('sName').value=s.business_name||'';
-  document.getElementById('sLogo').value=s.logo_url||'';
-  document.getElementById('sPrimary').value=s.primary_color||'#667eea';
-  document.getElementById('sHeader').value=s.header_color||'#1f2937';
-  document.getElementById('sAccent').value=s.accent_color||'#10b981';
-  document.getElementById('sFbCatalog').value=s.fb_catalog_id||'';
-  document.getElementById('sFbToken').value=s.fb_access_token||'';
-  document.getElementById('sPathaoId').value=s.pathao_client_id||'';
-  document.getElementById('sPathaoSecret').value=s.pathao_client_secret||'';
-  document.getElementById('sPathaoEmail').value=s.pathao_merchant_email||'';
-  document.getElementById('sPathaoPass').value=s.pathao_merchant_password||'';
-  document.getElementById('sPathaoStore').value=s.pathao_store_id||'';
-  document.getElementById('sPathaoBase').value=s.pathao_base_url||'';
-}
-async function saveSettings(){
-  const data={
-    business_name:document.getElementById('sName').value,
-    logo_url:document.getElementById('sLogo').value,
-    primary_color:document.getElementById('sPrimary').value,
-    header_color:document.getElementById('sHeader').value,
-    accent_color:document.getElementById('sAccent').value,
-    fb_catalog_id:document.getElementById('sFbCatalog').value,
-    fb_access_token:document.getElementById('sFbToken').value,
-    pathao_client_id:document.getElementById('sPathaoId').value,
-    pathao_client_secret:document.getElementById('sPathaoSecret').value,
-    pathao_merchant_email:document.getElementById('sPathaoEmail').value,
-    pathao_merchant_password:document.getElementById('sPathaoPass').value,
-    pathao_store_id:document.getElementById('sPathaoStore').value,
-    pathao_base_url:document.getElementById('sPathaoBase').value
-  };
-  const r=await api('/admin/api/settings',{method:'POST',body:JSON.stringify(data)});
-  document.getElementById('saveResult').textContent=r.message||'সেভ হয়েছে!';
-  if(r.success){showToast('Settings saved!');loadSettings();}
-}
-
-// CALLS
-async function loadCalls(status='pending'){
-  const d=await api('/admin/api/calls?status='+status);
-  const tbody=document.getElementById('callTable');
-  tbody.innerHTML=(d.calls||[]).map(c=>`
-    <tr><td>#${c.id}</td><td>${c.name||'N/A'}</td><td><a href="tel:${c.phone}" style="color:#667eea;font-weight:600">${c.phone}</a></td>
-    <td>${c.reason||'N/A'}</td><td>${c.created_at}</td>
-    <td><span class="status-badge status-${c.status}">${c.status}</span></td>
-    <td><div style="display:flex;gap:4px">
-      <button class="btn btn-sm btn-success" onclick="updateCall(${c.id},'called','')">✅ কল করেছি</button>
-      <button class="btn btn-sm btn-danger" onclick="updateCall(${c.id},'cancelled','')">❌ বাতিল</button>
-      <a href="tel:${c.phone}" class="btn btn-sm" style="background:#dbeafe;color:#1e40af;text-decoration:none">📞 Call</a>
-    </div></td></tr>
-  `).join('')||'<tr><td colspan="7" style="text-align:center;color:#9ca3af">কোনো কল রিকোয়েস্ট নেই</td></tr>';
-}
-async function syncCatalog(){
-  document.getElementById('syncResult').innerHTML='<span class="spinner"></span> সিঙ্ক হচ্ছে...';
-  const r=await api('/admin/api/catalog/sync',{method:'POST'});
-  if(r.success){document.getElementById('syncResult').textContent=r.message||'সিঙ্ক হয়েছে!';showToast('সিঙ্ক সম্পন্ন!');loadProducts();}
-  else{document.getElementById('syncResult').textContent='❌ '+(r.error||'ত্রুটি');}
-}
-async function updateCall(id,status,notes){
-  await api('/admin/api/call/'+id+'/status',{method:'POST',body:JSON.stringify({status,notes})});
-  showToast('আপডেট হয়েছে');loadCalls(status==='called'?'pending':'called');
-}
-
-// AUTO LOAD DASHBOARD
-loadDashboard();
-</script>
-</body></html>"""
-
-@app.route("/admin", methods=["GET"])
-@login_required
-def admin_dashboard():
-    return ADMIN_SHELL
+        logger.error("Webhook main structure parse failed: %s", e)
+    return "EVENT_RECEIVED", 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
