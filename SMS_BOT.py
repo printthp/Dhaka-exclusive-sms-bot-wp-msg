@@ -455,27 +455,42 @@ def _process_webhook(msg, from_number):
     if state == "idle" and any(k in user_text.lower() for k in ["কিনব", "অর্ডার", "চাই", "buy", "order"]):
         products = get_products()
         if products:
-            sections = [{"title": "আমাদের প্রোডাক্ট", "rows": [{"id": f"product_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳ | স্টক: {p['stock']}"} for p in products[:10]]}]
-            set_session(from_number, "selecting_product", {})
-            send_list_menu(from_number, "কোন প্রোডাক্ট কিনতে চান?", "প্রোডাক্ট", sections)
+            text = "🔹 আমাদের প্রোডাক্ট:\n\n"
+            for i, p in enumerate(products[:10], 1):
+                text += f"{i}. {p['name']} — {p['price']}৳ (স্টক: {p['stock']})\n"
+            text += "\nকোনটি চান? নম্বর লিখুন (যেমন: 1, 2, 3...)"
+            set_session(from_number, "selecting_product", {"products": products[:10]})
+            send_text(from_number, text)
             return
 
     if state == "selecting_product":
-        if user_text.startswith("product_"):
+        ctx = get_context(from_number)
+        products = ctx.get("products", [])
+        selected = None
+        # Try number input
+        try:
+            idx = int(user_text.strip()) - 1
+            if 0 <= idx < len(products):
+                selected = products[idx]
+        except:
+            pass
+        # Try product_N format (fallback)
+        if not selected and user_text.startswith("product_"):
             pid = int(user_text.replace("product_", ""))
-            product = get_product_by_id(pid)
-            if product:
-                ctx = {"product_id": pid, "product_name": product["name"], "price": product["price"]}
-                set_session(from_number, "selecting_qty", ctx)
-                if product.get("image_url"): send_image(from_number, product["image_url"], f"🔹 {product['name']}\n💰 {product['price']}৳")
-                send_buttons(from_number, f"🔹 {product['name']}\n💰 {product['price']}৳\n\nকতটি চান?", [{"id": "qty_1", "title": "১টি"}, {"id": "qty_2", "title": "২টি"}, {"id": "qty_3", "title": "৩টি"}])
-                return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে প্রোডাক্ট বাছাই করুন।")
+            selected = get_product_by_id(pid)
+        if selected:
+            ctx = {"product_id": selected["id"], "product_name": selected["name"], "price": selected["price"]}
+            set_session(from_number, "selecting_qty", ctx)
+            if selected.get("image_url"):
+                send_image(from_number, selected["image_url"], f"🔹 {selected['name']}\n💰 {selected['price']}৳")
+            send_text(from_number, f"✅ {selected['name']} — {selected['price']}৳\n\nকতটি চান? লিখুন:\n1 = ১টি\n2 = ২টি\n3 = ৩টি")
+            return
+        send_text(from_number, "সঠিক নম্বর লিখুন (যেমন: 1, 2, 3...)")
         return
 
     if state == "selecting_qty":
-        qm = {"qty_1": 1, "qty_2": 2, "qty_3": 3, "1": 1, "2": 2, "3": 3, "১": 1, "২": 2, "৩": 3}
-        qty = qm.get(user_text, 1)
+        qm = {"qty_1": 1, "qty_2": 2, "qty_3": 3, "1": 1, "2": 2, "3": 3, "১": 1, "২": 2, "৩": 3, "১টি": 1, "২টি": 2, "৩টি": 3}
+        qty = qm.get(user_text.strip(), 1)
         ctx = get_context(from_number)
         ctx["quantity"] = qty; ctx["subtotal"] = ctx["price"] * qty
         set_session(from_number, "awaiting_name", ctx)
@@ -503,9 +518,13 @@ def _process_webhook(msg, from_number):
         ctx = get_context(from_number)
         cities = get_pathao_cities()
         if cities:
-            sections = [{"title": "শহর", "rows": [{"id": f"city_{c['city_id']}", "title": c['city_name'][:24]} for c in cities[:10]]}]
+            text = "🏙️ শহর বাছাই করুন:\n\n"
+            for i, c in enumerate(cities[:10], 1):
+                text += f"{i}. {c['city_name']}\n"
+            text += "\nনম্বর লিখুন (যেমন: 1, 2...)"
+            ctx["_cities"] = cities[:10]
             set_session(from_number, "selecting_city", ctx)
-            send_list_menu(from_number, "ডেলিভারির জন্য শহর বাছাই করুন:", "শহর", sections)
+            send_text(from_number, text)
             return
         ctx["city_id"] = 1
         set_session(from_number, "selecting_payment", ctx)
@@ -513,50 +532,98 @@ def _process_webhook(msg, from_number):
         return
 
     if state == "selecting_city":
-        if user_text.startswith("city_"):
+        ctx = get_context(from_number)
+        cities = ctx.get("_cities", [])
+        selected_city = None
+        try:
+            idx = int(user_text.strip()) - 1
+            if 0 <= idx < len(cities):
+                selected_city = cities[idx]
+        except: pass
+        if not selected_city and user_text.startswith("city_"):
             cid = int(user_text.replace("city_", ""))
-            ctx = get_context(from_number)
+            for c in cities:
+                if c.get("city_id") == cid:
+                    selected_city = c
+                    break
+        if selected_city:
+            cid = selected_city["city_id"]
             ctx["city_id"] = cid
             zones = get_pathao_zones(cid)
             if zones:
-                sections = [{"title": "জোন", "rows": [{"id": f"zone_{z['zone_id']}", "title": z['zone_name'][:24]} for z in zones[:10]]}]
+                text = "📍 জোন বাছাই করুন:\n\n"
+                for i, z in enumerate(zones[:10], 1):
+                    text += f"{i}. {z['zone_name']}\n"
+                text += "\nনম্বর লিখুন (যেমন: 1, 2...)"
+                ctx["_zones"] = zones[:10]
                 set_session(from_number, "selecting_zone", ctx)
-                send_list_menu(from_number, "জোন বাছাই করুন:", "জোন", sections)
+                send_text(from_number, text)
                 return
             ctx["zone_id"] = 1; ctx["area_id"] = 1
             set_session(from_number, "selecting_payment", ctx)
             send_payment_options(from_number, ctx)
             return
+        send_text(from_number, "সঠিক নম্বর লিখুন।")
+        return
         send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে শহর বাছাই করুন।")
         return
 
     if state == "selecting_zone":
-        if user_text.startswith("zone_"):
+        ctx = get_context(from_number)
+        zones = ctx.get("_zones", [])
+        selected_zone = None
+        try:
+            idx = int(user_text.strip()) - 1
+            if 0 <= idx < len(zones):
+                selected_zone = zones[idx]
+        except: pass
+        if not selected_zone and user_text.startswith("zone_"):
             zid = int(user_text.replace("zone_", ""))
-            ctx = get_context(from_number)
+            for z in zones:
+                if z.get("zone_id") == zid:
+                    selected_zone = z
+                    break
+        if selected_zone:
+            zid = selected_zone["zone_id"]
             ctx["zone_id"] = zid
             areas = get_pathao_areas(zid)
             if areas:
-                sections = [{"title": "এরিয়া", "rows": [{"id": f"area_{a['area_id']}", "title": a['area_name'][:24]} for a in areas[:10]]}]
+                text = "📍 এরিয়া বাছাই করুন:\n\n"
+                for i, a in enumerate(areas[:10], 1):
+                    text += f"{i}. {a['area_name']}\n"
+                text += "\nনম্বর লিখুন (যেমন: 1, 2...)"
+                ctx["_areas"] = areas[:10]
                 set_session(from_number, "selecting_area", ctx)
-                send_list_menu(from_number, "এরিয়া বাছাই করুন:", "এরিয়া", sections)
+                send_text(from_number, text)
                 return
             ctx["area_id"] = 1
             set_session(from_number, "selecting_payment", ctx)
             send_payment_options(from_number, ctx)
             return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে জোন বাছাই করুন।")
+        send_text(from_number, "সঠিক নম্বর লিখুন।")
         return
 
     if state == "selecting_area":
-        if user_text.startswith("area_"):
+        ctx = get_context(from_number)
+        areas = ctx.get("_areas", [])
+        selected_area = None
+        try:
+            idx = int(user_text.strip()) - 1
+            if 0 <= idx < len(areas):
+                selected_area = areas[idx]
+        except: pass
+        if not selected_area and user_text.startswith("area_"):
             aid = int(user_text.replace("area_", ""))
-            ctx = get_context(from_number)
-            ctx["area_id"] = aid
+            for a in areas:
+                if a.get("area_id") == aid:
+                    selected_area = a
+                    break
+        if selected_area:
+            ctx["area_id"] = selected_area["area_id"]
             set_session(from_number, "selecting_payment", ctx)
             send_payment_options(from_number, ctx)
             return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে এরিয়া বাছাই করুন।")
+        send_text(from_number, "সঠিক নম্বর লিখুন।")
         return
 
     if state == "selecting_payment":
@@ -564,7 +631,7 @@ def _process_webhook(msg, from_number):
         ctx["payment_method"] = "cod"; ctx["delivery_charge"] = 80; ctx["total"] = ctx["subtotal"] + 80
         set_session(from_number, "awaiting_confirmation", ctx)
         summary = f"📦 ফাইনাল অর্ডার\n━━━━━━━━━━━━━━\n🔹 {ctx['product_name']} x {ctx['quantity']}\n💰 প্রাইস: {ctx['subtotal']}৳\n🚚 ডেলিভারি: {ctx['delivery_charge']}৳\n━━━━━━━━━━━━━━\n💵 মোট: {ctx['total']}৳\n👤 {ctx['name']}\n📞 {ctx['phone']}\n📍 {ctx['address']}\n\nঅর্ডার কনফার্ম করতে 'হ্যাঁ' লিখুন।"
-        send_buttons(from_number, summary, [{"id": "confirm_yes", "title": "✅ হ্যাঁ"}, {"id": "confirm_no", "title": "❌ না"}])
+        send_text(from_number, summary + "\n\nঅর্ডার কনফার্ম করতে 'হ্যাঁ' লিখুন। বাতিল করতে 'না' লিখুন।")
         return
 
     if state == "awaiting_confirmation":
