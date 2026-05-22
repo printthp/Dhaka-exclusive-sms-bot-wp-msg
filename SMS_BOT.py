@@ -38,7 +38,6 @@ PATHAO_MERCHANT_EMAIL = os.environ.get("PATHAO_MERCHANT_EMAIL", "cocid1000006@gm
 PATHAO_MERCHANT_PASSWORD = os.environ.get("PATHAO_MERCHANT_PASSWORD", "trustedaA@2")
 BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
-
 DB_FILE = "bot_v3.db"
 db_lock = Lock()
 
@@ -579,6 +578,17 @@ def pathao_webhook():
         raw = request.get_data(as_text=True)
         payload = request.get_json(silent=True) or {}
         signature = request.headers.get("X-PATHAO-Signature", "")
+        # Forward to user existing website webhook
+        try:
+            requests.post(
+                "https://www.dhakaexclusive.org/api/pathao/callback",
+                json=payload,
+                headers={"X-PATHAO-Signature": signature, "Content-Type": "application/json"},
+                timeout=8
+            )
+        except Exception as e:
+            logger.warning("Forward to website failed: %s", e)
+
         if PATHAO_WEBHOOK_SECRET and signature != PATHAO_WEBHOOK_SECRET: return jsonify({"error": "Invalid signature"}), 401
         event_type = payload.get("event_type", "")
         consignment_id = str(payload.get("consignment_id", "")).strip()
