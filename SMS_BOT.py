@@ -38,6 +38,7 @@ PATHAO_MERCHANT_EMAIL = os.environ.get("PATHAO_MERCHANT_EMAIL", "cocid1000006@gm
 PATHAO_MERCHANT_PASSWORD = os.environ.get("PATHAO_MERCHANT_PASSWORD", "trustedaA@2")
 BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
+
 DB_FILE = "bot_v3.db"
 db_lock = Lock()
 
@@ -344,13 +345,33 @@ def process_webhook_async(msg, from_number):
     state = session["state"] if session else "idle"
     context = get_context(from_number)
 
+    if any(k in user_text.lower() for k in ["কল চাই", "call", "ফোন", "phone", "প্রতিনিধি", "agent", "কথা বলতে চাই", "মানুষের সাথে"]):
+        user = db_query("SELECT name FROM users WHERE phone = ?", (from_number,), fetchone=True)
+        name = user["name"] if user else "অজানা"
+        db_query("INSERT INTO call_requests (phone, name, reason, status) VALUES (?, ?, ?, ?)", (from_number, name, user_text[:100], "pending"), commit=True)
+        send_text(from_number, "📞 প্রিয় গ্রাহক, আপনার কল রিকোয়েস্ট গ্রহণ করা হয়েছে!\n\nআমাদের প্রতিনিধি শীঘ্রই আপনাকে কল ব্যাক করবেন (সাধারণত ১০-৩০ মিনিটের মধ্যে)।\n\nজরুরি প্রয়োজনে সরাসরি কল করুন:\n📲 ০১৭৪২২৬৭৮৫৬")
+        # Notify admin
+        for admin in ADMIN_NUMBERS:
+            send_text(admin, f"📞 নতুন কল রিকোয়েস্ট!\n👤 {name}\n📱 {from_number}\n📝 কারণ: {user_text[:80]}\n\nএডমিন প্যানেলে দেখুন: /call-requests")
+        return
+
     if user_text.lower().startswith("admin:"):
         if from_number not in ADMIN_NUMBERS:
             send_text(from_number, "দুঃখিত, এই কমান্ড শুধু অ্যাডমিনের জন্য।")
             return
         cmd = user_text[6:].strip()
         if cmd.lower().startswith("help"):
-            send_text(from_number, "🔧 অ্যাডমিন কমান্ড:\nadmin:stats\nadmin:broadcast মেসেজ")
+            send_text(from_number, "🔧 অ্যাডমিন কমান্ড:\nadmin:stats\nadmin:broadcast মেসেজ\nadmin:calls")
+            return
+        if cmd.lower().startswith("calls"):
+            calls = db_query("SELECT * FROM call_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
+            if not calls:
+                send_text(from_number, "📞 কোনো পেন্ডিং কল রিকোয়েস্ট নেই।")
+                return
+            msg = "📞 পেন্ডিং কল রিকোয়েস্ট:\n"
+            for c in calls:
+                msg += f"\n👤 {c['name'] or 'N/A'}\n📱 {c['phone']}\n📝 {c['reason'] or 'N/A'}\n⏰ {c['created_at']}\n---"
+            send_text(from_number, msg)
             return
         send_text(from_number, "অজানা কমান্ড। admin:help লিখুন।")
         return
@@ -714,6 +735,22 @@ def api_pathao_logs():
 def api_get_settings():
     return jsonify(get_all_settings())
 
+@app.route("/admin/api/calls", methods=["GET"])
+@login_required
+def api_calls():
+    status_filter = request.args.get("status", "pending")
+    calls = db_query("SELECT * FROM call_requests WHERE status = ? ORDER BY created_at DESC", (status_filter,), fetchall=True) or []
+    return jsonify({"calls": calls})
+
+@app.route("/admin/api/call/<int:call_id>/status", methods=["POST"])
+@login_required
+def api_call_status(call_id):
+    data = request.get_json() or {}
+    status = data.get("status", "").strip()
+    notes = data.get("notes", "").strip()
+    if status: db_query("UPDATE call_requests SET status = ?, notes = ?, called_at = CURRENT_TIMESTAMP WHERE id = ?", (status, notes, call_id), commit=True)
+    return jsonify({"success": True})
+
 @app.route("/admin/api/settings", methods=["POST"])
 @login_required
 def api_save_settings():
@@ -809,6 +846,7 @@ tr:hover{background:#f9fafb}
 <button class="tab-btn" onclick="switchTab('products')">📦 Products</button>
 <button class="tab-btn" onclick="switchTab('orders')">🛒 Orders</button>
 <button class="tab-btn" onclick="switchTab('messages')">💬 Messages</button>
+<button class="tab-btn" onclick="switchTab('calls')">📞 Calls</button>
 <button class="tab-btn" onclick="switchTab('pathao')">🚚 Pathao</button>
 <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
 </div>
@@ -853,6 +891,17 @@ tr:hover{background:#f9fafb}
 <div class="card"><div class="card-header"><h2>🚚 Pathao Webhook Logs</h2></div>
 <table><thead><tr><th>Time</th><th>Event</th><th>Consignment</th><th>Order ID</th><th>Status</th></tr></thead>
 <tbody id="pathaoTable"></tbody></table></div>
+</div>
+<!-- CALL REQUESTS -->
+<div id="calls" class="section">
+<div class="card"><div class="card-header"><h2>📞 কল রিকোয়েস্ট</h2>
+<div style="display:flex;gap:8px">
+<button class="btn btn-sm" onclick="loadCalls('pending')" style="background:#fef3c7;color:#92400e">⏳ Pending</button>
+<button class="btn btn-sm" onclick="loadCalls('called')" style="background:#d1fae5;color:#065f46">✅ Called</button>
+<button class="btn btn-sm" onclick="loadCalls('cancelled')" style="background:#fee2e2;color:#991b1b">❌ Cancelled</button>
+</div></div>
+<table><thead><tr><th>ID</th><th>নাম</th><th>ফোন</th><th>কারণ</th><th>সময়</th><th>স্ট্যাটাস</th><th>অ্যাকশন</th></tr></thead>
+<tbody id="callTable"></tbody></table></div>
 </div>
 <!-- SETTINGS -->
 <div id="settings" class="section">
@@ -1074,6 +1123,26 @@ async function saveSettings(){
   const r=await api('/admin/api/settings',{method:'POST',body:JSON.stringify(data)});
   document.getElementById('saveResult').textContent=r.message||'সেভ হয়েছে!';
   if(r.success){showToast('Settings saved!');loadSettings();}
+}
+
+// CALLS
+async function loadCalls(status='pending'){
+  const d=await api('/admin/api/calls?status='+status);
+  const tbody=document.getElementById('callTable');
+  tbody.innerHTML=(d.calls||[]).map(c=>`
+    <tr><td>#${c.id}</td><td>${c.name||'N/A'}</td><td><a href="tel:${c.phone}" style="color:#667eea;font-weight:600">${c.phone}</a></td>
+    <td>${c.reason||'N/A'}</td><td>${c.created_at}</td>
+    <td><span class="status-badge status-${c.status}">${c.status}</span></td>
+    <td><div style="display:flex;gap:4px">
+      <button class="btn btn-sm btn-success" onclick="updateCall(${c.id},'called','')">✅ কল করেছি</button>
+      <button class="btn btn-sm btn-danger" onclick="updateCall(${c.id},'cancelled','')">❌ বাতিল</button>
+      <a href="tel:${c.phone}" class="btn btn-sm" style="background:#dbeafe;color:#1e40af;text-decoration:none">📞 Call</a>
+    </div></td></tr>
+  `).join('')||'<tr><td colspan="7" style="text-align:center;color:#9ca3af">কোনো কল রিকোয়েস্ট নেই</td></tr>';
+}
+async function updateCall(id,status,notes){
+  await api('/admin/api/call/'+id+'/status',{method:'POST',body:JSON.stringify({status,notes})});
+  showToast('আপডেট হয়েছে');loadCalls(status==='called'?'pending':'called');
 }
 
 // AUTO LOAD DASHBOARD
