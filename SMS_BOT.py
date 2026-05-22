@@ -591,6 +591,40 @@ def verify_meta_signature(payload, signature):
     except: return False
 
 # =====================================================================
+# FACEBOOK CATALOG SYNC
+# =====================================================================
+def fetch_facebook_catalog(catalog_id, access_token):
+    try:
+        url = f"https://graph.facebook.com/v21.0/{catalog_id}/products"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        params = {"limit": "100", "fields": "id,name,description,price,availability,image_url"}
+        all_items = []
+        while url:
+            r = requests.get(url, headers=headers, params=params if 'graph.facebook.com' in url else None, timeout=15)
+            if r.status_code != 200:
+                error_msg = r.json().get("error", {}).get("message", r.text)
+                return [], error_msg
+            data = r.json()
+            items = data.get("data", [])
+            all_items.extend(items)
+            url = data.get("paging", {}).get("next")
+            params = None
+        return all_items, None
+    except Exception as e:
+        return [], str(e)
+
+def parse_fb_price(price_str):
+    try:
+        price_str = str(price_str).strip().upper().replace(" ", "")
+        if price_str.endswith("BDT"):
+            return int(float(price_str.replace("BDT", "")))
+        if price_str.endswith("USD"):
+            return int(float(price_str.replace("USD", "")) * 110)
+        return int(float(price_str))
+    except:
+        return 0
+
+# =====================================================================
 # PATHAO WEBHOOK
 # =====================================================================
 @app.route("/pathao/webhook", methods=["POST"])
@@ -734,6 +768,33 @@ def api_pathao_logs():
 @login_required
 def api_get_settings():
     return jsonify(get_all_settings())
+
+@app.route("/admin/api/catalog/sync", methods=["POST"])
+@login_required
+def api_sync_catalog():
+    catalog_id = get_setting("fb_catalog_id", "")
+    access_token = get_setting("fb_access_token", "")
+    if not catalog_id or not access_token:
+        return jsonify({"error": "Facebook Catalog ID এবং Access Token সেটিংসে যোগ করুন"}), 400
+    fb_products, error = fetch_facebook_catalog(catalog_id, access_token)
+    if error: return jsonify({"error": error}), 400
+    added = 0; updated = 0
+    for item in fb_products:
+        name = item.get("name", "").strip()
+        price = parse_fb_price(item.get("price"))
+        desc = item.get("description", "")
+        image = item.get("image_url", "") or item.get("imageUrl", "")
+        avail = item.get("availability", "")
+        stock = 50 if avail and "in_stock" in str(avail).lower() else 0
+        if not name or price <= 0: continue
+        existing = db_query("SELECT id FROM products WHERE name = ?", (name,), fetchone=True)
+        if existing:
+            db_query("UPDATE products SET price=?, stock=?, description=?, image_url=? WHERE id=?", (price, stock, desc, image, existing["id"]), commit=True)
+            updated += 1
+        else:
+            db_query("INSERT INTO products (name, price, stock, description, image_url) VALUES (?, ?, ?, ?, ?)", (name, price, stock, desc, image), commit=True)
+            added += 1
+    return jsonify({"success": True, "added": added, "updated": updated, "message": f"✅ {added} নতুন + {updated} আপডেট = মোট {added+updated} প্রোডাক্ট সিঙ্ক হয়েছে!"})
 
 @app.route("/admin/api/calls", methods=["GET"])
 @login_required
@@ -913,10 +974,11 @@ tr:hover{background:#f9fafb}
 <div class="form-group"><label>হেডার কালার</label><input type="color" id="sHeader"></div>
 <div class="form-group"><label>অ্যাকসেন্ট কালার</label><input type="color" id="sAccent"></div>
 </div></div>
-<div class="card"><div class="card-header"><h2>📘 Facebook Catalog</h2></div>
+<div class="card"><div class="card-header"><h2>📘 Facebook Catalog</h2><button class="btn btn-sm" onclick="syncCatalog()">🔄 Sync</button></div>
 <div style="padding:20px;max-width:600px">
 <div class="form-group"><label>Facebook Catalog ID</label><input type="text" id="sFbCatalog"></div>
 <div class="form-group"><label>Facebook Access Token</label><input type="text" id="sFbToken"></div>
+<div id="syncResult" style="margin:8px 0;font-size:14px"></div>
 </div></div>
 <div class="card"><div class="card-header"><h2>🚚 Pathao Courier API</h2></div>
 <div style="padding:20px;max-width:600px">
@@ -1139,6 +1201,12 @@ async function loadCalls(status='pending'){
       <a href="tel:${c.phone}" class="btn btn-sm" style="background:#dbeafe;color:#1e40af;text-decoration:none">📞 Call</a>
     </div></td></tr>
   `).join('')||'<tr><td colspan="7" style="text-align:center;color:#9ca3af">কোনো কল রিকোয়েস্ট নেই</td></tr>';
+}
+async function syncCatalog(){
+  document.getElementById('syncResult').innerHTML='<span class="spinner"></span> সিঙ্ক হচ্ছে...';
+  const r=await api('/admin/api/catalog/sync',{method:'POST'});
+  if(r.success){document.getElementById('syncResult').textContent=r.message||'সিঙ্ক হয়েছে!';showToast('সিঙ্ক সম্পন্ন!');loadProducts();}
+  else{document.getElementById('syncResult').textContent='❌ '+(r.error||'ত্রুটি');}
 }
 async function updateCall(id,status,notes){
   await api('/admin/api/call/'+id+'/status',{method:'POST',body:JSON.stringify({status,notes})});
