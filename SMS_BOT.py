@@ -228,6 +228,22 @@ def send_image(to, image_url, caption=""):
         return r.status_code in (200, 201)
     except: return False
 
+def download_media(media_id):
+    if not PERMANENT_TOKEN: return None, None
+    try:
+        r = requests.get(f"https://graph.facebook.com/v21.0/{media_id}", headers={"Authorization": f"Bearer {PERMANENT_TOKEN}"}, timeout=15)
+        d = r.json()
+        url = d.get("url")
+        if not url:
+            logger.error("No media URL: %s", d)
+            return None, None
+        r2 = requests.get(url, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}"}, timeout=30)
+        mime = r2.headers.get("content-type", "image/jpeg")
+        return r2.content, mime
+    except Exception as e:
+        logger.error("Download media failed: %s", e)
+        return None, None
+
 # =====================================================================
 # HELPERS
 # =====================================================================
@@ -305,17 +321,50 @@ try:
 except Exception as e: logger.error("Gemini import failed: %s", e)
 
 def get_ai_answer(user_query, session_context=None):
-    if not genai_available or not client: return "দুঃখিত প্রিয় গ্রাহক, এখন AI সার্ভিস অফলাইন।"
+    if not genai_available or not client: return None
     try:
         si = "You are the AI sales assistant for 'Dhaka Exclusive' (Bangladesh).\n1. NEVER say 'নমস্কার'. ALWAYS 'প্রিয় গ্রাহক'.\n2. Short, polite, Bengali replies. Taka only.\n3. You CAN track orders and take orders.\n\nPRODUCTS:\n" + format_catalog()
         cfg = types.GenerateContentConfig(system_instruction=si, temperature=0.15, max_output_tokens=500)
         return client.models.generate_content(model=MODEL_NAME, contents=user_query, config=cfg).text
-    except: return "দুঃখিত প্রিয় গ্রাহক, সিস্টেম ব্যস্ত।"
+    except Exception as e:
+        logger.error("Gemini text error: %s", e)
+        return None
+
+def analyze_image(image_bytes, mime_type="image/jpeg"):
+    if not genai_available or not client: return None
+    try:
+        prompt = "তুমি Dhaka Exclusive-এর AI সেলস অ্যাসিস্ট্যান্ট। এই ছবিতে কোন প্রোডাক্ট আছে বলো। নাম, বৈশিষ্ট্য, আনুমানিক দাম (বাংলাদেশি টাকায়), এবং কিনতে আগ্রহী হলে কী করতে হবে তা বলো। সরাসরি গ্রাহককে উত্তর দেওয়ার মতো করে বাংলায় লেখো।"
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(text=prompt),
+                        types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes))
+                    ]
+                )
+            ],
+            config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=500)
+        )
+        return response.text
+    except Exception as e:
+        logger.error("Image AI failed: %s", e)
+        return None
 
 # =====================================================================
 # MAIN PROCESSOR
 # =====================================================================
 def process_webhook_async(msg, from_number):
+    try:
+        _process_webhook(msg, from_number)
+    except Exception as e:
+        logger.error("WEBHOOK CRASH: %s", e, exc_info=True)
+        try:
+            send_text(from_number, "প্রিয় গ্রাহক, একটু ত্রুটি হয়েছে। আবার চেষ্টা করুন।")
+        except: pass
+
+def _process_webhook(msg, from_number):
     msg_type = msg.get("type")
     msg_id = msg.get("id")
     try:
@@ -332,6 +381,14 @@ def process_webhook_async(msg, from_number):
         send_text(from_number, "প্রিয় গ্রাহক, ভয়েস মেসেজ সাপোর্টেড নয়।")
         return
     if msg_type == "image":
+        media_id = msg.get("image", {}).get("id")
+        if media_id and genai_available:
+            image_bytes, mime_type = download_media(media_id)
+            if image_bytes:
+                analysis = analyze_image(image_bytes, mime_type)
+                if analysis:
+                    send_text(from_number, f"📸 {analysis}\n\n🛒 কিনতে চাইলে 'কিনব' লিখুন।")
+                    return
         cap = msg.get("image", {}).get("caption", "").lower()
         if any(k in cap for k in ["কত", "দাম", "কিনব", "চাই", "price"]): send_text(from_number, "📸 প্রোডাক্ট ছবি পেয়েছি! আমাদের ক্যাটালগ দেখতে 'কিনব' লিখুন।")
         elif any(k in cap for k in ["পেমেন্ট", "টাকা", "bkash", "nagad", "paid"]): send_text(from_number, "💳 পেমেন্ট রিসিপ্ট পেয়েছি! আপনার অর্ডার আইডি দিন।")
@@ -786,7 +843,10 @@ def api_sync_catalog():
         image = item.get("image_url", "") or item.get("imageUrl", "")
         avail = item.get("availability", "")
         stock = 50 if avail and "in_stock" in str(avail).lower() else 0
-        if not name or price <= 0: continue
+        if not name: continue
+        # Facebook sometimes returns no price — default to 100 so admin can edit later
+        if price <= 0:
+            price = 100
         existing = db_query("SELECT id FROM products WHERE name = ?", (name,), fetchone=True)
         if existing:
             db_query("UPDATE products SET price=?, stock=?, description=?, image_url=? WHERE id=?", (price, stock, desc, image, existing["id"]), commit=True)
