@@ -1,15 +1,13 @@
 import os
 import sys
 import json
-import re
 import sqlite3
-import time
-import hmac
-import hashlib
 import logging
 import functools
-from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
+import hmac
+import hashlib
+from datetime import datetime
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from threading import Thread, Lock
 import requests
 
@@ -23,6 +21,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 application = app
 
+# Environment Variables
 PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "AIzaSyCRZIRWSoenfhA33qr7rkzoa56Byun0IWU")
@@ -39,57 +38,53 @@ PATHAO_MERCHANT_PASSWORD = os.environ.get("PATHAO_MERCHANT_PASSWORD", "trustedaA
 BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Dhaka Exclusive")
 BUSINESS_HOURS = os.environ.get("BUSINESS_HOURS", "09:00-21:00")
 
-DB_FILE = "bot_v3.db"
+DB_FILE = "bot_v5_fully_dynamic.db"
 db_lock = Lock()
 
 def init_db():
-    try:
-        with db_lock:
-            conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-            c = conn.cursor()
-            tables = [
-                "CREATE TABLE IF NOT EXISTS messages (msg_id TEXT PRIMARY KEY, from_number TEXT, content TEXT, msg_type TEXT DEFAULT 'text', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-                "CREATE TABLE IF NOT EXISTS sessions (phone TEXT PRIMARY KEY, state TEXT DEFAULT 'idle', context TEXT DEFAULT '{}', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-                "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, address TEXT, city_id INTEGER DEFAULT 1, zone_id INTEGER DEFAULT 1, area_id INTEGER DEFAULT 1, product_id INTEGER, quantity INTEGER DEFAULT 1, price INTEGER, delivery_charge INTEGER DEFAULT 80, discount INTEGER DEFAULT 0, total INTEGER, payment_method TEXT DEFAULT 'cod', payment_status TEXT DEFAULT 'pending', pathao_consignment_id TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-                "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, description TEXT, stock INTEGER DEFAULT 0, active INTEGER DEFAULT 1, image_url TEXT DEFAULT '')",
-                "CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT, language TEXT DEFAULT 'bn', first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, total_orders INTEGER DEFAULT 0, total_spent INTEGER DEFAULT 0)",
-                "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-                "CREATE TABLE IF NOT EXISTS pathao_webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT, consignment_id TEXT, order_id TEXT, status TEXT, raw_payload TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-                "CREATE TABLE IF NOT EXISTS call_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, reason TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-            ]
-            for t in tables:
-                c.execute(t)
-            defaults = [("business_name", BUSINESS_NAME), ("logo_url", ""), ("primary_color", "#667eea"), ("header_color", "#1f2937"), ("accent_color", "#10b981")]
-            for k, v in defaults:
-                c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
-            conn.commit()
-            conn.close()
-            logger.info("Database initialized successfully with call_requests support")
-    except Exception as e:
-        logger.error("Database init failed: %s", e)
-        raise
+    with db_lock:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        tables = [
+            "CREATE TABLE IF NOT EXISTS messages (msg_id TEXT PRIMARY KEY, from_number TEXT, content TEXT, msg_type TEXT DEFAULT 'text', direction TEXT DEFAULT 'inbound', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS sessions (phone TEXT PRIMARY KEY, state TEXT DEFAULT 'idle', context TEXT DEFAULT '{}', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, address TEXT, city_id INTEGER, zone_id INTEGER, area_id INTEGER, product_id INTEGER, quantity INTEGER DEFAULT 1, total INTEGER, delivery_fee INTEGER, pathao_consignment_id TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, description TEXT, stock INTEGER DEFAULT 0, active INTEGER DEFAULT 1, image_url TEXT DEFAULT '')",
+            "CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT, language TEXT DEFAULT 'bn', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS call_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, reason TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        ]
+        for t in tables:
+            c.execute(t)
+        defaults = [
+            ("business_name", BUSINESS_NAME), 
+            ("pathao_base_url", PATHAO_BASE_URL),
+            ("delivery_inside_dhaka", "60"),
+            ("delivery_outside_dhaka", "120")
+        ]
+        for k, v in defaults:
+            c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        conn.commit()
+        conn.close()
 
-try:
-    init_db()
-except Exception as e:
-    logger.critical("Cannot start without database: %s", e)
-    sys.exit(1)
+init_db()
 
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     with db_lock:
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         try:
             c.execute(query, params)
-            if commit: conn.commit(); conn.close(); return True
-            if fetchone: row = c.fetchone(); conn.close(); return dict(row) if row else None
-            if fetchall: rows = c.fetchall(); conn.close(); return [dict(r) for r in rows]
-            conn.close(); return None
+            if commit: conn.commit(); return True
+            if fetchone: row = c.fetchone(); return dict(row) if row else None
+            if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
+            return None
         except Exception as e:
-            logger.error("DB Error: %s | Query: %s", e, query)
-            conn.close()
+            logger.error(f"DB Error: {e} | Query: {query}")
             raise
+        finally:
+            conn.close()
 
 def format_phone(num):
     num = str(num).strip().replace(" ", "").replace("-", "").replace("+", "")
@@ -103,23 +98,16 @@ def login_required(f):
         au = os.environ.get("ADMIN_PANEL_USER", "admin")
         ap = os.environ.get("ADMIN_PANEL_PASS", "admin123")
         if not auth or auth.username != au or auth.password != ap:
-            return ('<h3>অননুমোদিত</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+            return ('<h3>Unauthorized</h3>', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
         return f(*args, **kwargs)
     return decorated
-
-def get_setting(key, default=""):
-    row = db_query("SELECT value FROM settings WHERE key = ?", (key,), fetchone=True)
-    return row["value"] if row else default
-
-def set_setting(key, value):
-    db_query("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (key, value), commit=True)
 
 def get_all_settings():
     rows = db_query("SELECT key, value FROM settings", fetchall=True) or []
     return {r["key"]: r["value"] for r in rows}
 
 # =====================================================================
-# PATHAO API
+# DYNAMIC PATHAO API SEARCH & INTEGRATION
 # =====================================================================
 def get_pathao_token():
     s = get_all_settings()
@@ -128,723 +116,566 @@ def get_pathao_token():
     email = s.get("pathao_merchant_email") or PATHAO_MERCHANT_EMAIL
     pwd = s.get("pathao_merchant_password") or PATHAO_MERCHANT_PASSWORD
     base = s.get("pathao_base_url") or PATHAO_BASE_URL
-    if not all([cid, csec, email, pwd]): return None, "Pathao credentials missing"
+    if not all([cid, csec, email, pwd]): return None, "Credentials missing"
     try:
-        r = requests.post(f"{base}/aladdin/api/v1/issue-token", json={"client_id": cid, "client_secret": csec, "username": email, "password": pwd, "grant_type": "password"}, headers={"content-type": "application/json"}, timeout=15)
+        r = requests.post(f"{base}/aladdin/api/v1/issue-token", json={"client_id": cid, "client_secret": csec, "username": email, "password": pwd, "grant_type": "password"}, headers={"content-type": "application/json"}, timeout=10)
         d = r.json()
-        if r.status_code == 200:
-            token = d.get("token") or d.get("access_token") or d.get("data", {}).get("token")
-            if token: return str(token), None
-        return None, d.get("message", "Token failed")
+        token = d.get("token") or d.get("access_token") or d.get("data", {}).get("token")
+        return (str(token), None) if token else (None, d.get("message", "Token fail"))
     except Exception as e: return None, str(e)
 
-def track_pathao_order(key):
-    token, err = get_pathao_token()
-    if not token: return f"Token Error: {err}"
-    key = str(key).strip().replace("+", "")
-    s = get_all_settings()
-    base = s.get("pathao_base_url") or PATHAO_BASE_URL
+def get_pathao_data(endpoint):
+    token, _ = get_pathao_token()
+    if not token: return []
     try:
-        r = requests.get(f"{base}/aladdin/api/v1/orders/{key}/tracking", headers={"authorization": f"Bearer {token}", "accept": "application/json"}, timeout=15)
-        d = r.json()
-        if r.status_code == 200 and d.get("status") == 200:
-            st = d.get("data", {}).get("order_status", "unknown").lower()
-            mp = {"pending": "পেন্ডিং", "picked": "কুরিয়ারে হস্তান্তরিত", "in_transit": "ডেলিভারির পথে", "delivered": "ডেলিভারি সম্পন্ন", "cancelled": "বাতিল", "returned": "রিটার্ন"}
-            return mp.get(st, st.upper())
-        return "অর্ডার পাওয়া যায়নি।"
-    except: return "ট্র্যাকিং ত্রুটি।"
+        base = get_all_settings().get("pathao_base_url") or PATHAO_BASE_URL
+        r = requests.get(f"{base}{endpoint}", headers={"authorization": f"Bearer {token}", "accept": "application/json"}, timeout=10)
+        return r.json().get("data", {}).get("data", [])
+    except: return []
 
-def create_pathao_order(name, phone, address, city_id=1, zone_id=1, area_id=1, item_desc="", cod_amount=0):
+def create_pathao_order(name, phone, address, city_id, zone_id, area_id, item_desc, cod_amount):
     token, err = get_pathao_token()
     if not token: return False, err
     s = get_all_settings()
     base = s.get("pathao_base_url") or PATHAO_BASE_URL
     store = s.get("pathao_store_id") or PATHAO_STORE_ID
-    phone = format_phone(phone)
     try:
-        r = requests.post(f"{base}/aladdin/api/v1/orders", json={"store_id": int(store) if store else 0, "recipient_name": name, "recipient_phone": phone, "recipient_address": address, "recipient_city": int(city_id), "recipient_zone": int(zone_id), "recipient_area": int(area_id), "delivery_type": 48, "item_type": 2, "special_instruction": "WhatsApp Bot Order", "item_quantity": 1, "amount_to_collect": int(cod_amount), "item_description": item_desc}, headers={"authorization": f"Bearer {token}", "content-type": "application/json"}, timeout=15)
+        payload = {"store_id": int(store) if store else 0, "recipient_name": name, "recipient_phone": format_phone(phone), "recipient_address": address, "recipient_city": int(city_id), "recipient_zone": int(zone_id), "recipient_area": int(area_id), "delivery_type": 48, "item_type": 2, "special_instruction": "WhatsApp fully dynamic bot", "item_quantity": 1, "amount_to_collect": int(cod_amount), "item_description": item_desc}
+        r = requests.post(f"{base}/aladdin/api/v1/orders", json=payload, headers={"authorization": f"Bearer {token}", "content-type": "application/json"}, timeout=15)
         d = r.json()
         if r.status_code == 200 and d.get("status") == 200: return True, d.get("data", {}).get("consignment_id")
         return False, d.get("message", r.text)
     except Exception as e: return False, str(e)
 
-def get_pathao_cities():
-    token, _ = get_pathao_token()
-    if not token: return []
-    try:
-        s = get_all_settings()
-        base = s.get("pathao_base_url") or PATHAO_BASE_URL
-        r = requests.get(f"{base}/aladdin/api/v1/countries/1/city-list", headers={"authorization": f"Bearer {token}", "accept": "application/json"}, timeout=10)
-        return r.json().get("data", {}).get("data", [])
-    except: return []
-
-def get_pathao_zones(cid):
-    token, _ = get_pathao_token()
-    if not token: return []
-    try:
-        s = get_all_settings()
-        base = s.get("pathao_base_url") or PATHAO_BASE_URL
-        r = requests.get(f"{base}/aladdin/api/v1/cities/{cid}/zone-list", headers={"authorization": f"Bearer {token}", "accept": "application/json"}, timeout=10)
-        return r.json().get("data", {}).get("data", [])
-    except: return []
-
-def get_pathao_areas(zid):
-    token, _ = get_pathao_token()
-    if not token: return []
-    try:
-        s = get_all_settings()
-        base = s.get("pathao_base_url") or PATHAO_BASE_URL
-        r = requests.get(f"{base}/aladdin/api/v1/zones/{zid}/area-list", headers={"authorization": f"Bearer {token}", "accept": "application/json"}, timeout=10)
-        return r.json().get("data", {}).get("data", [])
-    except: return []
-
 # =====================================================================
-# WHATSAPP
+# WHATSAPP API & AI CORES
 # =====================================================================
-def send_text(to, body):
+def send_whatsapp(to, payload_type, content, extra=None):
     if not PERMANENT_TOKEN or not PHONE_NUMBER_ID: return False
+    url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}
+    body = {"messaging_product": "whatsapp", "to": format_phone(to), "type": payload_type}
+    if payload_type == "text": body["text"] = {"body": content}
+    elif payload_type == "image": body["image"] = {"link": content, "caption": extra or ""}
+    elif payload_type == "interactive": body["interactive"] = content
     try:
-        r = requests.post(f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages", json={"messaging_product": "whatsapp", "to": format_phone(to), "type": "text", "text": {"body": body}}, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}, timeout=15)
-        return r.status_code in (200, 201)
+        r = requests.post(url, json=body, headers=headers, timeout=10)
+        if r.status_code in [200, 201]:
+            db_query("INSERT INTO messages (msg_id, from_number, content, msg_type, direction) VALUES (?, ?, ?, ?, 'outbound')", (r.json().get("messages",[{}])[0].get("id", "out"), to, str(content), payload_type), commit=True)
+            return True
+        return False
     except: return False
 
-def send_buttons(to, body, buttons):
-    if not PERMANENT_TOKEN or not PHONE_NUMBER_ID: return False
+def get_ai_answer(user_query):
+    if not GEMINI_KEY: return "আমাদের প্রতিনিধি খুব দ্রুত আপনার সাথে যোগাযোগ করবেন।"
     try:
-        r = requests.post(f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages", json={"messaging_product": "whatsapp", "to": format_phone(to), "type": "interactive", "interactive": {"type": "button", "body": {"text": body}, "action": {"buttons text": [{"type": "reply", "reply": {"id": b["id"], "title": b["title"]}} for b in buttons[:3]]}}}, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}, timeout=15)
-        return r.status_code in (200, 201)
-    except: return False
-
-def send_list_menu(to, body, btntext, sections):
-    if not PERMANENT_TOKEN or not PHONE_NUMBER_ID: return False
-    try:
-        r = requests.post(f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages", json={"messaging_product": "whatsapp", "to": format_phone(to), "type": "interactive", "interactive": {"type": "list", "body": {"text": body}, "action": {"button": btntext, "sections": sections}}}, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}, timeout=15)
-        return r.status_code in (200, 201)
-    except: return False
-
-def send_image(to, image_url, caption=""):
-    if not PERMANENT_TOKEN or not PHONE_NUMBER_ID: return False
-    try:
-        r = requests.post(f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages", json={"messaging_product": "whatsapp", "to": format_phone(to), "type": "image", "image": {"link": image_url, "caption": caption}}, headers={"Authorization": f"Bearer {PERMANENT_TOKEN}", "Content-Type": "application/json"}, timeout=15)
-        return r.status_code in (200, 201)
-    except: return False
-
-# =====================================================================
-# HELPERS
-# =====================================================================
-def get_products():
-    try: return db_query("SELECT * FROM products WHERE active = 1 ORDER BY id DESC", fetchall=True)
-    except: return []
-
-def get_product_by_id(pid):
-    try: return db_query("SELECT * FROM products WHERE id = ?", (pid,), fetchone=True)
-    except: return None
-
-def format_catalog():
-    p = get_products()
-    if not p: return "কোনো প্রোডাক্ট আপডেট হয়নি।"
-    return "\n".join([f"🔹 {x['name']} — {x['price']}৳" for x in p])
-
-def get_session(phone):
-    try: return db_query("SELECT * FROM sessions WHERE phone = ?", (phone,), fetchone=True)
-    except: return None
-
-def set_session(phone, state, ctx=None):
-    try:
-        c = json.dumps(ctx or {}, ensure_ascii=False)
-        e = get_session(phone)
-        if e: db_query("UPDATE sessions SET state = ?, context = ?, last_active = CURRENT_TIMESTAMP WHERE phone = ?", (state, c, phone), commit=True)
-        else: db_query("INSERT INTO sessions (phone, state, context) VALUES (?, ?, ?)", (phone, state, c), commit=True)
-    except: pass
-
-def get_context(phone):
-    try:
-        s = get_session(phone)
-        return json.loads(s["context"]) if s and s.get("context") else {}
-    except: return {}
-
-def update_context(phone, key, value):
-    try:
-        s = get_session(phone)
-        ctx = json.loads(s["context"]) if s and s.get("context") else {}
-        ctx[key] = value
-        set_session(phone, s["state"] if s else "idle", ctx)
-    except: pass
-
-def ensure_user(phone):
-    try:
-        u = db_query("SELECT * FROM users WHERE phone = ?", (phone,), fetchone=True)
-        if not u: db_query("INSERT OR IGNORE INTO users (phone) VALUES (?)", (phone,), commit=True)
-        else: db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
-    except: pass
-
-def log_message(msg_id, phone, content, msg_type="text"):
-    try: db_query("INSERT OR IGNORE INTO messages (msg_id, from_number, content, msg_type) VALUES (?, ?, ?, ?)", (msg_id, phone, content, msg_type), commit=True)
-    except: pass
-
-def is_rate_limited(phone):
-    try:
-        ago = (datetime.utcnow() - timedelta(minutes=1)).isoformat()
-        c = db_query("SELECT COUNT(*) as cnt FROM messages WHERE from_number = ? AND created_at > ?", (phone, ago), fetchone=True)
-        return c and c["cnt"] >= 10
-    except: return False
-
-def verify_meta_signature(payload, signature):
-    if not APP_SECRET: return True
-    if not signature: return False
-    sha_name, signature_val = signature.split('=')
-    if sha_name != 'sha256': return False
-    mac = hmac.new(APP_SECRET.encode('utf-8'), payload, hashlib.sha256)
-    return hmac.compare_digest(mac.hexdigest(), signature_val)
-
-# =====================================================================
-# AI
-# =====================================================================
-genai_available = False
-client = None
-MODEL_NAME = "gemini-2.5-flash"
-try:
-    from google import genai
-    from google.genai import types
-    if GEMINI_KEY:
+        from google import genai
+        from google.genai import types
         client = genai.Client(api_key=GEMINI_KEY)
-        genai_available = True
-        logger.info("Gemini loaded")
-    else: logger.warning("GEMINI_KEY missing")
-except Exception as e: logger.error("Gemini import failed: %s", e)
-
-def get_ai_answer(user_query, session_context=None):
-    if not genai_available or not client: return "দুঃখিত প্রিয় গ্রাহক, এখন AI সার্ভিস অফলাইন।"
-    try:
-        si = "You are the AI sales assistant for 'Dhaka Exclusive' (Bangladesh).\n1. NEVER say 'নমস্কার'. ALWAYS 'প্রিয় গ্রাহক'.\n2. Short, polite, Bengali replies. Taka only.\n3. You CAN track orders and take orders.\n\nPRODUCTS:\n" + format_catalog()
-        cfg = types.GenerateContentConfig(system_instruction=si, temperature=0.15, max_output_tokens=500)
-        return client.models.generate_content(model=MODEL_NAME, contents=user_query, config=cfg).text
-    except: return "দুঃখিত প্রিয় গ্রাহক, সিস্টেম ব্যস্ত।"
+        p_rows = db_query("SELECT * FROM products WHERE active = 1 AND stock > 0", fetchall=True) or []
+        catalog = "\n".join([f"- {p['name']}: {p['price']}৳ ({p['description']}) [Stock: {p['stock']}]" for p in p_rows])
+        s = get_all_settings()
+        si = f"You are the AI Sales Executive for '{s.get('business_name')}' in Bangladesh. Answer shortly and sweetly in Bengali. Catalog:\n{catalog}"
+        cfg = types.GenerateContentConfig(system_instruction=si, temperature=0.2, max_output_tokens=300)
+        return client.models.generate_content(model="gemini-2.5-flash", contents=user_query, config=cfg).text
+    except: return "আপনার প্রশ্নটি রেকর্ড করা হয়েছে। আমাদের কাস্টমার কেয়ার টিম মেসেজ দিচ্ছে।"
 
 # =====================================================================
-# MAIN PROCESSOR
+# 100% DYNAMIC INTERACTIVE WEBHOOK WORKFLOW
 # =====================================================================
 def process_webhook_async(msg, from_number):
-    msg_type = msg.get("type")
     msg_id = msg.get("id")
-    try:
-        if db_query("SELECT 1 FROM messages WHERE msg_id = ?", (msg_id,), fetchone=True): return
-    except: pass
-    log_message(msg_id, from_number, str(msg), msg_type)
-    ensure_user(from_number)
-    try:
-        if is_rate_limited(from_number):
-            send_text(from_number, "প্রিয় গ্রাহক, অনেক মেসেজ পাঠিয়েছেন। কিছুক্ষণ অপেক্ষা করুন।")
-            return
-    except: pass
-    if msg_type in ["audio", "voice"]:
-        send_text(from_number, "প্রিয় গ্রাহক, ভয়েস মেসেজ সাপোর্টেড নয়।")
-        return
-    if msg_type == "image":
-        cap = msg.get("image", {}).get("caption", "").lower()
-        if any(k in cap for k in ["কত", "দাম", "কিনব", "চাই", "price"]): send_text(from_number, "📸 প্রোডাক্ট ছবি পেয়েছি! আমাদের ক্যাটালগ দেখতে 'কিনব' লিখুন।")
-        elif any(k in cap for k in ["পেমেন্ট", "টাকা", "bkash", "nagad", "paid"]): send_text(from_number, "💳 পেমেন্ট রিসিপ্ট পেয়েছি! আপনার অর্ডার আইডি দিন।")
-        else: send_text(from_number, "📸 ছবি পেয়েছি! প্রোডাক্ট কিনতে চাইলে 'কিনব' লিখুন।")
-        return
-    if msg_type != "text":
-        send_text(from_number, "প্রিয় গ্রাহক, শুধু টেক্সট বুঝি।")
-        return
-    user_text = msg["text"]["body"].strip()
-    session = get_session(from_number)
-    state = session["state"] if session else "idle"
-    context = get_context(from_number)
+    if db_query("SELECT 1 FROM messages WHERE msg_id = ?", (msg_id,), fetchone=True): return
+    msg_type = msg.get("type", "text")
+    body_text = msg.get("text", {}).get("body", "").strip() if msg_type == "text" else ""
+    if msg_type == "interactive":
+        int_type = msg.get("interactive", {}).get("type")
+        if int_type == "list_reply": body_text = msg["interactive"]["list_reply"]["id"]
+        elif int_type == "button_reply": body_text = msg["interactive"]["button_reply"]["id"]
+    
+    db_query("INSERT INTO messages (msg_id, from_number, content, msg_type, direction) VALUES (?, ?, ?, ?, 'inbound')", (msg_id, from_number, body_text if body_text else f"[{msg_type}]", msg_type), commit=True)
+    db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, 'Customer')", (from_number,), commit=True)
+    db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (from_number,), commit=True)
 
-    if any(k in user_text.lower() for k in ["কল চাই", "call", "ফোন", "phone", "প্রতিনিধি", "agent", "কথা বলতে চাই", "মানুষের সাথে"]):
-        user = db_query("SELECT name FROM users WHERE phone = ?", (from_number,), fetchone=True)
-        name = user["name"] if user else "অজানা"
-        db_query("INSERT INTO call_requests (phone, name, reason, status) VALUES (?, ?, ?, ?)", (from_number, name, user_text[:100], "pending"), commit=True)
-        send_text(from_number, "📞 প্রিয় গ্রাহক, আপনার কল রিকোয়েস্ট গ্রহণ করা হয়েছে!\n\nআমাদের প্রতিনিধি শীঘ্রই আপনাকে কল ব্যাক করবেন (সাধারণত ১০-৩০ মিনিটের মধ্যে)।\n\nজরুরি প্রয়োজনে সরাসরি কল করুন:\n📲 ০১৭৪২২৬৭৮৫৬")
-        for admin in ADMIN_NUMBERS:
-            send_text(admin, f"📞 নতুন কল রিকোয়েস্ট!\n👤 {name}\n📱 {from_number}\n📝 কারণ: {user_text[:80]}\n\nএডমিন প্যানেলে দেখুন: /admin")
+    if any(k in body_text.lower() for k in ["call", "কল", "ফোন", "কথা", "প্রতিনিধি"]):
+        db_query("INSERT INTO call_requests (phone, name, reason) VALUES (?, 'Customer', ?)", (from_number, body_text[:100]), commit=True)
+        send_whatsapp(from_number, "text", "📞 ধন্যবাদ। আপনার কল ব্যাক রিকোয়েস্টটি লাইভ অ্যাডমিন প্যানেলে পাঠানো হয়েছে।")
         return
 
-    if user_text.lower().startswith("admin:"):
-        if from_number not in ADMIN_NUMBERS:
-            send_text(from_number, "দুঃখিত, এই কমান্ড শুধু অ্যাডমিনের জন্য।")
+    sess = db_query("SELECT * FROM sessions WHERE phone = ?", (from_number,), fetchone=True)
+    state = sess["state"] if sess else "idle"
+    ctx = json.loads(sess["context"]) if sess and sess.get("context") else {}
+
+    # State: IDLE -> Trigger Catalogue
+    if state == "idle" and any(k in body_text.lower() for k in ["কিনব", "অর্ডার", "buy", "order", "প্রোডাক্ট"]):
+        products = db_query("SELECT * FROM products WHERE active = 1 AND stock > 0 LIMIT 10", fetchall=True) or []
+        if not products:
+            send_whatsapp(from_number, "text", "দুঃখিত, আমাদের সবগুলো প্রোডাক্ট এই মুহূর্তে স্টক-আউট আছে।")
             return
-        cmd = user_text[6:].strip()
-        if cmd.lower().startswith("help"):
-            send_text(from_number, "🔧 অ্যাডমিন কমান্ড:\nadmin:stats\nadmin:broadcast মেসেজ\nadmin:calls")
-            return
-        if cmd.lower().startswith("calls"):
-            calls = db_query("SELECT * FROM call_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 5", fetchall=True) or []
-            if not calls:
-                send_text(from_number, "📞 কোনো পেন্ডিং কল রিকোয়েস্ট নেই।")
-                return
-            msg = "📞 পেন্ডিং কল রিকোয়েস্ট:\n"
-            for c in calls:
-                msg += f"\n👤 {c['name'] or 'N/A'}\n📱 {c['phone']}\n📝 {c['reason'] or 'N/A'}\n⏰ {c['created_at']}\n---"
-            send_text(from_number, msg)
-            return
-        send_text(from_number, "অজানা কমান্ড। admin:help লিখুন।")
+        rows = [{"id": f"p_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳"} for p in products]
+        menu = {"type": "list", "body": {"text": "আমাদের লাইভ স্টক ক্যাটালগ থেকে প্রোডাক্টটি সিলেক্ট করুন:"}, "action": {"button": "প্রোডাক্ট লিস্ট", "sections": [{"title": "স্টক আইটেম", "rows": rows}]}}
+        db_query("INSERT INTO sessions (phone, state, context) VALUES (?, 'selecting_product', '{}') ON CONFLICT(phone) DO UPDATE SET state='selecting_product', context='{}'", (from_number,), commit=True)
+        send_whatsapp(from_number, "interactive", menu)
         return
 
-    if any(k in user_text.lower() for k in ["তুমি কি কি পারো", "what can you do", "কি কি পারো", "তোমার কাজ কি"]):
-        send_text(from_number, "🙋‍♂️ প্রিয় গ্রাহক, আমি আপনাকে সাহায্য করতে পারি:\n\n1️⃣ 🛒 প্রোডাক্ট অর্ডার করতে\n2️⃣ 📦 আপনার অর্ডার ট্র্যাক করতে\n3️⃣ 💰 প্রোডাক্টের দাম ও তথ্য জানতে\n\nকীভাবে সাহায্য করতে পারি?")
+    # State: Selecting Product
+    if state == "selecting_product" and body_text.startswith("p_"):
+        pid = int(body_text.split("_")[1])
+        p = db_query("SELECT * FROM products WHERE id = ?", (pid,), fetchone=True)
+        if p:
+            ctx = {"product_id": pid, "name": p["name"], "price": p["price"], "max_stock": p["stock"]}
+            # Generate Dynamic Quantity Buttons based on Live Stock
+            buttons = []
+            for i in range(1, min(p["stock"] + 1, 4)):
+                buttons.append({"type": "reply", "reply": {"id": f"q_{i}", "title": f"{i} পিস"}})
+            
+            btns = {"type": "button", "body": {"text": f"🔹 {p['name']}\n💰 মূল্য: {p['price']}৳\n📊 স্টকে আছে: {p['stock']} টি\n\nআপনি কত পিস অর্ডার করতে চান?"}, "action": {"buttons": buttons}}
+            db_query("UPDATE sessions SET state='selecting_qty', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+            if p.get("image_url"): send_whatsapp(from_number, "image", p["image_url"], p["name"])
+            send_whatsapp(from_number, "interactive", btns)
+            return
+
+    # State: Selecting Quantity
+    if state == "selecting_qty" and body_text.startswith("q_"):
+        qty = int(body_text.split("_")[1])
+        ctx["quantity"] = qty
+        ctx["subtotal"] = ctx["price"] * qty
+        db_query("UPDATE sessions SET state='awaiting_name', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+        send_whatsapp(from_number, "text", "📝 ধন্যবাদ! এবার অনুগ্রহ করে আপনার সম্পূর্ণ নাম টাইপ করুন:")
         return
 
-    if any(k in user_text.lower() for k in ["অর্ডার কোথায়", "আমার অর্ডার", "ট্র্যাক", "track", "কোথায় আছে", "ডেলিভারি কোথায়"]):
-        orders = db_query("SELECT * FROM orders WHERE phone = ? ORDER BY created_at DESC LIMIT 1", (from_number,), fetchone=True)
-        if orders and orders.get("pathao_consignment_id"):
-            live = track_pathao_order(orders["pathao_consignment_id"])
-            send_text(from_number, f"📦 আপনার সর্বশেষ অর্ডার (#{orders['id']}):\n\n📌 স্ট্যাটাস: {live}\n🆔 Tracking: {orders['pathao_consignment_id']}")
+    # State: Awaiting Name
+    if state == "awaiting_name" and body_text:
+        ctx["cust_name"] = body_text
+        db_query("UPDATE sessions SET state='awaiting_address', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+        send_whatsapp(from_number, "text", "📍 আপনার সম্পূর্ণ ডেলিভারি ঠিকানা (বাসা নম্বর, রোড, এলাকা) দিন:")
+        return
+
+    # State: Awaiting Address -> Fetch 100% Dynamic Cities from Pathao API matching user text input
+    if state == "awaiting_address" and body_text:
+        ctx["address"] = body_text
+        # Dynamic Search on Pathao API matching user context
+        all_cities = get_pathao_data("/aladdin/api/v1/countries/1/city-list")
+        search_query = body_text.split(",")[-1].strip().lower() # Check last word for city guess
+        
+        filtered_cities = [c for c in all_cities if search_query in c['city_name'].lower()][:10]
+        if not filtered_cities: filtered_cities = all_cities[:10] # Fallback to top cities
+        
+        rows = [{"id": f"c_{c['city_id']}_{c['city_name']}", "title": c['city_name'][:24]} for c in filtered_cities]
+        menu = {"type": "list", "body": {"text": "আপনার ঠিকানা অনুযায়ী নিচে থেকে আপনার শহরটি সুনির্দিষ্টভাবে সিলেক্ট করুন:"}, "action": {"button": "শহর সিলেক্ট করুন", "sections": [{"title": "শহরসমূহ", "rows": rows}]}}
+        db_query("UPDATE sessions SET state='selecting_city', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+        send_whatsapp(from_number, "interactive", menu)
+        return
+
+    # State: Selecting City -> Fetch Dynamic Zones from Pathao
+    if state == "selecting_city" and body_text.startswith("c_"):
+        parts = body_text.split("_")
+        cid = int(parts[1])
+        cname = parts[2]
+        ctx["city_id"] = cid
+        ctx["city_name"] = cname
+        
+        # Calculate Fully Dynamic Delivery Fee based on City Name
+        s = get_all_settings()
+        if "dhaka" in cname.lower():
+            ctx["delivery_fee"] = int(s.get("delivery_inside_dhaka", 60))
         else:
-            send_text(from_number, "📦 অর্ডার ট্র্যাক করতে আপনার ফোন নম্বর বা Tracking ID দিন:\n(যেমন: 01712XXXXXX)")
+            ctx["delivery_fee"] = int(s.get("delivery_outside_dhaka", 120))
+
+        zones = get_pathao_data(f"/aladdin/api/v1/cities/{cid}/zone-list")[:10]
+        if zones:
+            rows = [{"id": f"z_{z['zone_id']}", "title": z['zone_name'][:24]} for z in zones]
+            menu = {"type": "list", "body": {"text": "এবার আপনার নির্দিষ্ট জোন/থানাটি সিলেক্ট করুন:"}, "action": {"button": "জোন সিলেক্ট করুন", "sections": [{"title": "জোন/থানা সমূহ", "rows": rows}]}}
+            db_query("UPDATE sessions SET state='selecting_zone', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+            send_whatsapp(from_number, "interactive", menu)
+        else:
+            ctx["zone_id"], ctx["area_id"] = 1, 1
+            confirm_order_final(from_number, ctx)
         return
 
-    clean = user_text.replace(" ", "").replace("+", "").strip()
-    if clean.isdigit() and (len(clean) == 11 or len(clean) == 13) and clean.startswith(("01", "8801")):
-        live = track_pathao_order(clean)
-        send_text(from_number, f"প্রিয় গ্রাহক, আপনার অর্ডারের অবস্থা:\n\n📌 {live}")
-        return
-
-    if state == "idle" and any(k in user_text.lower() for k in ["কিনব", "অর্ডার", "চাই", "buy", "order"]):
-        products = get_products()
-        if products:
-            sections = [{"title": "আমাদের প্রোডাক্ট", "rows": [{"id": f"product_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳ | স্টক: {p['stock']}"} for p in products[:10]]}]
-            set_session(from_number, "selecting_product", {})
-            send_list_menu(from_number, "কোন প্রোডাক্ট কিনতে চান?", "প্রোডাক্ট", sections)
-            return
-
-    if state == "selecting_product":
-        if user_text.startswith("product_"):
-            pid = int(user_text.replace("product_", ""))
-            product = get_product_by_id(pid)
-            if product:
-                ctx = {"product_id": pid, "product_name": product["name"], "price": product["price"]}
-                set_session(from_number, "selecting_qty", ctx)
-                if product.get("image_url"): send_image(from_number, product["image_url"], f"🔹 {product['name']}\n💰 {product['price']}৳")
-                send_buttons(from_number, f"🔹 {product['name']}\n💰 {product['price']}৳\n\nকতটি চান?", [{"id": "qty_1", "title": "১টি"}, {"id": "qty_2", "title": "২টি"}, {"id": "qty_3", "title": "৩টি"}])
-                return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে প্রোডাক্ট বাছাই করুন।")
-        return
-
-    if state == "selecting_qty":
-        qm = {"qty_1": 1, "qty_2": 2, "qty_3": 3, "1": 1, "2": 2, "3": 3, "১": 1, "২": 2, "৩": 3}
-        qty = qm.get(user_text, 1)
-        ctx = get_context(from_number)
-        ctx["quantity"] = qty; ctx["subtotal"] = ctx["price"] * qty
-        set_session(from_number, "awaiting_name", ctx)
-        send_text(from_number, f"✅ {qty}টি '{ctx['product_name']}'। আপনার সম্পূর্ণ নাম:")
-        return
-
-    if state == "awaiting_name":
-        update_context(from_number, "name", user_text)
-        set_session(from_number, "awaiting_phone", get_context(from_number))
-        send_text(from_number, "ধন্যবাদ! এখন ১১ সংখ্যার মোবাইল নম্বর (যেমন: 01712XXXXXX):")
-        return
-
-    if state == "awaiting_phone":
-        c = user_text.replace(" ", "").replace("+", "").replace("-", "")
-        if not (c.startswith("01") and len(c) == 11):
-            send_text(from_number, "❌ সঠিক বাংলাদেশি নম্বর দিন (যেমন: 01712XXXXXX):")
-            return
-        update_context(from_number, "phone", c)
-        set_session(from_number, "awaiting_address", get_context(from_number))
-        send_text(from_number, "অসাধারণ! সম্পূর্ণ ডেলিভারি ঠিকানা:")
-        return
-
-    if state == "awaiting_address":
-        update_context(from_number, "address", user_text)
-        ctx = get_context(from_number)
-        cities = get_pathao_cities()
-        if cities:
-            sections = [{"title": "শহর", "rows": [{"id": f"city_{c['city_id']}", "title": c['city_name'][:24]} for c in cities[:10]]}]
-            set_session(from_number, "selecting_city", ctx)
-            send_list_menu(from_number, "ডেলিভারির জন্য শহর বাছাই করুন:", "শহর", sections)
-            return
-        ctx["city_id"] = 1
-        set_session(from_number, "selecting_payment", ctx)
-        send_payment_options(from_number, ctx)
-        return
-
-    if state == "selecting_city":
-        if user_text.startswith("city_"):
-            cid = int(user_text.replace("city_", ""))
-            ctx = get_context(from_number)
-            ctx["city_id"] = cid
-            zones = get_pathao_zones(cid)
-            if zones:
-                sections = [{"title": "জোন", "rows": [{"id": f"zone_{z['zone_id']}", "title": z['zone_name'][:24]} for z in zones[:10]]}]
-                set_session(from_number, "selecting_zone", ctx)
-                send_list_menu(from_number, "জোন বাছাই করুন:", "জোন", sections)
-                return
-            ctx["zone_id"] = 1; ctx["area_id"] = 1
-            set_session(from_number, "selecting_payment", ctx)
-            send_payment_options(from_number, ctx)
-            return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে শহর বাছাই করুন।")
-        return
-
-    if state == "selecting_zone":
-        if user_text.startswith("zone_"):
-            zid = int(user_text.replace("zone_", ""))
-            ctx = get_context(from_number)
-            ctx["zone_id"] = zid
-            areas = get_pathao_areas(zid)
-            if areas:
-                sections = [{"title": "এরিয়া", "rows": [{"id": f"area_{a['area_id']}", "title": a['area_name'][:24]} for a in areas[:10]]}]
-                set_session(from_number, "selecting_area", ctx)
-                send_list_menu(from_number, "এরিয়া বাছাই করুন:", "এরিয়া", sections)
-                return
+    # State: Selecting Zone -> Fetch Dynamic Areas from Pathao
+    if state == "selecting_zone" and body_text.startswith("z_"):
+        zid = int(body_text.split("_")[1])
+        ctx["zone_id"] = zid
+        areas = get_pathao_data(f"/aladdin/api/v1/zones/{zid}/area-list")[:10]
+        if areas:
+            rows = [{"id": f"a_{a['area_id']}", "title": a['area_name'][:24]} for a in areas]
+            menu = {"type": "list", "body": {"text": "সর্বশেষ, আপনার ডেলিভারি এরিয়া/পোস্টাল কোড এরিয়া সিলেক্ট করুন:"}, "action": {"button": "এরিয়া সিলেক্ট করুন", "sections": [{"title": "এরিয়া তালিকা", "rows": rows}]}}
+            db_query("UPDATE sessions SET state='selecting_area', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+            send_whatsapp(from_number, "interactive", menu)
+        else:
             ctx["area_id"] = 1
-            set_session(from_number, "selecting_payment", ctx)
-            send_payment_options(from_number, ctx)
-            return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে জোন বাছাই করুন।")
+            confirm_order_final(from_number, ctx)
         return
 
-    if state == "selecting_area":
-        if user_text.startswith("area_"):
-            aid = int(user_text.replace("area_", ""))
-            ctx = get_context(from_number)
-            ctx["area_id"] = aid
-            set_session(from_number, "selecting_payment", ctx)
-            send_payment_options(from_number, ctx)
-            return
-        send_text(from_number, "অনুগ্রহ করে লিস্ট থেকে এরিয়া বাছাই করুন।")
+    # State: Selecting Area
+    if state == "selecting_area" and body_text.startswith("a_"):
+        ctx["area_id"] = int(body_text.split("_")[1])
+        confirm_order_final(from_number, ctx)
         return
 
-    if state == "selecting_payment":
-        ctx = get_context(from_number)
-        ctx["payment_method"] = "cod"; ctx["delivery_charge"] = 80; ctx["total"] = ctx["subtotal"] + 80
-        set_session(from_number, "awaiting_confirmation", ctx)
-        summary = f"📦 ফাইনাল অর্ডার\n━━━━━━━━━━━━━━\n🔹 {ctx['product_name']} x {ctx['quantity']}\n💰 প্রাইস: {ctx['subtotal']}৳\n🚚 ডেলিভারি: {ctx['delivery_charge']}৳\n━━━━━━━━━━━━━━\n💵 মোট: {ctx['total']}৳\n👤 {ctx['name']}\n📞 {ctx['phone']}\n📍 {ctx['address']}\n\nঅর্ডার কনফার্ম করতে 'হ্যাঁ' লিখুন।"
-        send_buttons(from_number, summary, [{"id": "confirm_yes", "title": "✅ হ্যাঁ"}, {"id": "confirm_no", "title": "❌ না"}])
-        return
-
+    # State: Final Confirmation Order Processing
     if state == "awaiting_confirmation":
-        if user_text in ["হ্যাঁ", "yes", "confirm_yes", "✅ হ্যাঁ"]:
-            ctx = get_context(from_number)
-            cod = ctx["total"] if ctx.get("payment_method") == "cod" else 0
-            success, result = create_pathao_order(name=ctx.get("name"), phone=ctx.get("phone"), address=ctx.get("address"), city_id=ctx.get("city_id", 1), zone_id=ctx.get("zone_id", 1), area_id=ctx.get("area_id", 1), item_desc=f"{ctx['product_name']} x{ctx['quantity']}", cod_amount=cod)
-            if success:
-                db_query("INSERT INTO orders (phone, name, address, city_id, zone_id, area_id, product_id, quantity, price, delivery_charge, discount, total, payment_method, pathao_consignment_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (ctx.get("phone"), ctx.get("name"), ctx.get("address"), ctx.get("city_id", 1), ctx.get("zone_id", 1), ctx.get("area_id", 1), ctx.get("product_id"), ctx.get("quantity"), ctx.get("subtotal"), ctx.get("delivery_charge", 80), ctx.get("discount", 0), ctx.get("total"), ctx.get("payment_method", "cod"), str(result), "created"), commit=True)
-                db_query("UPDATE users SET total_orders = total_orders + 1, total_spent = total_spent + ? WHERE phone = ?", (ctx.get("total", 0), from_number), commit=True)
-                send_text(from_number, f"🎉 অর্ডার সফল!\n📦 Tracking: {result}\n🚚 পাঠাও কুরিয়ার আসবে।\nধন্যবাদ প্রিয় গ্রাহক! 🙏")
-            else:
-                db_query("INSERT INTO orders (phone, name, address, city_id, zone_id, area_id, product_id, quantity, price, delivery_charge, discount, total, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (ctx.get("phone"), ctx.get("name"), ctx.get("address"), ctx.get("city_id", 1), ctx.get("zone_id", 1), ctx.get("area_id", 1), ctx.get("product_id"), ctx.get("quantity"), ctx.get("subtotal"), ctx.get("delivery_charge", 80), ctx.get("discount", 0), ctx.get("total"), ctx.get("payment_method", "cod"), "manual_pending"), commit=True)
-                send_text(from_number, f"⚠️ কুরিয়ার API ত্রুটি: {result}\nঅর্ডার ম্যানুয়ালি নোট। প্রতিনিধি কল করে কনফার্ম করবেন।")
-            set_session(from_number, "idle", {})
-            return
+        if body_text == "conf_yes":
+            # Dynamic Order Placement on Pathao System
+            total_cod = ctx["subtotal"] + ctx["delivery_fee"]
+            success, res = create_pathao_order(ctx["cust_name"], from_number, ctx["address"], ctx["city_id"], ctx["zone_id"], ctx["area_id"], f"{ctx['name']} x{ctx['quantity']}", total_cod)
+            
+            status = "created_in_pathao" if success else "pending_manual_approval"
+            consignment = str(res) if success else ""
+            
+            db_query("INSERT INTO orders (phone, name, address, city_id, zone_id, area_id, product_id, quantity, total, delivery_fee, pathao_consignment_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                     (from_number, ctx["cust_name"], ctx["address"], ctx["city_id"], ctx["zone_id"], ctx["area_id"], ctx["product_id"], ctx["quantity"], total_cod, ctx["delivery_fee"], consignment, status), commit=True)
+            
+            db_query("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (ctx["quantity"], ctx["product_id"]), commit=True)
+            
+            msg = f"🎉 অভিনন্দন {ctx['cust_name']}! আপনার অর্ডারটি নিশ্চিত করা হয়েছে।\n📦 পাঠাও ট্র্যাকিং আইডি: {consignment}\n💰 সর্বমোট ক্যাশ-অন-ডেলিভারি কালেকশন: {total_cod}৳" if success else "⚠️ অর্ডারটি সিস্টেমে সেভ করা হয়েছে। ডেলিভারি এপিআই সমস্যার কারণে আমাদের টিম ম্যানুয়ালি চেক করে কনফার্ম করবে।"
+            send_whatsapp(from_number, "text", msg)
         else:
-            send_text(from_number, "অর্ডার বাতিল। আপনাকে কীভাবে সাহায্য করতে পারি?")
-            set_session(from_number, "idle", {})
-            return
+            send_whatsapp(from_number, "text", "❌ আপনার অর্ডারটি বাতিল করা হয়েছে। আবার শুরু করতে 'অর্ডার' লিখুন।")
+        db_query("UPDATE sessions SET state='idle', context='{}' WHERE phone=?", (from_number,), commit=True)
+        return
 
-    ai_response = get_ai_answer(user_text, context)
-    if any(k in user_text.lower() for k in ["কিনব", "অর্ডার", "চাই", "buy", "order", "দাম"]):
-        products = get_products()
-        if products:
-            sections = [{"title": "প্রোداشت", "rows": [{"id": f"product_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳"} for p in products[:10]]}]
-            set_session(from_number, "selecting_product", {})
-            send_list_menu(from_number, "কোন প্রোডাক্টটি দেখতে চান?", "প্রোডাক্ট", sections)
-            return
-    send_text(from_number, ai_response)
+    # Fallback to Dynamic AI Engine
+    ai_msg = get_ai_answer(body_text)
+    send_whatsapp(from_number, "text", ai_msg)
 
-def send_payment_options(to, ctx):
-    sub = ctx.get("subtotal", 0)
-    send_buttons(to, f"💰 সাবটোটাল: {sub}৳\n\nপেমেন্ট মেথড:", [{"id": "pay_cod", "title": "💵 COD"}, {"id": "pay_bkash", "title": "📱 bKash"}, {"id": "pay_nagad", "title": "💳 Nagad"}])
-
+def confirm_order_final(from_number, ctx):
+    total = ctx["subtotal"] + ctx["delivery_fee"]
+    summary = f"📦 অর্ডারের পুঙ্খানুপুঙ্খ বিবরণী:\n\n📝 প্রোডাক্ট: {ctx['name']} (x{ctx['quantity']})\n💰 সাবটোটাল: {ctx['subtotal']}৳\n🚚 ডেলিভারি চার্জ ({ctx.get('city_name','শহর')}): {ctx['delivery_fee']}৳\n💵 সর্বমোট প্রদেয় বিল: {total}৳\n👤 কাস্টমার নাম: {ctx['cust_name']}\n📍 ঠিকানা: {ctx['address']}\n\nসব তথ্য ঠিক থাকলে নিচের বাটনে ক্লিক করুন:"
+    btns = {"type": "button", "body": {"text": summary}, "action": {"buttons": [{"type": "reply", "reply": {"id": "conf_yes", "title": "হ্যাঁ, কনফার্ম"}}, {"type": "reply", "reply": {"id": "conf_no", "title": "না, বাতিল"}}]}}
+    db_query("UPDATE sessions SET state='awaiting_confirmation', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
+    send_whatsapp(from_number, "interactive", btns)
 
 # =====================================================================
-# UPDATED ADMIN PANEL VIEWS & DASHBOARD UI HTML
+# 100% REAL-TIME SUPER ADMIN DASHBOARD
 # =====================================================================
-
 ADMIN_HTML = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="bn">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ settings.get('business_name', 'Admin Panel') }} - Dashboard</title>
+    <title>Dynamic Super Admin Control Panel</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script>
+        // Feature 2 & 3: Fully Dynamic Live Chat Poller & Counter without page reload
+        async function fetchRealtimeUpdates() {
+            try {
+                const res = await fetch('/admin/api/updates');
+                const data = await res.json();
+                if(document.getElementById('stat-orders')) document.getElementById('stat-orders').innerText = data.total_orders;
+                if(document.getElementById('stat-rev')) document.getElementById('stat-rev').innerText = data.total_revenue + "৳";
+                if(document.getElementById('stat-calls')) document.getElementById('stat-calls').innerText = data.pending_calls;
+                
+                // Live Chat Auto Refresher (Feature 3)
+                const activeChat = document.getElementById('active_chat_phone').value;
+                if (activeChat) {
+                    const chatRes = await fetch('/admin/api/chat/' + activeChat);
+                    const chatData = await chatRes.json();
+                    const chatBox = document.getElementById('live-chat-messages-container');
+                    let html = '';
+                    chatData.messages.forEach(m => {
+                        const isOut = m.direction === 'outbound';
+                        html += `<div class="max-w-[70%] p-3 rounded-2xl text-sm ${isOut ? 'bg-emerald-600 text-white self-end rounded-tr-none' : 'bg-white text-slate-800 self-start rounded-tl-none shadow-sm border'}">${m.content}</div>`;
+                    });
+                    chatBox.innerHTML = html;
+                }
+            } catch (e) { console.log(e); }
+        }
+        setInterval(fetchRealtimeUpdates, 3000); // 3 Seconds dynamic interval reload
+    </script>
 </head>
-<body class="bg-gray-50 font-sans">
-    <div class="min-h-screen flex">
-        <!-- Sidebar -->
-        <div class="w-64 bg-slate-900 text-white flex flex-col">
-            <div class="p-5 text-xl font-bold border-b border-slate-800 flex items-center gap-2">
-                <i class="fa-solid fa-robot text-emerald-400"></i>
-                <span>{{ settings.get('business_name', 'Dhaka Exclusive') }}</span>
-            </div>
-            <nav class="flex-1 p-4 space-y-2">
-                <a href="/admin" class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-medium">
-                    <i class="fa-solid fa-chart-pie w-5"></i> Dashboard
-                </a>
-                <a href="#orders" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition">
-                    <i class="fa-solid fa-box w-5"></i> Orders
-                </a>
-                <a href="#calls" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition">
-                    <i class="fa-solid fa-headset w-5"></i> Call Requests
-                </a>
-                <a href="#settings" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition">
-                    <i class="fa-solid fa-sliders w-5"></i> System Settings
-                </a>
-            </nav>
-            <div class="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">
-                v4.0-Dynamic &copy; 2026
-            </div>
-        </div>
+<body class="bg-slate-50 flex min-h-screen">
+    <input type="hidden" id="active_chat_phone" value="{{ active_chat }}">
 
-        <!-- Main Content -->
-        <div class="flex-1 flex flex-col max-h-screen overflow-y-auto p-8">
-            <div class="flex justify-between items-center mb-8">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800">Overview Dashboard</h1>
-                    <p class="text-sm text-slate-500">Live summary of your WhatsApp Bot & Pathao Orders</p>
-                </div>
-                <div class="flex items-center gap-4 bg-white px-4 py-2 rounded-xl shadow-sm border">
-                    <span class="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                    <span class="text-sm font-medium text-slate-600">Bot Service: Active</span>
-                </div>
-            </div>
-
-            <!-- Stats Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-                    <div>
-                        <p class="text-sm text-slate-500 font-medium">Total Orders</p>
-                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.total_orders }}</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-shopping-cart"></i></div>
-                </div>
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-                    <div>
-                        <p class="text-sm text-slate-500 font-medium">Total Revenue</p>
-                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.total_revenue or 0 }}৳</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-bangladeshi-taka-sign"></i></div>
-                </div>
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-                    <div>
-                        <p class="text-sm text-slate-500 font-medium">Pending Calls</p>
-                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.pending_calls }}</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-phone-volume"></i></div>
-                </div>
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-                    <div>
-                        <p class="text-sm text-slate-500 font-medium">Active Products</p>
-                        <h3 class="text-2xl font-bold text-slate-800 mt-1">{{ stats.total_products }}</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center text-lg"><i class="fa-solid fa-boxes-stacked"></i></div>
-                </div>
-            </div>
-
-            <!-- Sections Container -->
-            <div class="space-y-8">
-                <!-- Call Requests Table -->
-                <div id="calls" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
-                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-headset text-amber-500"></i> Active Call Back Requests</h2>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-100">
-                                    <th class="p-4">Customer</th>
-                                    <th class="p-4">Phone</th>
-                                    <th class="p-4">Reason/Query</th>
-                                    <th class="p-4">Time</th>
-                                    <th class="p-4">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody class="text-sm text-slate-700 divide-y divide-slate-100">
-                                {% for call in calls %}
-                                <tr class="hover:bg-slate-50/80 transition">
-                                    <td class="p-4 font-medium text-slate-900">{{ call.name }}</td>
-                                    <td class="p-4">{{ call.phone }}</td>
-                                    <td class="p-4 text-slate-500 italic">"{{ call.reason }}"</td>
-                                    <td class="p-4 text-xs text-slate-400">{{ call.created_at }}</td>
-                                    <td class="p-4">
-                                        <form action="/admin/call/complete/{{ call.id }}" method="POST" class="inline">
-                                            <button type="submit" class="bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1 rounded-lg text-xs font-medium hover:bg-emerald-600 hover:text-white transition">
-                                                <i class="fa-solid fa-check mr-1"></i> Done
-                                            </button>
-                                        </form>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr>
-                                    <td colspan="5" class="p-8 text-center text-slate-400">কোনো পেন্ডিং কল রিকোয়েস্ট নেই।</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Recent Orders Table -->
-                <div id="orders" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
-                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-receipt text-blue-500"></i> Recent Orders</h2>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-100">
-                                    <th class="p-4">Order ID</th>
-                                    <th class="p-4">Customer</th>
-                                    <th class="p-4">Details</th>
-                                    <th class="p-4">Total Amount</th>
-                                    <th class="p-4">Pathao Consignment</th>
-                                    <th class="p-4">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody class="text-sm text-slate-700 divide-y divide-slate-100">
-                                {% for order in orders %}
-                                <tr class="hover:bg-slate-50/80 transition">
-                                    <td class="p-4 font-semibold text-blue-600">#{{ order.id }}</td>
-                                    <td class="p-4">
-                                        <div class="font-medium text-slate-900">{{ order.name }}</div>
-                                        <div class="text-xs text-slate-400">{{ order.phone }}</div>
-                                    </td>
-                                    <td class="p-4">
-                                        <div class="text-slate-800">Product ID: {{ order.product_id }} (Qty: {{ order.quantity }})</div>
-                                        <div class="text-xs text-slate-400 max-w-xs truncate">{{ order.address }}</div>
-                                    </td>
-                                    <td class="p-4 font-medium">{{ order.total }}৳</td>
-                                    <td class="p-4">
-                                        {% if order.pathao_consignment_id %}
-                                        <span class="bg-slate-100 text-slate-800 font-mono px-2 py-1 rounded text-xs border">{{ order.pathao_consignment_id }}</span>
-                                        {% else %}
-                                        <span class="text-xs text-amber-500 font-medium"><i class="fa-solid fa-triangle-exclamation"></i> Manual Entry</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="p-4">
-                                        <span class="px-2.5 py-1 rounded-full text-xs font-medium 
-                                            {% if order.status in ['created', 'pending'] %} bg-blue-50 text-blue-600
-                                            {% elif order.status == 'manual_pending' %} bg-amber-50 text-amber-600
-                                            {% else %} bg-emerald-50 text-emerald-600 {% endif %}">
-                                            {{ order.status }}
-                                        </span>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr>
-                                    <td colspan="6" class="p-8 text-center text-slate-400">এখনো কোনো অর্ডার পাওয়া যায়নি।</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Configuration Settings Form -->
-                <div id="settings" class="bg-white rounded-2xl shadow-sm border border-slate-100">
-                    <div class="p-6 border-b border-slate-100 bg-slate-50/50">
-                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-sliders text-emerald-500"></i> Live Dynamic Configuration</h2>
-                        <p class="text-xs text-slate-400 mt-1">কোর সেটিংস ও আইডি সরাসরি এখান থেকে ব্রাউজারে আপডেট করতে পারবেন।</p>
-                    </div>
-                    <form action="/admin/settings/save" method="POST" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Business Name</label>
-                            <input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pathao Client ID</label>
-                            <input type="text" name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pathao Store ID</label>
-                            <input type="text" name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pathao Base URL</label>
-                            <input type="text" name="pathao_base_url" value="{{ settings.get('pathao_base_url', 'https://api-hermes.pathao.com') }}" class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500">
-                        </div>
-                        <div class="md:col-span-2 flex justify-end border-t pt-4 mt-2">
-                            <button type="submit" class="bg-slate-900 text-white font-medium px-6 py-2.5 rounded-xl hover:bg-slate-800 transition shadow-sm">
-                                <i class="fa-solid fa-floppy-disk mr-2"></i> Save Configurations
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
+    <!-- Sidebar Dashboard Left Drawer -->
+    <div class="w-64 bg-slate-900 text-white flex flex-col">
+        <div class="p-6 text-lg font-black border-b border-slate-800 text-emerald-400"><i class="fa-solid fa-layer-group mr-2"></i> {{ settings.get('business_name') }}</div>
+        <nav class="flex-1 p-4 space-y-1">
+            <a href="#dashboard" onclick="switchTab('dashboard')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-600 text-white font-bold transition"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+            <a href="#orders" onclick="switchTab('orders')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-shopping-bag"></i> Orders</a>
+            <a href="#calls" onclick="switchTab('calls')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-phone"></i> Call Requests</a>
+            <a href="#products" onclick="switchTab('products')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-cubes"></i> Products (CRUD)</a>
+            <a href="#chat" onclick="switchTab('chat')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-message"></i> Live Chat Desk</a>
+            <a href="#broadcast" onclick="switchTab('broadcast')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-bullhorn"></i> Broadcast</a>
+            <a href="#settings" onclick="switchTab('settings')" class="tab-btn flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-sliders"></i> System Config</a>
+        </nav>
     </div>
+
+    <!-- Right Container Panel Workspace -->
+    <div class="flex-1 p-8 overflow-y-auto max-h-screen">
+        
+        <!-- DASHBOARD TAB -->
+        <div id="tab-dashboard" class="tab-content space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                    <p class="text-xs font-bold uppercase text-slate-400">Total Live Orders</p>
+                    <h2 id="stat-orders" class="text-3xl font-black text-slate-800 mt-2">{{ stats.total_orders }}</h2>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                    <p class="text-xs font-bold uppercase text-slate-400">Total Dynamic Revenue</p>
+                    <h2 id="stat-rev" class="text-3xl font-black text-emerald-600 mt-2">{{ stats.total_revenue or 0 }}৳</h2>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                    <p class="text-xs font-bold uppercase text-slate-400">Pending Callbacks</p>
+                    <h2 id="stat-calls" class="text-3xl font-black text-amber-500 mt-2">{{ stats.pending_calls }}</h2>
+                </div>
+            </div>
+        </div>
+
+        <!-- ORDERS TAB -->
+        <div id="tab-orders" class="tab-content hidden bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <table class="w-full text-left text-sm">
+                <tr class="bg-slate-100 border-b text-xs font-bold text-slate-600 uppercase"><th class="p-4">ID</th><th class="p-4">Customer</th><th class="p-4">Product Specs</th><th class="p-4">Delivery Fee</th><th class="p-4">Total Collected</th><th class="p-4">Pathao Consignment</th></tr>
+                {% for o in orders %}
+                <tr class="border-b hover:bg-slate-50">
+                    <td class="p-4 font-bold">#{{ o.id }}</td>
+                    <td class="p-4"><div><b>{{ o.name }}</b></div><div class="text-xs text-slate-400">{{ o.phone }}</div><div class="text-xs text-slate-500 italic">{{ o.address }}</div></td>
+                    <td class="p-4">Product ID: {{ o.product_id }} (x{{ o.quantity }})</td>
+                    <td class="p-4 text-amber-600 font-bold">{{ o.delivery_fee }}৳</td>
+                    <td class="p-4 text-emerald-600 font-black">{{ o.total }}৳</td>
+                    <td class="p-4 font-mono text-xs">{{ o.pathao_consignment_id or 'Manual Pending' }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <!-- CALLS TAB -->
+        <div id="tab-calls" class="tab-content hidden bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <table class="w-full text-left text-sm">
+                <tr class="bg-slate-100 border-b text-xs font-bold text-slate-600"><th class="p-4">Phone</th><th class="p-4">Reason Asked</th><th class="p-4">Timestamp</th><th class="p-4">Action</th></tr>
+                {% for c in calls %}
+                <tr class="border-b">
+                    <td class="p-4 font-bold">{{ c.phone }}</td><td class="p-4 italic text-slate-700">"{{ c.reason }}"</td><td class="p-4 text-xs text-slate-400">{{ c.created_at }}</td>
+                    <td class="p-4"><form action="/admin/call/complete/{{ c.id }}" method="POST"><button class="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold">Resolve</button></form></td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <!-- CRUD PRODUCTS TAB -->
+        <div id="tab-products" class="tab-content hidden space-y-6">
+            <div class="bg-white p-6 rounded-2xl border shadow-sm">
+                <h3 class="font-bold text-slate-800 mb-4"><i class="fa-solid fa-circle-plus text-emerald-500"></i> Add New Product Item to Inventory</h3>
+                <form action="/admin/products/add" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <input type="text" name="name" placeholder="Item Name" required class="border p-2.5 rounded-xl text-sm">
+                    <input type="number" name="price" placeholder="Price Amount" required class="border p-2.5 rounded-xl text-sm">
+                    <input type="number" name="stock" placeholder="Stock Available" required class="border p-2.5 rounded-xl text-sm">
+                    <input type="text" name="image_url" placeholder="Direct Image URL Address" class="border p-2.5 rounded-xl text-sm">
+                    <textarea name="description" placeholder="Write full product specifications..." class="border p-2.5 rounded-xl text-sm md:col-span-4"></textarea>
+                    <button type="submit" class="bg-slate-900 text-white font-bold p-3 rounded-xl md:col-span-4">Push Item to Stock</button>
+                </form>
+            </div>
+            <div class="bg-white rounded-2xl border shadow-sm overflow-hidden">
+                <table class="w-full text-left text-sm">
+                    <tr class="bg-slate-100 border-b text-xs font-bold text-slate-600"><th class="p-4">Visual</th><th class="p-4">Name</th><th class="p-4">Price</th><th class="p-4">Live Stock</th><th class="p-4">Status Actions</th></tr>
+                    {% for p in products %}
+                    <tr class="border-b">
+                        <td class="p-4"><img src="{{ p.image_url or 'https://placehold.co/50' }}" class="w-10 h-10 object-cover rounded border"></td>
+                        <td class="p-4 font-bold">{{ p.name }}</td><td class="p-4">{{ p.price }}৳</td><td class="p-4 font-mono font-bold text-blue-600">{{ p.stock }} Units</td>
+                        <td class="p-4"><a href="/admin/products/delete/{{ p.id }}" class="text-red-500 hover:underline font-bold"><i class="fa-solid fa-trash-can"></i> Delist</a></td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+
+        <!-- LIVE CHAT DESK TAB -->
+        <div id="tab-chat" class="tab-content hidden bg-white rounded-2xl border shadow-sm grid grid-cols-3 min-h-[520px]">
+            <div class="border-r p-4 space-y-2 overflow-y-auto max-h-[520px] bg-slate-50/50">
+                <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-4">Inbox Stream Contacts</h4>
+                {% for u in users %}
+                <a href="?chat_with={{ u.phone }}#chat" onclick="setTimeout(()=>switchTab('chat'), 50)" class="block p-3 rounded-xl border {{ 'bg-emerald-50 border-emerald-300' if active_chat == u.phone else 'bg-white' }} transition shadow-xs">
+                    <div class="font-bold text-sm text-slate-800">{{ u.phone }}</div>
+                    <div class="text-[10px] text-slate-400 mt-1">Activity Log: {{ u.last_active }}</div>
+                </a>
+                {% endfor %}
+            </div>
+            <div class="col-span-2 flex flex-col justify-between max-h-[520px]">
+                <div class="p-4 border-b font-bold text-slate-700 bg-slate-50 flex justify-between items-center text-sm">
+                    <span>Active Screen: {{ active_chat or 'No Selected Chat' }}</span>
+                </div>
+                <div id="live-chat-messages-container" class="p-4 space-y-3 flex-1 overflow-y-auto bg-slate-100/50 flex flex-col">
+                    {% for m in chat_messages %}
+                    <div class="max-w-[70%] p-3 rounded-2xl text-sm {{ 'bg-emerald-600 text-white self-end rounded-tr-none' if m.direction == 'outbound' else 'bg-white text-slate-800 self-start rounded-tl-none shadow-sm border' }}">
+                        {{ m.content }}
+                    </div>
+                    {% endfor %}
+                </div>
+                <form action="/admin/chat/reply" method="POST" class="p-4 border-t flex gap-2 bg-white">
+                    <input type="hidden" name="to_phone" value="{{ active_chat }}">
+                    <input type="text" name="reply_text" placeholder="Type WhatsApp manual message reply here..." required {{ 'disabled' if not active_chat }} class="flex-1 border p-3 rounded-xl text-sm">
+                    <button type="submit" {{ 'disabled' if not active_chat }} class="bg-emerald-600 text-white font-bold px-6 rounded-xl text-sm"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </div>
+        </div>
+
+        <!-- BROADCAST TAB -->
+        <div id="tab-broadcast" class="tab-content hidden bg-white p-6 rounded-2xl border shadow-sm max-w-xl">
+            <h3 class="font-bold text-slate-800 mb-2"><i class="fa-solid fa-bullhorn text-indigo-600"></i> Dynamic Bulk Marketing Broadcast Broadcast</h3>
+            <p class="text-xs text-slate-400 mb-6">Loop directly through all registered user database rows and blast text messages via standard API pipes.</p>
+            <form action="/admin/broadcast" method="POST" class="space-y-4">
+                <textarea name="broadcast_msg" rows="5" required placeholder="Write bulk message script template..." class="w-full border p-3 rounded-xl text-sm"></textarea>
+                <button type="submit" class="bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl w-full text-sm"><i class="fa-solid fa-paper-plane-top"></i> Execute Blast Pipeline</button>
+            </form>
+        </div>
+
+        <!-- SETTINGS CONFIG TAB -->
+        <div id="tab-settings" class="tab-content hidden bg-white p-6 rounded-2xl border shadow-sm max-w-xl">
+            <h3 class="font-bold text-slate-800 mb-4">Core Variable Threshold configurations</h3>
+            <form action="/admin/settings/save" method="POST" class="space-y-4 text-sm">
+                <div><label class="block font-bold text-slate-600 mb-1">Business Name</label><input type="text" name="business_name" value="{{ settings.get('business_name','') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Delivery Charge Inside Dhaka (৳)</label><input type="number" name="delivery_inside_dhaka" value="{{ settings.get('delivery_inside_dhaka','60') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Delivery Charge Outside Dhaka (৳)</label><input type="number" name="delivery_outside_dhaka" value="{{ settings.get('delivery_outside_dhaka','120') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Pathao Client ID</label><input type="text" name="pathao_client_id" value="{{ settings.get('pathao_client_id','') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Pathao Client Secret</label><input type="text" name="pathao_client_secret" value="{{ settings.get('pathao_client_secret','') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Pathao Store ID</label><input type="text" name="pathao_store_id" value="{{ settings.get('pathao_store_id','') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Pathao Merchant Email</label><input type="text" name="pathao_merchant_email" value="{{ settings.get('pathao_merchant_email','') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <div><label class="block font-bold text-slate-600 mb-1">Pathao Merchant Password</label><input type="password" name="pathao_merchant_password" value="{{ settings.get('pathao_merchant_password','') }}" class="w-full border p-2.5 rounded-xl"></div>
+                <button type="submit" class="bg-slate-900 text-white font-bold py-3 px-6 rounded-xl w-full">Commit Configuration Variables</button>
+            </form>
+        </div>
+
+    </div>
+
+    <script>
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('bg-emerald-600', 'font-bold', 'text-white');
+                btn.classList.add('text-slate-400');
+            });
+            const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('href') === '#' + tabId);
+            if(activeBtn) {
+                activeBtn.classList.remove('text-slate-400');
+                activeBtn.classList.add('bg-emerald-600', 'font-bold', 'text-white');
+            }
+        }
+        window.addEventListener('DOMContentLoaded', () => {
+            const hash = window.location.hash.replace('#', '') || 'dashboard';
+            switchTab(hash);
+        });
+    </script>
 </body>
 </html>
 """
 
 # =====================================================================
-# FLASK ROUTES
+# DYNAMIC BACKEND WEB API ROUTING CONTROLLERS
 # =====================================================================
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "running", "service": f"{BUSINESS_NAME} WhatsApp Bot", "version": "4.0-dynamic", "timestamp": datetime.utcnow().isoformat()})
-
-@app.route("/health", methods=["GET"])
-def health():
-    try: db_query("SELECT 1", fetchone=True); return jsonify({"status": "healthy", "database": True})
-    except: return jsonify({"status": "unhealthy", "database": False})
-
 @app.route("/admin", methods=["GET"])
 @login_required
 def admin_dashboard():
-    total_orders = db_query("SELECT COUNT(*) as cnt FROM orders", fetchone=True)["cnt"]
-    total_revenue = db_query("SELECT SUM(total) as rev FROM orders WHERE status NOT IN ('cancelled', 'returned')", fetchone=True)["rev"]
-    pending_calls = db_query("SELECT COUNT(*) as cnt FROM call_requests WHERE status = 'pending'", fetchone=True)["cnt"]
-    total_products = db_query("SELECT COUNT(*) as cnt FROM products WHERE active = 1", fetchone=True)["cnt"]
-    
     stats = {
-        "total_orders": total_orders,
-        "total_revenue": total_revenue,
-        "pending_calls": pending_calls,
-        "total_products": total_products
+        "total_orders": db_query("SELECT COUNT(*) as cnt FROM orders", fetchone=True)["cnt"],
+        "total_revenue": db_query("SELECT SUM(total) as rev FROM orders", fetchone=True)["rev"],
+        "pending_calls": db_query("SELECT COUNT(*) as cnt FROM call_requests WHERE status='pending'", fetchone=True)["cnt"]
     }
-    
-    calls = db_query("SELECT * FROM call_requests WHERE status = 'pending' ORDER BY created_at DESC", fetchall=True) or []
-    orders = db_query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10", fetchall=True) or []
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 30", fetchall=True) or []
+    calls = db_query("SELECT * FROM call_requests WHERE status='pending' ORDER BY id DESC", fetchall=True) or []
+    products = db_query("SELECT * FROM products WHERE active=1 ORDER BY id DESC", fetchall=True) or []
+    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
     settings = get_all_settings()
     
-    return render_template_string(ADMIN_HTML, stats=stats, calls=calls, orders=orders, settings=settings)
+    active_chat = request.args.get("chat_with", "")
+    chat_messages = []
+    if active_chat:
+        chat_messages = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY created_at ASC LIMIT 50", (active_chat,), fetchall=True) or []
+
+    return render_template_string(ADMIN_HTML, stats=stats, orders=orders, calls=calls, products=products, users=users, settings=settings, active_chat=active_chat, chat_messages=chat_messages)
+
+@app.route("/admin/api/updates", methods=["GET"])
+@login_required
+def admin_api_updates():
+    tot = db_query("SELECT COUNT(*) as cnt FROM orders", fetchone=True)["cnt"]
+    rev = db_query("SELECT SUM(total) as rev FROM orders", fetchone=True)["rev"]
+    cl = db_query("SELECT COUNT(*) as cnt FROM call_requests WHERE status='pending'", fetchone=True)["cnt"]
+    return jsonify({"total_orders": tot, "total_revenue": rev or 0, "pending_calls": cl})
+
+@app.route("/admin/api/chat/<string:phone>", methods=["GET"])
+@login_required
+def admin_api_chat_stream(phone):
+    rows = db_query("SELECT content, direction FROM messages WHERE from_number = ? ORDER BY created_at ASC LIMIT 50", (phone,), fetchall=True) or []
+    return jsonify({"messages": rows})
 
 @app.route("/admin/call/complete/<int:call_id>", methods=["POST"])
 @login_required
 def complete_call(call_id):
     db_query("UPDATE call_requests SET status = 'completed' WHERE id = ?", (call_id,), commit=True)
-    return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('admin_dashboard') + "#calls")
+
+@app.route("/admin/products/add", methods=["POST"])
+@login_required
+def add_product():
+    name = request.form.get("name")
+    price = int(request.form.get("price") or 0)
+    stock = int(request.form.get("stock") or 0)
+    img = request.form.get("image_url", "")
+    desc = request.form.get("description", "")
+    db_query("INSERT INTO products (name, price, stock, image_url, description) VALUES (?, ?, ?, ?, ?)", (name, price, stock, img, desc), commit=True)
+    return redirect(url_for('admin_dashboard') + "#products")
+
+@app.route("/admin/products/delete/<int:pid>", methods=["GET"])
+@login_required
+def delete_product(pid):
+    db_query("UPDATE products SET active=0 WHERE id=?", (pid,), commit=True)
+    return redirect(url_for('admin_dashboard') + "#products")
+
+@app.route("/admin/chat/reply", methods=["POST"])
+@login_required
+def chat_reply():
+    to = request.form.get("to_phone")
+    text = request.form.get("reply_text")
+    if to and text:
+        send_whatsapp(to, "text", text)
+    return redirect(f"/admin?chat_with={to}#chat")
+
+@app.route("/admin/broadcast", methods=["POST"])
+@login_required
+def trigger_broadcast():
+    msg = request.form.get("broadcast_msg")
+    users = db_query("SELECT phone FROM users", fetchall=True) or []
+    if msg:
+        for u in users:
+            send_whatsapp(u["phone"], "text", msg)
+    return redirect(url_for('admin_dashboard') + "#broadcast")
 
 @app.route("/admin/settings/save", methods=["POST"])
 @login_required
 def save_settings():
-    for key, value in request.form.items():
-        if value.strip():
-            set_setting(key, value.strip())
-    return redirect(url_for('admin_dashboard'))
+    for k, v in request.form.items():
+        if v.strip():
+            db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v.strip()), commit=True)
+    return redirect(url_for('admin_dashboard') + "#settings")
 
+# =====================================================================
+# SYSTEM GATEWAYS WEBHOOKS
+# =====================================================================
 @app.route("/webhook", methods=["GET"])
 def verify():
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == VERIFY_TOKEN: return challenge, 200
+    if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == VERIFY_TOKEN:
+        return request.args.get("hub.challenge"), 200
     return "Verification failed", 403
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     signature = request.headers.get("X-Hub-Signature-256", "")
     payload = request.get_data()
-    if not verify_meta_signature(payload, signature): return "Invalid signature", 403
+    if APP_SECRET and signature:
+        sha_name, sig_val = signature.split('=')
+        if sha_name == 'sha256':
+            mac = hmac.new(APP_SECRET.encode('utf-8'), payload, hashlib.sha256)
+            if not hmac.compare_digest(mac.hexdigest(), sig_val): return "Forbidden", 403
+    
     data = request.get_json(silent=True) or {}
     try:
-        entry = data.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
+        value = data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
         if "messages" in value:
             msg = value["messages"][0]
-            from_number = msg.get("from")
-            Thread(target=process_webhook_async, args=(msg, from_number)).start()
-    except Exception as e:
-        logger.error("Webhook main structure parse failed: %s", e)
+            Thread(target=process_webhook_async, args=(msg, msg.get("from"))).start()
+    except: pass
     return "EVENT_RECEIVED", 200
 
 if __name__ == "__main__":
