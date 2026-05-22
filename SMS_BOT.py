@@ -228,6 +228,8 @@ def send_image(to, image_url, caption=""):
         return r.status_code in (200, 201)
     except: return False
 
+DEFAULT_PRODUCT_IMAGE = os.environ.get("DEFAULT_PRODUCT_IMAGE", "https://i.postimg.cc/ydG2D187/Adobe-Express-file.png")
+
 def download_media(media_id):
     if not PERMANENT_TOKEN: return None, None
     try:
@@ -309,7 +311,8 @@ def is_rate_limited(phone):
 # =====================================================================
 genai_available = False
 client = None
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.0-flash"
+FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"]
 try:
     from google import genai
     from google.genai import types
@@ -320,37 +323,40 @@ try:
     else: logger.warning("GEMINI_KEY missing")
 except Exception as e: logger.error("Gemini import failed: %s", e)
 
-def get_ai_answer(user_query, session_context=None):
+def _gemini_generate_with_retry(contents, config, is_image=False):
     if not genai_available or not client: return None
-    try:
-        si = "You are the AI sales assistant for 'Dhaka Exclusive' (Bangladesh).\n1. NEVER say 'নমস্কার'. ALWAYS 'প্রিয় গ্রাহক'.\n2. Short, polite, Bengali replies. Taka only.\n3. You CAN track orders and take orders.\n\nPRODUCTS:\n" + format_catalog()
-        cfg = types.GenerateContentConfig(system_instruction=si, temperature=0.15, max_output_tokens=500)
-        return client.models.generate_content(model=MODEL_NAME, contents=user_query, config=cfg).text
-    except Exception as e:
-        logger.error("Gemini text error: %s", e)
-        return None
+    for model in FALLBACK_MODELS:
+        try:
+            response = client.models.generate_content(model=model, contents=contents, config=config)
+            return response.text
+        except Exception as e:
+            err_str = str(e)
+            if "503" in err_str or "UNAVAILABLE" in err_str or "quota" in err_str.lower():
+                logger.warning("Model %s failed (%s), trying next...", model, err_str[:80])
+                continue
+            logger.error("Gemini error on %s: %s", model, err_str[:120])
+            return None
+    logger.error("All Gemini models exhausted")
+    return None
+
+def get_ai_answer(user_query, session_context=None):
+    si = "You are the AI sales assistant for 'Dhaka Exclusive' (Bangladesh).\n1. NEVER say 'নমস্কার'. ALWAYS 'প্রিয় গ্রাহক'.\n2. Short, polite, Bengali replies. Taka only.\n3. You CAN track orders and take orders.\n\nPRODUCTS:\n" + format_catalog()
+    cfg = types.GenerateContentConfig(system_instruction=si, temperature=0.15, max_output_tokens=500)
+    return _gemini_generate_with_retry(user_query, cfg)
 
 def analyze_image(image_bytes, mime_type="image/jpeg"):
-    if not genai_available or not client: return None
-    try:
-        prompt = "তুমি Dhaka Exclusive-এর AI সেলস অ্যাসিস্ট্যান্ট। এই ছবিতে কোন প্রোডাক্ট আছে বলো। নাম, বৈশিষ্ট্য, আনুমানিক দাম (বাংলাদেশি টাকায়), এবং কিনতে আগ্রহী হলে কী করতে হবে তা বলো। সরাসরি গ্রাহককে উত্তর দেওয়ার মতো করে বাংলায় লেখো।"
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part(text=prompt),
-                        types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes))
-                    ]
-                )
-            ],
-            config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=500)
+    prompt = "তুমি Dhaka Exclusive-এর AI সেলস অ্যাসিস্ট্যান্ট। এই ছবিতে কোন প্রোডাক্ট আছে বলো। নাম, বৈশিষ্ট্য, আনুমানিক দাম (বাংলাদেশি টাকায়), এবং কিনতে আগ্রহী হলে কী করতে হবে তা বলো। সরাসরি গ্রাহককে উত্তর দেওয়ার মতো করে বাংলায় লেখো।"
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part(text=prompt),
+                types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes))
+            ]
         )
-        return response.text
-    except Exception as e:
-        logger.error("Image AI failed: %s", e)
-        return None
+    ]
+    cfg = types.GenerateContentConfig(temperature=0.3, max_output_tokens=500)
+    return _gemini_generate_with_retry(contents, cfg, is_image=True)
 
 # =====================================================================
 # MAIN PROCESSOR
@@ -721,7 +727,7 @@ def fetch_facebook_catalog(catalog_id, access_token):
     try:
         url = f"https://graph.facebook.com/v21.0/{catalog_id}/products"
         headers = {"Authorization": f"Bearer {access_token}"}
-        params = {"limit": "100", "fields": "id,name,description,price,availability,image_url"}
+        params = {"limit": "100", "fields": "id,name,description,price,availability,image_url,image_cdn_urls,images{url}"}
         all_items = []
         while url:
             r = requests.get(url, headers=headers, params=params if 'graph.facebook.com' in url else None, timeout=15)
@@ -908,6 +914,17 @@ def api_sync_catalog():
         price = parse_fb_price(item.get("price"))
         desc = item.get("description", "")
         image = item.get("image_url", "") or item.get("imageUrl", "")
+        if not image and item.get("image_cdn_urls"):
+            icu = item["image_cdn_urls"]
+            if isinstance(icu, list) and len(icu) > 0: image = icu[0]
+            elif isinstance(icu, str): image = icu.split(",")[0].strip()
+        if not image and item.get("images"):
+            imgs = item["images"]
+            if isinstance(imgs, list) and len(imgs) > 0:
+                first = imgs[0]
+                image = first.get("url", "") if isinstance(first, dict) else str(first)
+        if not image:
+            image = DEFAULT_PRODUCT_IMAGE
         avail = item.get("availability", "")
         stock = 50 if avail and "in_stock" in str(avail).lower() else 0
         if not name: continue
