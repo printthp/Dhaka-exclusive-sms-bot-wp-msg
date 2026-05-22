@@ -25,10 +25,9 @@ application = app
 
 PERMANENT_TOKEN = os.environ.get("PERMANENT_TOKEN", "EAANtSb24BiwBRREXu8HztnpOLtamcKIvi09Qb24LiYax45S4aoYtFEVKEQZAxigfO2wbGf6RgHh51IURbQzKKrzPhkcprLxHpZBfOwxZAVCscdVOpjbapbS9sOLCIqZBM8tZAtSRRaVVYSTZBjUkkPZAQaLABSnG6cQcgQcwqZBC5I5yrB4cXgoUPDlzzn7HzUwsMAZDZD")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "1039959469208417")
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "AIzaSyCRZIRWSoenfhA33qr7rkzoa56Byun0IWU")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhakaex0020")
-APP_SECRET = os.environ.get("APP_SECRET", "")
+APP_SECRET = os.environ.get("APP_SECRET", "378c339366554565e35bc64dc6601a56")
 ADMIN_NUMBERS_STR = os.environ.get("ADMIN_NUMBERS", "")
 ADMIN_NUMBERS = [n.strip() for n in ADMIN_NUMBERS_STR.split(",") if n.strip()]
 PATHAO_BASE_URL = os.environ.get("PATHAO_BASE_URL", "https://api-hermes.pathao.com")
