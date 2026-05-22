@@ -311,8 +311,8 @@ def is_rate_limited(phone):
 # =====================================================================
 genai_available = False
 client = None
-MODEL_NAME = "gemini-2.0-flash"
-FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"]
+MODEL_NAME = "gemini-1.5-flash"
+FALLBACK_MODELS = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
 try:
     from google import genai
     from google.genai import types
