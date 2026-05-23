@@ -1,1 +1,1 @@
-web: gunicorn SMS_BOT:application
+web: gunicorn run_server:application
