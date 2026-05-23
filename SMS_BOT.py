@@ -63,6 +63,11 @@ def login():
             <input type="submit" value="Login">
         </form>
     '''
+@app.route("/dashboard")
+def dashboard():
+    # লজিক এখানে
+    return "Dashboard content"
+
 
 @app.route("/dashboard")
 def dashboard():
