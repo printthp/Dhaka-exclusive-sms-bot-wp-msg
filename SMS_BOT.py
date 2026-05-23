@@ -1,7 +1,6 @@
 import os
 import sys
 import json
-import update
 import sqlite3
 import logging
 from datetime import datetime
