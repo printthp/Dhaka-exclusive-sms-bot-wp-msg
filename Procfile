@@ -1,6 +1,1 @@
-web: gunicorn run_server:application
-
-
-*.db
-__pycache__/
-.env
+web: gunicorn SMS_BOT:application
