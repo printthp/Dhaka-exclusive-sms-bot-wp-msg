@@ -3,6 +3,26 @@ import sqlite3
 import requests
 import logging
 from datetime import datetime
+import SMS_BOT # আপনার মেইন ফাইলের সাথে সরাসরি যুক্ত হওয়া
+
+# এটি মেইন ফাইলের ড্যাশবোর্ড লজিককে বাইরে থেকে ডাটা পাঠাবে
+def get_dashboard_extras():
+    conn = sqlite3.connect(SMS_BOT.DB_FILE) # মেইন ফাইলের ডাটাবেজ ব্যবহার করবে
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # নতুন ডাটাগুলো টানুন
+    agents = c.execute("SELECT * FROM agents").fetchall()
+    complaints = c.execute("SELECT * FROM complaints WHERE status='pending' ORDER BY id DESC").fetchall()
+    
+    conn.close()
+    return {"agents": agents, "complaints": complaints}
+
+# প্যাচিং ফাংশন যা মেইন ফাইলের ড্যাশবোর্ডে নতুন টেবিল যোগ করবে
+def patch_admin_template():
+    # মেইন ফাইলের এডমিন টেমপ্লেটটি আমরা রিড করব
+    # এবং তার ভেতর আমাদের নতুন এইচটিএমএল ইনজেক্ট করব
+    pass
 
 logger = logging.getLogger(__name__)
 DB_FILE = "bot_v8_ultimate.db"
