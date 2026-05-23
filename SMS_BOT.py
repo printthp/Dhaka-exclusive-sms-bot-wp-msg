@@ -3,7 +3,15 @@ import sqlite3
 import logging
 import google.generativeai as genai
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
+import ctypes
+import os
 
+# সি++ হাই-পারফরম্যান্স ইঞ্জিন লোড করা হচ্ছে
+# আপনার compiled engine.so ফাইলটি একই ফোল্ডারে থাকতে হবে
+lib_path = os.path.abspath("business_engine.so")
+hybrid_engine = ctypes.CDLL(lib_path)
+
+# এখন আপনি সরাসরি আপনার বিজনেস লজিকে hybrid_engine.process_data() কল করতে পারবেন
 # Logging Setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
