@@ -284,13 +284,12 @@ def process_webhook_async(msg, from_number):
     state = sess["state"] if sess else "idle"
     ctx = json.loads(sess["context"]) if sess and sess.get("context") else {}
 
-    # আপডেট ১: স্মার্ট কন্টেক্সট রিকগনিশন লজিক
     positive_keywords = ["হ্যাঁ", "yes", "order করতে চাই", "অর্ডার করতে চাই", "কিনব", "confirm", "এটা নিব"]
     if state == "idle" and any(k in body_text.lower() for k in positive_keywords):
         last_p = db_query("SELECT content FROM messages WHERE from_number=? AND direction='outbound' AND (content LIKE '%মূল্য%' OR content LIKE '%৳%') ORDER BY id DESC LIMIT 1", (from_number,), fetchone=True)
         if last_p:
             db_query("INSERT INTO sessions (phone, state, context) VALUES (?, 'awaiting_name', '{}') ON CONFLICT(phone) DO UPDATE SET state='awaiting_name'", (from_number,), commit=True)
-            send_whatsapp(from_number, "text", "📋 চমৎকার ভাইয়া! অর্ডারটি কনফার্ম করার জন্য অনুগ্রহ করে আপনার **पूर्ण नाम** লিখুন:")
+            send_whatsapp(from_number, "text", "📋 চমৎকার ভাইয়া! অর্ডারটি কনফার্ম করার জন্য অনুগ্রহ করে আপনার **পূর্ণ নাম** লিখুন:")
             return
 
     if state == "idle" and any(k in body_text.lower() for k in ["কমপ্লেইন", "অভিযোগ"]):
@@ -355,7 +354,6 @@ def process_webhook_async(msg, from_number):
         if body_text == "conf_yes":
             total_cod = ctx.get("subtotal", 0) + ctx.get("delivery_fee", 60)
             
-            # আপডেট ৭: ডুপ্লিকেট চেক
             check_time = (datetime.now() - timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
             is_dup = db_query("SELECT 1 FROM orders WHERE phone=? AND product_id=? AND created_at > ?", (from_number, ctx.get("product_id"), check_time), fetchone=True)
             dup_flag = 1 if is_dup else 0
@@ -403,7 +401,6 @@ def admin_logout():
 @app.route("/admin", methods=["GET"])
 def admin_portal():
     if not session.get("logged_in"): return redirect(url_for('admin_login'))
-    user_role = session.get("username")
     orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
     products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
@@ -458,7 +455,7 @@ def webhook():
     return "EVENT_RECEIVED", 200
 
 # =====================================================================
-# UI CODE BASE (RECONSTRUCTED COMPLETE UI)
+# CLASSIFIED UI CODE BASE (HIFZED PREVIOUS DESIGN & BRANDING)
 # =====================================================================
 LOGIN_HTML = """
 <!DOCTYPE html>
@@ -468,18 +465,22 @@ LOGIN_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: linear-gradient(135deg, #74b9ff, #0984e3); height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .card { border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        body { background: #1e272e; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: sans-serif; }
+        .login-card { background: #2f3640; border: 1px solid #485460; border-radius: 12px; padding: 35px; width: 100%; max-width: 400px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+        .form-control { background: #1e272e; border: 1px solid #485460; color: #fff; }
+        .form-control:focus { background: #1e272e; color: #fff; border-color: #05c46b; box-shadow: none; }
+        .btn-success { background: #05c46b; border: none; }
+        .btn-success:hover { background: #04ea7f; }
     </style>
 </head>
 <body>
-    <div class="card p-4 text-center" style="width: 380px; background: white;">
-        <h3 class="mb-3 text-primary">Dhaka Exclusive</h3>
-        <p class="text-muted mb-4">Ultimate WhatsApp Bot Control Panel</p>
+    <div class="login-card text-center">
+        <h2 class="text-white mb-2" style="font-weight: 700; letter-spacing: 1px;">Dhaka Exclusive</h2>
+        <p style="color: #85929E;" class="mb-4">WhatsApp Automation Server Control</p>
         <form method="POST">
-            <input type="text" name="username" class="form-control mb-3" placeholder="ইউজারনেম" required>
-            <input type="password" name="password" class="form-control mb-4" placeholder="পাসওয়ার্ড" required>
-            <button type="submit" class="btn btn-primary w-100 py-2">লগইন করুন</button>
+            <input type="text" name="username" class="form-control mb-3 py-2" placeholder="ইউজারনেম" required>
+            <input type="password" name="password" class="form-control mb-4 py-2" placeholder="পাসওয়ার্ড" required>
+            <button type="submit" class="btn btn-success w-100 py-2" style="font-weight: 600;">প্যানেলে প্রবেশ করুন</button>
         </form>
     </div>
 </body>
@@ -490,196 +491,215 @@ ADMIN_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Dhaka Exclusive - Bot Dashboard</title>
+    <title>Dhaka Exclusive - Control Hub</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f5f6fa; font-family: system-ui, -apple-system, sans-serif; }
-        .sidebar { background: #2f3640; min-height: 100vh; color: white; padding-top: 20px; }
-        .sidebar a { color: #f5f6fa; text-decoration: none; padding: 12px 20px; display: block; border-bottom: 1px solid #40739e; }
-        .sidebar a:hover { background: #4b6584; }
-        .card-stat { border-radius: 10px; border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: 0.3s; }
-        .chat-box { height: 400px; overflow-y: auto; background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; }
-        .msg-in { background: #e1ffc7; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; width: fit-content; max-width: 80%; }
-        .msg-out { background: #f1f0f0; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; width: fit-content; max-width: 80%; margin-left: auto; }
+        body { background-color: #1e272e; color: #f5f6fa; font-family: sans-serif; padding-bottom: 50px; }
+        .navbar-brand { font-weight: bold; color: #05c46b !important; font-size: 24px; }
+        .card { background-color: #2f3640; border: 1px solid #485460; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .card-header { background-color: #3c40c6; color: white; font-weight: bold; font-size: 16px; border-bottom: 1px solid #485460; }
+        .table { color: #f5f6fa; border-color: #485460; }
+        .table-striped tbody tr:nth-of-type(odd) { background-color: rgba(255, 255, 255, 0.03); }
+        .form-control, .form-select { background-color: #1e272e; color: white; border: 1px solid #485460; }
+        .form-control:focus, .form-select:focus { background-color: #1e272e; color: white; border-color: #05c46b; box-shadow: none; }
+        .chat-container { height: 450px; overflow-y: auto; background-color: #1e272e; padding: 15px; border-radius: 6px; border: 1px solid #485460; }
+        .msg-inbound { background-color: #05c46b; color: black; padding: 8px 14px; border-radius: 12px 12px 12px 0px; margin-bottom: 12px; width: fit-content; max-width: 75%; font-weight: 500; }
+        .msg-outbound { background-color: #3c40c6; color: white; padding: 8px 14px; border-radius: 12px 12px 0px 12px; margin-bottom: 12px; width: fit-content; max-width: 75%; margin-left: auto; }
+        .user-link { color: #f5f6fa; text-decoration: none; display: block; padding: 10px; border-radius: 4px; transition: 0.2s; }
+        .user-link:hover, .user-link.active { background-color: #3c40c6; color: white; }
     </style>
 </head>
 <body>
-    <div class="container-fluid">
-        <div class="row">
-            <div class="col-md-2 sidebar d-none d-md-block">
-                <h4 class="text-center text-warning mb-4">📊 Control Engine</h4>
-                <a href="#livechat">💬 লাইভ চ্যাট রুম</a>
-                <a href="#orders">📦 অর্ডার ট্র্যাকার</a>
-                <a href="#complaints">⚠️ কাস্টমার অভিযোগ</a>
-                <a href="#config">⚙️ গ্লোবাল কনফিগারেশন</a>
-                <a href="/admin/logout" class="text-danger mt-5">🚪 লগআউট</a>
-            </div>
-            
-            <div class="col-md-10 p-4">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2>Dhaka Exclusive - মেগা কন্ট্রোল ড্যাশবোর্ড v8</h2>
-                    <a href="/admin/logout" class="btn btn-danger d-md-none">Logout</a>
-                </div>
-                
-                {% if msg %}<div class="alert alert-success alert-dismissible fade show">{{ msg }}</div>{% endif %}
+    <nav class="navbar navbar-dark bg-dark mb-4 px-3 py-2 border-bottom border-secondary">
+        <div class="container-fluid">
+            <span class="navbar-brand">Dhaka Exclusive — Management Hub v8</span>
+            <a href="/admin/logout" class="btn btn-outline-danger btn-sm">প্যানেল লগআউট</a>
+        </div>
+    </nav>
 
-                <div id="livechat" class="card card-stat p-4 mb-4" style="background: white;">
-                    <h4 class="text-primary mb-3">💬 লাইভ চ্যাট এবং কাস্টমার ইনবক্স</h4>
-                    <div class="row">
-                        <div class="col-md-4" style="border-right: 1px solid #eee;">
-                            <h5>সক্রিয় কাস্টমার লিস্ট</h5>
-                            <div class="list-group">
-                                {% for u in users %}
-                                <a href="?chat_with={{ u.phone }}" class="list-group-item list-group-item-action {% if active_chat == u.phone %}active{% endif %}">
-                                    📞 {{ u.phone }}
-                                </a>
-                                {% endfor %}
-                            </div>
+    <div class="container">
+        {% if msg %}<div class="alert alert-info bg-dark text-info border-info mb-4">{{ msg }}</div>{% endif %}
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-gradient" style="background-color: #3c40c6;">💬 রিয়েল-টাইম কাস্টমার মেসেজিং গেটওয়ে (লাইভ চ্যাট)</div>
+                    <div class="card-body row p-3">
+                        <div class="col-md-4 mb-3 mb-md-0" style="border-right: 1px solid #485460; max-height: 520px; overflow-y: auto;">
+                            <h6 class="text-warning mb-3">ইনবক্স কাস্টমারসমূহ (সর্বশেষ ৩০ জন)</h6>
+                            {% for u in users %}
+                            <a href="?chat_with={{ u.phone }}" class="user-link mb-2 border border-secondary {% if active_chat == u.phone %}active{% endif %}">
+                                📱 {{ u.phone }}
+                            </a>
+                            {% endfor %}
                         </div>
                         <div class="col-md-8">
                             {% if active_chat %}
-                            <h5>চ্যাট হিস্ট্রি: <span class="text-muted">{{ active_chat }}</span></h5>
-                            <div class="mb-2">
-                                <a href="/admin/chat/toggle-bot/{{ active_chat }}" class="btn btn-sm btn-warning">🤖 বটের অটো-রিপ্লাই টগল করুন</a>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="text-success m-0">চ্যাট সেশন নম্বর: {{ active_chat }}</h6>
+                                <a href="/admin/chat/toggle-bot/{{ active_chat }}" class="btn btn-sm btn-outline-warning">🤖 বট অটো-রিপ্লাই অন/অফ করুন</a>
                             </div>
-                            <div class="chat-box mb-3 d-flex flex-column">
+                            <div class="chat-container mb-3">
                                 {% for h in chat_history %}
-                                <div class="{% if h.direction == 'inbound' %}msg-in{% else %}msg-out{% endif %}">
-                                    <strong>{{ h.agent_id }}:</strong> {{ h.content }}
-                                    <small class="d-block text-muted" style="font-size: 10px;">{{ h.created_at }}</small>
+                                <div class="{% if h.direction == 'inbound' %}msg-inbound{% else %}msg-outbound{% endif %}">
+                                    <div style="font-size: 11px; opacity: 0.8;" class="mb-1">[{{ h.agent_id }}]</div>
+                                    <div>{{ h.content }}</div>
+                                    <div style="font-size: 9px; opacity: 0.6; text-align: right;" class="mt-1">{{ h.created_at }}</div>
                                 </div>
                                 {% endfor %}
                             </div>
                             <form action="/admin/chat/send" method="POST">
                                 <input type="hidden" name="phone" value="{{ active_chat }}">
                                 <div class="input-group">
-                                    <input type="text" name="message" class="form-control" placeholder="এখানে বাংলায় উত্তর লিখুন..." required>
-                                    <button class="btn btn-primary" type="submit">মেসেজ পাঠান</button>
+                                    <input type="text" name="message" class="form-control" placeholder="এখানে বাংলায় বার্তা টাইপ করুন..." required autocomplete="off">
+                                    <button class="btn btn-success px-4" type="submit">মেসেজ পাঠান</button>
                                 </div>
                             </form>
                             {% else %}
-                            <p class="text-center text-muted my-5">বামের কাস্টমার লিস্ট থেকে যেকোনো একটি চ্যাট সিলেক্ট করুন।</p>
+                            <div class="text-center text-muted my-5">
+                                <p style="font-size: 18px;">👉 ইনবক্স পরিচালনা করতে বাম পাশের তালিকা থেকে কাস্টমার নম্বর সিলেক্ট করুন।</p>
+                            </div>
                             {% endif %}
                         </div>
                     </div>
                 </div>
-
-                <div id="orders" class="card card-stat p-4 mb-4" style="background: white;">
-                    <h4 class="text-success mb-3">📦 কাস্টমার অর্ডার লডার গেটওয়ে</h4>
-                    <div class="table-responsive">
-                        <table class="table table-striped align-middle">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>ID</th>
-                                    <th>ফোন নম্বর</th>
-                                    <th>নাম</th>
-                                    <th>ঠিকানা</th>
-                                    <th>মোট বিল</th>
-                                    <th>পাঠাও কনসাইনমেন্ট</th>
-                                    <th>ডুপ্লিকেট?</th>
-                                    <th>তারিখ</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for o in orders %}
-                                <tr>
-                                    <td>#{{ o.id }}</td>
-                                    <td>{{ o.phone }}</td>
-                                    <td>{{ o.name }}</td>
-                                    <td>{{ o.address }}</td>
-                                    <td>{{ o.total }}৳</td>
-                                    <td><span class="badge bg-primary">{{ o.pathao_consignment_id }}</span></td>
-                                    <td>
-                                        {% if o.is_duplicate == 1 %}
-                                        <span class="badge bg-danger">⚠️ ডুপ্লিকেট ফ্ল্যাগ</span>
-                                        {% else %}
-                                        <span class="badge bg-success">ইউনিক</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ o.created_at }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="complaints" class="card card-stat p-4 mb-4" style="background: white;">
-                    <h4 class="text-danger mb-3">⚠️ কাস্টমার অভিযোগ ও কমপ্লেইন ট্র্যাকিং</h4>
-                    <div class="table-responsive">
-                        <table class="table table-bordered table-hover">
-                            <thead class="table-danger">
-                                <tr>
-                                    <th>ID</th>
-                                    <th>কাস্টমার ফোন</th>
-                                    <th>অভিযোগের বিবরণ</th>
-                                    <th>স্ট্যাটাস</th>
-                                    <th>তারিখ</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for c in complaints %}
-                                <tr>
-                                    <td>#{{ c.id }}</td>
-                                    <td>{{ c.phone }}</td>
-                                    <td>{{ c.complaint_text }}</td>
-                                    <td><span class="badge bg-warning text-dark">{{ c.status }}</span></td>
-                                    <td>{{ c.created_at }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="config" class="card card-stat p-4 mb-4" style="background: white;">
-                    <h4 class="text-secondary mb-3">⚙️ গ্লোবাল এপিআই ও বট সেটিংস কনফিগারেশন</h4>
-                    <form action="/admin/settings/save" method="POST">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">ব্যবসার নাম</label>
-                                <input type="text" name="business_name" class="form-control" value="{{ settings.business_name }}">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">মেটা ভেরিফাই টোকেন (Webhook)</label>
-                                <input type="text" name="verify_token" class="form-control" value="{{ settings.verify_token }}">
-                            </div>
-                            <div class="col-md-12 mb-3">
-                                <label class="form-label">হোয়াটসঅ্যাপ পার্মানেন্ট টোকেন (Meta Cloud API)</label>
-                                <textarea name="permanent_token" class="form-control" rows="2">{{ settings.permanent_token }}</textarea>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">ফোন নম্বর আইডি (Phone Number ID)</label>
-                                <input type="text" name="phone_number_id" class="form-control" value="{{ settings.phone_number_id }}">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">জেমিনি এআই এপিআই কি (Gemini API Key)</label>
-                                <input type="password" name="gemini_key" class="form-control" value="{{ settings.gemini_key }}">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">ফেসবুক ক্যাটালগ আইডি (Meta Commerce Catalogue ID)</label>
-                                <input type="text" name="fb_catalogue_id" class="form-control" value="{{ settings.fb_catalogue_id or '' }}">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">ফেসবুক ক্যাটালগ অ্যাক্সেস টোকেন</label>
-                                <input type="password" name="fb_access_token" class="form-control" value="{{ settings.fb_access_token or '' }}">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">ব্যাকআপ ইমেইল অ্যাড্রেস</label>
-                                <input type="email" name="backup_email" class="form-control" value="{{ settings.backup_email }}">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">বিকাশ পার্সোনাল নম্বর</label>
-                                <input type="text" name="bkash_number" class="form-control" value="{{ settings.bkash_number }}">
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-success px-5 py-2 mt-2">সংরক্ষণ করুন</button>
-                    </form>
-                </div>
-
             </div>
         </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header" style="background-color: #05c46b; color: black;">📦 কাস্টমার অর্ডার রেজিস্ট্রি ও কুরিয়ার ট্র্যাকিং</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped m-0 align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>ফোন নম্বর</th>
+                                        <th>কাস্টমার নাম</th>
+                                        <th>ঠিকানা ও ডেলিভারি লোকেশন</th>
+                                        <th>টোটাল বিল</th>
+                                        <th>পাঠাও আইডি (Consignment)</th>
+                                        <th>ডুপ্লিকেট স্ট্যাটাস</th>
+                                        <th>অর্ডার সময়</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for o in orders %}
+                                    <tr>
+                                        <td>#{{ o.id }}</td>
+                                        <td><code>{{ o.phone }}</code></td>
+                                        <td>{{ o.name }}</td>
+                                        <td>{{ o.address }}</td>
+                                        <td class="text-warning fw-bold">{{ o.total }}৳</td>
+                                        <td><span class="badge bg-secondary py-1.5 px-2">{{ o.pathao_consignment_id }}</span></td>
+                                        <td>
+                                            {% if o.is_duplicate == 1 %}
+                                            <span class="badge bg-danger">⚠️ ডুপ্লিকেট ফ্ল্যাগ</span>
+                                            {% else %}
+                                            <span class="badge bg-success">ইউনিক</span>
+                                            {% endif %}
+                                        </td>
+                                        <td style="font-size: 12px; opacity: 0.8;">{{ o.created_at }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-danger">⚠️ কাস্টমার কমপ্লেইন বক্স ও সেন্ট্রাল অভিযোগ রেজিস্ট্রি</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover m-0">
+                                <thead>
+                                    <tr>
+                                        <th>অভিযোগ ID</th>
+                                        <th>কাস্টমার নম্বর</th>
+                                        <th>অভিযোগের বিস্তারিত টেক্সট</th>
+                                        <th>বর্তমান অবস্থা</th>
+                                        <th>দাখিল করার সময়</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for c in complaints %}
+                                    <tr>
+                                        <td>#{{ c.id }}</td>
+                                        <td><code>{{ c.phone }}</code></td>
+                                        <td>{{ c.complaint_text }}</td>
+                                        <td><span class="badge bg-warning text-dark">{{ c.status }}</span></td>
+                                        <td style="font-size: 12px;">{{ c.created_at }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-secondary">⚙️ এআই ইঞ্জিন, হোয়াটসঅ্যাপ এবং এপিআই কোড কনফিগারেশন</div>
+                    <div class="card-body p-4">
+                        <form action="/admin/settings/save" method="POST">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">বিজনেস বা ব্র্যান্ড নাম</label>
+                                    <input type="text" name="business_name" class="form-control" value="{{ settings.business_name }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">মেটা অ্যাপ ভেরিফাই টোকেন (Webhook Token)</label>
+                                    <input type="text" name="verify_token" class="form-control" value="{{ settings.verify_token }}">
+                                </div>
+                                <div class="col-md-12 mb-3">
+                                    <label class="form-label text-white-50">মেটা হোয়াটসঅ্যাপ ক্লাউড পার্মানেন্ট অ্যাক্সেস টোকেন</label>
+                                    <textarea name="permanent_token" class="form-control" rows="2">{{ settings.permanent_token }}</textarea>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">ফোন নম্বর আইডি (Phone Number ID)</label>
+                                    <input type="text" name="phone_number_id" class="form-control" value="{{ settings.phone_number_id }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">গুগল জেমিনি এআই এপিআই কী (Gemini API Key)</label>
+                                    <input type="password" name="gemini_key" class="form-control" value="{{ settings.gemini_key }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">মেটা কমার্স ক্যাটালগ আইডি (Facebook Catalog ID)</label>
+                                    <input type="text" name="fb_catalogue_id" class="form-control" value="{{ settings.fb_catalogue_id or '' }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">ফেসবুক ক্যাটালগ সিস্টেম অ্যাক্সেস টোকেন</label>
+                                    <input type="password" name="fb_access_token" class="form-control" value="{{ settings.fb_access_token or '' }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">অটোমেটিক ব্যাকআপ ইমেইল অ্যাড্রেস</label>
+                                    <input type="email" name="backup_email" class="form-control" value="{{ settings.backup_email }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-white-50">বিকাশ পার্সোনাল নম্বর (পেমেন্ট গাইড)</label>
+                                    <input type="text" name="bkash_number" class="form-control" value="{{ settings.bkash_number }}">
+                                </div>
+                            </div>
+                            <div class="text-end mt-2">
+                                <button type="submit" class="btn btn-success px-5 fw-bold">সার্ভার সেটিংস আপডেট করুন</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </body>
 </html>
