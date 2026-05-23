@@ -1,14 +1,12 @@
 import google.generativeai as genai
-import os
-from flask import Flask, request, jsonify
+# ... অন্যান্য ইমপোর্ট ...
 
-app = Flask(__name__)
+# Gemini AI Setup
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-pro-latest')
+ai_model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
-@app.route("/api/vision", methods=["POST"])
-def vision_analysis():
-    # ইমেজ এনালাইসিস করে বিজনেস ডিসিশন নিবে
-    image_data = request.json.get("image_base64")
-    response = model.generate_content(["এই পণ্যটি কি এবং এর দাম কত হওয়া উচিত?", image_data])
-    return jsonify({"analysis": response.text})
+@app.route("/ai/chat", methods=["POST"])
+def ai_chat():
+    user_input = request.json.get("message")
+    response = ai_model.generate_content(user_input)
+    return jsonify({"reply": response.text})
