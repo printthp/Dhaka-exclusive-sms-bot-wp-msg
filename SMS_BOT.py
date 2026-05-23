@@ -10,3 +10,10 @@ def ai_chat():
     user_input = request.json.get("message")
     response = ai_model.generate_content(user_input)
     return jsonify({"reply": response.text})
+    
+@app.route("/dashboard", methods=["GET", "POST"])
+def dashboard():
+    # এখানে সেশন চেক করার কোড বসবে
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+    # ড্যাশবোর্ড কন্টেন্ট...
