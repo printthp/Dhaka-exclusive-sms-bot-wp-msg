@@ -1,7 +1,13 @@
-import bot_extensions  # এটিই মেইন ফাইলের সব ফাংশনকে বাইরে থেকে কন্ট্রোল করবে
+import os
+# প্রথমে মেইন ফাইল ইম্পোর্ট করুন
 import SMS_BOT
+# এরপর আপনার এক্সটেনশন ফাইল ইম্পোর্ট করুন
+import bot_extensions
 
-app = SMS_BOT.application
+# মেইন ফাইলের অ্যাপটিকে ধরুন
+application = SMS_BOT.application
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # পোর্ট ঠিক রেখে সার্ভার চালু করুন
+    port = int(os.environ.get("PORT", 5000))
+    application.run(host="0.0.0.0", port=port)
