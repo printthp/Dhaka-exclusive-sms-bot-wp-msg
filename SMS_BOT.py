@@ -13,15 +13,15 @@ app = Flask(__name__)
 application = app
 
 # ইঞ্জিন লোডার (নিরাপদ পদ্ধতি)
-try:
-    lib_path = os.path.abspath("business_engine.so")
-    if os.path.exists(lib_path):
-        hybrid_engine = ctypes.CDLL(lib_path)
-        hybrid_engine.process_logic.restype = ctypes.c_int
-    else:
-        hybrid_engine = None
-except Exception as e:
-    print(f"Engine Warning: {e}")
+# পুরোনো কোড মুছে এটি বসান
+import sys
+lib_path = os.path.join(os.getcwd(), "business_engine.so")
+
+if os.path.exists(lib_path):
+    hybrid_engine = ctypes.CDLL(lib_path)
+    # ... বাকি লজিক ...
+else:
+    print(f"Warning: Engine file not found at {lib_path}")
     hybrid_engine = None
 
 @app.route("/execute", methods=["POST"])
