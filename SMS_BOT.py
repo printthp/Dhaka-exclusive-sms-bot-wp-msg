@@ -1,13 +1,13 @@
+
 import os
 import sqlite3
 import logging
 import google.generativeai as genai
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
 import ctypes
-import os
-import ctypes
-import os
 from flask import Flask, request, jsonify
+lib_path = os.path.abspath("business_engine.so")
+hybrid_engine = ctypes.CDLL(lib_path)
 
 app = Flask(__name__)
 application = app
