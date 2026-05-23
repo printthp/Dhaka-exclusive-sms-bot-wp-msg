@@ -2,14 +2,13 @@ import os
 import sqlite3
 import logging
 import ctypes
-import google.generativeai as genai
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect, url_for, session
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
-app.secret_key = "dhaka_exclusive_secret_key_2026" # সেশন এর জন্য এটি জরুরি
+app.secret_key = "dhaka_exclusive_secret_key_2026" 
 application = app
 
 DB_FILE = "bot_v7_ultimate.db"
