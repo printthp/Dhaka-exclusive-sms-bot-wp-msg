@@ -1,2 +1,2 @@
-build:
-	g++ -shared -o engine.so -fPIC engine.cpp
+all:
+	g++ -shared -o core_engine.so -fPIC core_engine.cpp
