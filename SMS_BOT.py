@@ -2,6 +2,13 @@ from flask import Flask, render_template_string
 import ctypes
 import os
 
+lib = None
+try:
+    if os.path.exists("engine.so"):
+        lib = ctypes.CDLL(os.path.abspath("engine.so"))
+except Exception as e:
+    print(f"Engine Load Error: {e}")
+
 app = Flask(__name__)
 application = app
 
