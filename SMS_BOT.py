@@ -5,16 +5,17 @@ import os
 app = Flask(__name__)
 application = app
 
-# ১. সি++ ইঞ্জিন নিরাপদভাবে লোড করা
-core = ctypes.CDLL(os.path.abspath("core_engine.so"))
-core.process_business_logic.restype = ctypes.c_char_p
 
-lib = None
-try:
-    if os.path.exists("engine.so"):
-        lib = ctypes.CDLL(os.path.abspath("engine.so"))
-except Exception as e:
-    print(f"Engine Load Error: {e}")
+
+# গ্লোবাল ভেরিয়েবল
+core = None
+# ফাইলটি আছে কি না চেক করুন
+if os.path.exists("core_engine.so"):
+    try:
+        core = ctypes.CDLL(os.path.abspath("core_engine.so"))
+        core.process_business_logic.restype = ctypes.c_char_p
+    except Exception as e:
+        print(f"Engine Load Error: {e}")
 
 
 
