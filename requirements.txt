@@ -1,9 +1,4 @@
-flask
-requests
-protobuf==4.25.3
+Flask
 gunicorn
 google-generativeai
-google-genai
-Pillow
-pybind11
-
+requests
