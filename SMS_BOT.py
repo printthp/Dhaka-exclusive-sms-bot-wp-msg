@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, render_template_string
 import os
 
 app = Flask(__name__)
@@ -6,15 +6,11 @@ application = app
 
 @app.route("/")
 def index():
-    return "Bot is Active"
+    return "System is Online"
 
 @app.route("/admin/dashboard")
 def admin_dashboard():
-    return "Admin Panel is Active"
-    
-@app.route("/admin/dashboard")
-def admin_dashboard():
-    return "<h1>Admin Panel Active - System Connected</h1>"    
+    return "<h1>Admin Control Center Active</h1>"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run()
