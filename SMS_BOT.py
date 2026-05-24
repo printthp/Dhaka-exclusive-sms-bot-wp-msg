@@ -19,27 +19,21 @@ def index():
     return "System is Online"
 
 # ৩. ড্যাশবোর্ড রাউট (শুধু একটিই থাকবে)
+DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html>
+<body style="background:#1a1a1a; color:#fff; font-family:sans-serif; padding:20px;">
+    <h1>Master Control Dashboard</h1>
+    <div style="background:#333; padding:20px; border-radius:10px;">
+        <h3>System Status: ACTIVE</h3>
+    </div>
+</body>
+</html>
+"""
+
 @app.route("/admin/dashboard")
-def admin_dashboard():
-    # ইঞ্জিনের রেজাল্ট বের করা
-    result = "N/A (Engine not loaded)"
-    if lib:
-        try:
-            # ধরুন সি++ এর ফাংশনটির নাম process_engine
-            result = lib.process_engine(10)
-        except Exception as e:
-            result = f"Error: {e}"
-            
-    return render_template_string("""
-        <html>
-            <body style="font-family: sans-serif; padding: 50px;">
-                <h1>Admin Panel Active - System Connected</h1>
-                <div style="background: #e0e0e0; padding: 20px;">
-                    <h3>C++ Engine Output: {{ result }}</h3>
-                </div>
-            </body>
-        </html>
-    """, result=result)
+def dashboard():
+    return render_template_string(DASHBOARD_HTML)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
