@@ -11,6 +11,10 @@ def index():
 @app.route("/admin/dashboard")
 def admin_dashboard():
     return "Admin Panel is Active"
+    
+@app.route("/admin/dashboard")
+def admin_dashboard():
+    return "<h1>Admin Panel Active - System Connected</h1>"    
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
