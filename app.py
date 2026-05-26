@@ -464,107 +464,68 @@ ADMIN_HTML = """<!DOCTYPE html>
 <body class="bg-slate-900 text-slate-100 min-h-screen font-sans antialiased flex flex-col md:flex-row">
 
 <div class="w-full md:w-72 bg-slate-950 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col">
-<div class="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center md:block text-center">
-<h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2"><i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}</h1>
-<div class="text-xs text-slate-400 mt-1">ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span></div>
+    <div class="p-5 border-b border-slate-800 bg-slate-950 text-center">
+        <h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2"><i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}</h1>
+        <div class="text-xs text-slate-400 mt-1">ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span></div>
+    </div>
+    <nav class="p-3 flex flex-col gap-1">
+        <button onclick="switchTab('orders')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm bg-indigo-600 text-white font-bold transition"><i class="fa-solid fa-wallet"></i> অর্ডার প্যানেল</button>
+        <button onclick="switchTab('livechat')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-comments"></i> লাইভ ইনবক্স</button>
+        <button onclick="switchTab('complaints')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-triangle-exclamation"></i> কমপ্লেইন বক্স</button>
+        <button onclick="switchTab('inventory')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-box-open"></i> প্রোডাক্ট সিঙ্ক</button>
+        <button onclick="switchTab('config')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-sliders"></i> সেটিংস</button>
+        <a href="/admin/logout" class="mt-auto flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-rose-400 hover:bg-rose-950/20 transition"><i class="fa-solid fa-right-from-bracket"></i> লগআউট</a>
+    </nav>
 </div>
-<nav class="p-3 grid grid-cols-2 md:flex md:flex-col gap-1 overflow-x-auto">
-<button onclick="switchTab('orders')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm bg-indigo-600 text-white font-bold transition"><i class="fa-solid fa-wallet"></i> অর্ডার প্যানেল</button>
-<button onclick="switchTab('livechat')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-comments"></i> লাইভ ইনবক্স</button>
-<button onclick="switchTab('complaints')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-triangle-exclamation"></i> কমপ্লেইন বক্স</button>
-<button onclick="switchTab('inventory')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-box-open"></i> প্রোডাক্ট সিঙ্ক</button>
-<button onclick="switchTab('agents')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-users"></i> প্রতিনিধি ট্র্যাকার</button>
-<button onclick="switchTab('config')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-sliders"></i> সেটিংস</button>
-<a href="/admin/logout" class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-rose-400 hover:bg-rose-950/20 transition mt-auto"><i class="fa-solid fa-right-from-bracket"></i> লগআউট</a>
-</nav>
-</div>
 
-<div class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-x-hidden">
-{% if msg %}
-<div class="m-4 md:m-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold rounded-xl text-xs md:text-sm flex items-center gap-2"><i class="fa-solid fa-circle-check"></i> {{ msg }}</div>
-{% endif %}
+<div class="flex-1 p-8 overflow-y-auto">
+    {% if msg %}<div class="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold rounded-xl">{{ msg }}</div>{% endif %}
 
-<div class="p-4 md:p-8 flex-1 overflow-y-auto">
-
-<div id="tab-orders" class="tab-content space-y-6">
-    <h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
+    <div id="tab-orders" class="tab-content">
+        <h2 class="text-2xl font-black mb-6">অর্ডার ট্র্যাকিং ও বুকিং</h2>
+        <div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400"><th class="p-4">Customer</th><th class="p-4">COD</th><th class="p-4">Action</th></tr></thead>
+                <tbody>
+                {% for o in orders %}
+                <tr class="border-b border-slate-800">
+                    <td class="p-4">{{ o.name }}<br><span class="text-xs text-slate-500">{{ o.phone }}</span></td>
+                    <td class="p-4 text-emerald-400 font-bold">{{ o.total }}৳</td>
+                    <td class="p-4"><a href="/admin/order/book/{{ o.id }}" class="bg-indigo-600 px-3 py-1 rounded text-xs">Pathao Book</a></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
-<div id="tab-livechat" class="tab-content hidden">
-    </div>
-
-<div id="tab-complaints" class="tab-content hidden">
-    </div>
-
-<div id="tab-inventory" class="tab-content hidden">
-    </div>
-
-<div id="tab-agents" class="tab-content hidden">
-    </div>
-
-<div id="tab-config" class="tab-content hidden bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6">
-<div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
-<form action="/admin/settings/save" method="POST" class="space-y-6">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label><input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white focus:outline-none"></div>
-        <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label><input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white focus:outline-none"></div>
-
-        <div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
-            <div class="font-bold text-xs text-indigo-400 uppercase">Meta (Facebook) Config</div>
-            <div class="grid md:grid-cols-2 gap-4">
-                <input type="text" name="fb_catalogue_id" placeholder="Facebook Catalogue ID" value="{{ settings.get('fb_catalogue_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-                <input type="password" name="fb_access_token" placeholder="FB Access Token" value="{{ settings.get('fb_access_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-                <input type="password" name="permanent_token" placeholder="WhatsApp Permanent Token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+    <div id="tab-config" class="tab-content hidden bg-slate-950 rounded-2xl border border-slate-800 p-6">
+        <h2 class="text-xl font-bold mb-6 border-b border-slate-800 pb-3">সিস্টেম কনফিগ</h2>
+        <form action="/admin/settings/save" method="POST" class="space-y-4">
+            <input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 p-3 rounded-xl border border-slate-800" placeholder="Business Name">
+            <div class="grid grid-cols-2 gap-4">
+                <input type="text" name="fb_catalogue_id" placeholder="Catalogue ID" value="{{ settings.get('fb_catalogue_id', '') }}" class="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                <input type="password" name="fb_access_token" placeholder="FB Access Token" value="{{ settings.get('fb_access_token', '') }}" class="bg-slate-900 p-3 rounded-xl border border-slate-800">
             </div>
-        </div>
-
-        <div class="md:col-span-2 p-4 bg-rose-950/20 border border-rose-500/20 rounded-xl space-y-3">
-            <div class="font-bold text-xs text-rose-400 uppercase">Pathao Courier Config</div>
-            <div class="grid md:grid-cols-3 gap-4">
-                <input type="text" name="pathao_store_id" placeholder="Store ID" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-                <input type="text" name="pathao_client_id" placeholder="Client ID" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-                <input type="password" name="pathao_client_secret" placeholder="Client Secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-                <input type="text" name="pathao_merchant_email" placeholder="Merchant Email" value="{{ settings.get('pathao_merchant_email', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-                <input type="password" name="pathao_merchant_password" placeholder="Merchant Password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <div class="grid grid-cols-2 gap-4">
+                <input type="text" name="pathao_store_id" placeholder="Pathao Store ID" value="{{ settings.get('pathao_store_id', '') }}" class="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                <input type="password" name="gemini_key" placeholder="Gemini Key" value="{{ settings.get('gemini_key', '') }}" class="bg-slate-900 p-3 rounded-xl border border-slate-800">
             </div>
-        </div>
-
-        <div class="md:col-span-2 p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl space-y-3">
-            <div class="font-bold text-xs text-emerald-400 uppercase">Google Gemini AI Config</div>
-            <input type="password" name="gemini_key" placeholder="Gemini API Key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <textarea name="ai_system_instruction" rows="2" placeholder="AI System Instruction" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea>
-        </div>
+            <button class="w-full bg-indigo-600 p-3 rounded-xl font-bold mt-4">Save All</button>
+        </form>
     </div>
-    <button type="submit" class="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl text-sm hover:bg-indigo-500 transition">Save Configurations</button>
-</form>
-</div>
-
-</div>
 </div>
 
 <script>
-function toggleEdit(id) {
-const viewEl = document.getElementById('view-' + id);
-const editEl = document.getElementById('edit-' + id);
-const btnEl = document.getElementById('btn-' + id);
-if (editEl.style.display === 'none') {
-viewEl.style.display = 'none'; editEl.style.display = 'block'; btnEl.innerText = 'Cancel';
-} else {
-viewEl.style.display = 'block'; editEl.style.display = 'none'; btnEl.innerText = 'Edit';
-}
-}
 function switchTab(tabId) {
-document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-document.getElementById('tab-' + tabId).classList.remove('hidden');
-document.querySelectorAll('.tab-btn').forEach(btn => {
-btn.classList.remove('bg-indigo-600','text-white','font-bold');
-btn.classList.add('text-slate-400');
-});
-const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick') === "switchTab('" + tabId + "')");
-if (activeBtn) { activeBtn.classList.add('bg-indigo-600','text-white','font-bold'); activeBtn.classList.remove('text-slate-400'); }
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.getElementById('tab-' + tabId).classList.remove('hidden');
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-indigo-600','text-white','font-bold');
+        btn.classList.add('text-slate-400');
+    });
+    event.currentTarget.classList.add('bg-indigo-600','text-white','font-bold');
 }
-const hash = window.location.hash.replace('#','');
-if (hash) switchTab(hash);
 </script>
 </body>
 </html>"""
