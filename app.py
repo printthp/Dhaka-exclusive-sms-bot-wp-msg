@@ -453,7 +453,7 @@ def process_webhook_async(msg, from_number):
 # =====================================================================
 # FULLY RESPONSIVE ADMIN DASHBOARD
 # =====================================================================
-  ADMIN_HTML = """<!DOCTYPE html>
+ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -487,214 +487,55 @@ def process_webhook_async(msg, from_number):
 <div class="p-4 md:p-8 flex-1 overflow-y-auto">
 
 <div id="tab-orders" class="tab-content space-y-6">
-<h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
-<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
-<table class="w-full text-left text-xs md:text-sm min-w-[600px]">
-<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400 uppercase">
-<th class="p-4">Customer</th><th class="p-4">Address</th><th class="p-4">COD Total</th><th class="p-4">Agent Assigned</th><th class="p-4 text-right">Actions</th>
-</tr></thead>
-<tbody>
-{% for o in orders %}
-<tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
-<td class="p-4">
-<span class="font-mono text-indigo-400 font-bold">#{{ o.id }}</span>
-{% if o.pathao_consignment_id == 'CALL_REQUEST' %}<span class="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">Call Request</span>{% endif %}<br>
-<b class="text-white">{{ o.name }}</b><br><span class="text-xs text-slate-500">{{ o.phone }}</span>
-</td>
-<td class="p-4 text-xs max-w-xs truncate">{{ o.address }}</td>
-<td class="p-4 font-bold text-emerald-400">{{ o.total }}৳</td>
-<td class="p-4 text-slate-300 font-medium">{{ o.agent_name }}</td>
-<td class="p-4 text-right space-y-1 md:space-y-0 md:space-x-1">
-<a href="/invoice/{{ o.id }}" target="_blank" class="inline-block p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-xs"><i class="fa-solid fa-print"></i></a>
-{% if o.status == 'pending' and o.pathao_consignment_id != 'CALL_REQUEST' %}
-<a href="/admin/order/book/{{ o.id }}" class="inline-block p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold">Pathao Book</a>
-{% endif %}
-{% if o.status == 'pending' and o.pathao_consignment_id == 'CALL_REQUEST' %}
-<a href="/admin/order/resolve-call/{{ o.id }}" class="inline-block p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold">Call Done</a>
-{% endif %}
-</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-</div>
-</div>
+    <h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
+    </div>
 
-<div id="tab-livechat" class="tab-content hidden grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
-<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4 h-[50vh] md:h-full overflow-y-auto">
-<h3 class="text-xs font-bold text-slate-400 uppercase mb-4">কাস্টমার লিস্ট</h3>
-<div class="space-y-2">
-{% for u in users %}
-<a href="/admin?chat_with={{ u.phone }}#livechat" class="block p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/50 transition">
-<div class="font-bold text-white text-xs md:text-sm">{{ u.phone }}</div>
-</a>
-{% endfor %}
-</div>
-</div>
-<div class="md:col-span-2 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col h-[50vh] md:h-full overflow-hidden">
-<div class="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-xs md:text-sm">
-<div class="font-bold text-indigo-400">💬 কাস্টমার: {{ active_chat or 'সিলেক্ট করুন' }}</div>
-{% if active_chat %}<a href="/admin/chat/toggle-bot/{{ active_chat }}" class="px-2 py-1 bg-amber-500 text-slate-950 rounded-lg font-bold text-xs">বট পজ/অন</a>{% endif %}
-</div>
-<div class="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col">
-{% for m in chat_history %}
-<div class="max-w-xs md:max-w-md p-3 rounded-2xl text-xs {% if m.direction == 'inbound' %}bg-slate-800 text-white self-start{% else %}bg-indigo-600 text-white self-end{% endif %}">
-<div class="font-semibold text-[10px] text-slate-400 mb-0.5">{{ m.agent_id }}</div>
-<div>{{ m.content }}</div>
-</div>
-{% endfor %}
-</div>
-{% if active_chat %}
-<form action="/admin/chat/send" method="POST" class="p-3 bg-slate-900 border-t border-slate-800 flex gap-2">
-<input type="hidden" name="phone" value="{{ active_chat }}">
-<input type="text" name="message" placeholder="এখানে উত্তর লিখুন..." class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none">
-<button type="submit" class="bg-indigo-600 text-white px-4 md:px-5 rounded-xl text-xs font-bold hover:bg-indigo-500"><i class="fa-solid fa-paper-plane"></i></button>
-</form>
-{% endif %}
-</div>
-</div>
+<div id="tab-livechat" class="tab-content hidden">
+    </div>
 
-<div id="tab-complaints" class="tab-content hidden space-y-6">
-<h2 class="text-xl md:text-2xl font-black text-rose-400">⚠️ কাস্টমার কমপ্লেইন বক্স</h2>
-<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
-<table class="w-full text-left text-xs md:text-sm min-w-[600px]">
-<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400"><th class="p-4">Customer</th><th class="p-4">Complaint Note</th><th class="p-4">Status</th><th class="p-4">Resolved By</th><th class="p-4 text-right">Action</th></tr></thead>
-<tbody>
-{% for c in complaints %}
-<tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
-<td class="p-4 font-bold">{{ c.phone }}<br><span class="text-[10px] text-slate-500">{{ c.created_at }}</span></td>
-<td class="p-4 text-xs max-w-xs whitespace-normal">{{ c.complaint_text }}</td>
-<td class="p-4"><span class="px-2 py-0.5 rounded text-[11px] font-bold {% if c.status=='pending' %}bg-rose-500/20 text-rose-400{% else %}bg-emerald-500/20 text-emerald-400{% endif %}">{{ c.status.upper() }}</span></td>
-<td class="p-4 text-xs"><b>{{ c.resolved_by or '-' }}</b><br><span class="text-slate-400 text-[11px]">{{ c.resolution_notes }}</span></td>
-<td class="p-4 text-right">
-{% if c.status == 'pending' %}
-<form action="/admin/complaint/resolve/{{ c.id }}" method="POST" class="flex flex-col md:flex-row gap-1 justify-end">
-<input type="text" name="notes" placeholder="সমাধান নোট লিখুন..." required class="bg-slate-900 border border-slate-800 rounded p-1 text-xs text-white">
-<button type="submit" class="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold">Resolve</button>
-</form>
-{% else %}<span class="text-slate-500 text-xs"><i class="fa-solid fa-circle-check text-emerald-500"></i> Solved</span>{% endif %}
-</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-</div>
-</div>
+<div id="tab-complaints" class="tab-content hidden">
+    </div>
 
-<div id="tab-inventory" class="tab-content hidden space-y-6">
-<div class="bg-gradient-to-r from-indigo-950 to-blue-950 border border-indigo-500/20 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
-<h3 class="text-sm md:text-base font-black text-white">মেটা ক্যাটালগ অটো সিঙ্ক ইঞ্জিন</h3>
-<a href="/admin/sync-facebook-trigger" class="w-full md:w-auto text-center bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-lg">Sync Meta Catalogue</a>
-</div>
-<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto">
-<table class="w-full text-left text-xs md:text-sm min-w-[500px]">
-<thead><tr class="bg-slate-900 text-slate-400"><th class="p-4">Product ID</th><th class="p-4">Image</th><th class="p-4">Details</th><th class="p-4">Price</th><th class="p-4">Edit</th></tr></thead>
-<tbody>
-{% for p in products %}
-<tr class="border-b border-slate-800/40" id="prod-row-{{ p.id }}">
-<td class="p-4 font-mono text-xs text-slate-500">{{ p.fb_product_id or 'Manual' }}</td>
-<td class="p-4"><img src="{{ p.image_url or DEFAULT_PRODUCT_IMAGE }}" class="h-10 w-10 object-cover rounded-lg" onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'"></td>
-<td class="p-4">
-<div class="view-mode" id="view-{{ p.id }}"><b class="text-white">{{ p.name }}</b><br><span class="text-xs text-slate-400">Stock: {{ p.stock }}</span></div>
-<form class="edit-mode hidden" id="edit-{{ p.id }}" action="/admin/product/edit/{{ p.id }}" method="POST" style="display:none">
-<input type="text" name="name" value="{{ p.name }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white mb-1" required><br>
-<input type="number" name="price" value="{{ p.price }}" class="w-20 bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white mr-1" required>
-<input type="number" name="stock" value="{{ p.stock }}" class="w-16 bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white"><br>
-<input type="text" name="image_url" value="{{ p.image_url or '' }}" placeholder="Image URL" class="w-full bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white mt-1">
-<button type="submit" class="mt-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded">Save</button>
-</form>
-</td>
-<td class="p-4 font-bold text-emerald-400">{{ p.price }}৳</td>
-<td class="p-4"><button onclick="toggleEdit({{ p.id }})" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded font-bold" id="btn-{{ p.id }}">Edit</button></td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-</div>
-</div>
+<div id="tab-inventory" class="tab-content hidden">
+    </div>
 
-<div id="tab-agents" class="tab-content hidden space-y-6">
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-<div class="bg-slate-950 p-5 rounded-2xl border border-slate-800">
-<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">নতুন প্রতিনিধি যোগ করুন</h3>
-<form action="/admin/agents/add" method="POST" class="space-y-3">
-<input type="text" name="username" placeholder="ইউজারনেম" required class="w-full bg-slate-900 border border-slate-800 p-2 rounded-xl text-xs text-white">
-<input type="password" name="password" placeholder="পাসওয়ার্ড" required class="w-full bg-slate-900 border border-slate-800 p-2 rounded-xl text-xs text-white">
-<button type="submit" class="w-full bg-indigo-600 p-2 text-xs font-bold rounded-xl text-white">Save Agent</button>
-</form>
-</div>
-<div class="md:col-span-2 bg-slate-950 p-5 rounded-2xl border border-slate-800 overflow-x-auto">
-<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">প্রতিনিধিদের কর্মক্ষমতা লগ</h3>
-<table class="w-full text-left text-xs">
-<thead><tr class="bg-slate-900 text-slate-400"><th class="p-2">Agent Name</th><th class="p-2">Action</th><th class="p-2">Details</th><th class="p-2">Time</th></tr></thead>
-<tbody>
-{% for l in agent_logs %}
-<tr class="border-b border-slate-800/50">
-<td class="p-2 font-bold text-indigo-400">{{ l.username }}</td>
-<td class="p-2"><span class="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-[10px]">{{ l.action }}</span></td>
-<td class="p-2 text-slate-300 max-w-xs truncate">{{ l.details }}</td>
-<td class="p-2 text-slate-500">{{ l.timestamp }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-</div>
-</div>
-</div>
+<div id="tab-agents" class="tab-content hidden">
+    </div>
 
 <div id="tab-config" class="tab-content hidden bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6">
 <div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
 <form action="/admin/settings/save" method="POST" class="space-y-6">
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:grid-cols-2 gap-6">
-<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label><input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
-<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label><input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
-<div class="md:col-span-2"><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Permanent Token</label><input type="password" name="permanent_token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
-<div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
-<div class="font-bold text-xs text-indigo-400 uppercase">Google Gemini AI Config</div>
-<div><input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white"></div>
-<div><textarea name="ai_system_instruction" rows="3" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea></div>
-</div>
-</div>
-<button type="submit" class="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl text-xs md:text-sm hover:bg-indigo-500 transition">Save Configurations</button>
-</form>
-</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label><input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white focus:outline-none"></div>
+        <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label><input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white focus:outline-none"></div>
 
-<div class="p-4 md:p-8 flex-1 overflow-y-auto">
+        <div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
+            <div class="font-bold text-xs text-indigo-400 uppercase">Meta (Facebook) Config</div>
+            <div class="grid md:grid-cols-2 gap-4">
+                <input type="text" name="fb_catalogue_id" placeholder="Facebook Catalogue ID" value="{{ settings.get('fb_catalogue_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+                <input type="password" name="fb_access_token" placeholder="FB Access Token" value="{{ settings.get('fb_access_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+                <input type="password" name="permanent_token" placeholder="WhatsApp Permanent Token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            </div>
+        </div>
 
-<div id="tab-config" class="tab-content hidden bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6">
-<div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
-<form action="/admin/settings/save" method="POST" class="space-y-6">
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label><input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
-    <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label><input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
+        <div class="md:col-span-2 p-4 bg-rose-950/20 border border-rose-500/20 rounded-xl space-y-3">
+            <div class="font-bold text-xs text-rose-400 uppercase">Pathao Courier Config</div>
+            <div class="grid md:grid-cols-3 gap-4">
+                <input type="text" name="pathao_store_id" placeholder="Store ID" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+                <input type="text" name="pathao_client_id" placeholder="Client ID" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+                <input type="password" name="pathao_client_secret" placeholder="Client Secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+                <input type="text" name="pathao_merchant_email" placeholder="Merchant Email" value="{{ settings.get('pathao_merchant_email', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+                <input type="password" name="pathao_merchant_password" placeholder="Merchant Password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            </div>
+        </div>
 
-    <div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
-        <div class="font-bold text-xs text-indigo-400 uppercase">Meta (Facebook) Config</div>
-        <div class="grid md:grid-cols-2 gap-4">
-            <input type="text" name="fb_catalogue_id" placeholder="Facebook Catalogue ID" value="{{ settings.get('fb_catalogue_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <input type="password" name="fb_access_token" placeholder="FB Access Token" value="{{ settings.get('fb_access_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <input type="password" name="permanent_token" placeholder="WhatsApp Permanent Token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+        <div class="md:col-span-2 p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl space-y-3">
+            <div class="font-bold text-xs text-emerald-400 uppercase">Google Gemini AI Config</div>
+            <input type="password" name="gemini_key" placeholder="Gemini API Key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <textarea name="ai_system_instruction" rows="2" placeholder="AI System Instruction" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea>
         </div>
     </div>
-
-    <div class="md:col-span-2 p-4 bg-rose-950/20 border border-rose-500/20 rounded-xl space-y-3">
-        <div class="font-bold text-xs text-rose-400 uppercase">Pathao Courier Config</div>
-        <div class="grid md:grid-cols-3 gap-4">
-            <input type="text" name="pathao_store_id" placeholder="Store ID" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <input type="text" name="pathao_client_id" placeholder="Client ID" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <input type="password" name="pathao_client_secret" placeholder="Client Secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <input type="text" name="pathao_merchant_email" placeholder="Merchant Email" value="{{ settings.get('pathao_merchant_email', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-            <input type="password" name="pathao_merchant_password" placeholder="Merchant Password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-        </div>
-    </div>
-
-    <div class="md:col-span-2 p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl space-y-3">
-        <div class="font-bold text-xs text-emerald-400 uppercase">Google Gemini AI Config</div>
-        <input type="password" name="gemini_key" placeholder="Gemini API Key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
-        <textarea name="ai_system_instruction" rows="2" placeholder="AI System Instruction" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea>
-    </div>
-</div>
-<button type="submit" class="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl text-xs md:text-sm hover:bg-indigo-500 transition">Save Configurations</button>
+    <button type="submit" class="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl text-sm hover:bg-indigo-500 transition">Save Configurations</button>
 </form>
 </div>
 
