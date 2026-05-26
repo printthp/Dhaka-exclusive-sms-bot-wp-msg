@@ -50,20 +50,20 @@ except Exception as e:
     logger.error(f"C++ Engine Load Error: {e}")
 
 # =====================================================================
-# ASSEMBLY ENGINE LOADER
+# ASSEMBLY ENGINE LOADER (COMMENTED OUT - UNCOMMENT IF NEEDED)
 # =====================================================================
-#asm_lib = None
-#try:
-    #if os.path.exists("asm_engine.so"):
-        #asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
-        #asm_lib.asm_process_command.restype = ctypes.c_char_p
-        #asm_lib.asm_strlen.restype = ctypes.c_uint64
-        #asm_lib.asm_checksum.restype = ctypes.c_uint64
-        #logger.info("Assembly Engine loaded: asm_engine.so")
-    #else:
-        #logger.warning("No Assembly engine .so file found")
-#except Exception as e:
-    #logger.error(f"Assembly Engine Load Error: {e}")
+# asm_lib = None
+# try:
+#     if os.path.exists("asm_engine.so"):
+#         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
+#         asm_lib.asm_process_command.restype = ctypes.c_char_p
+#         asm_lib.asm_strlen.restype = ctypes.c_uint64
+#         asm_lib.asm_checksum.restype = ctypes.c_uint64
+#         logger.info("Assembly Engine loaded: asm_engine.so")
+#     else:
+#         logger.warning("No Assembly engine .so file found")
+# except Exception as e:
+#     logger.error(f"Assembly Engine Load Error: {e}")
 
 # =====================================================================
 # HYBRID ENGINES
@@ -97,7 +97,11 @@ class AsmEngine:
         return asm_lib.asm_checksum(text.encode("utf-8"))
 
 cpp_engine = CppEngine()
-asm_engine = AsmEngine()
+# Only instantiate AsmEngine if asm_lib is defined
+if 'asm_lib' in locals() and asm_lib:
+    asm_engine = AsmEngine()
+else:
+    asm_engine = None
 
 # =====================================================================
 # DATABASE
@@ -128,7 +132,7 @@ def init_db():
             ("verify_token", "dhakaex0020"),
             ("fb_catalogue_id", ""),
             ("fb_access_token", ""),
-            ("ai_system_instruction", "আপনি একজন প্রফেশনাল কাস্টমার অ্যাসিস্ট্যান্ট। কাস্টমারের সাথে বাংলায় বিনীতভাবে কথা বলুন এবং প্রোডাক্ট কিনতে সাহায্য করুন।"),
+            ("ai_system_instruction", "আপনি একজন প্রফেশনাল কাস্টমার অ্যাসিস্ট্যান্ট। কাস্টমারের সাথে বাংলায় বিনীতভাবে কথা বলুন এবং প্রোডাক্ট কিনতে সাহায্য করুন।"),
             ("pathao_base_url", "https://api-hermes.pathao.com"),
             ("pathao_store_id", ""),
             ("pathao_client_id", ""),
@@ -232,7 +236,7 @@ def sync_facebook_catalogue():
                 ON CONFLICT(fb_product_id) DO UPDATE SET name=excluded.name, price=excluded.price, description=excluded.description, image_url=excluded.image_url
             ''', (fb_id, name, price, desc, img_url), commit=True)
             sync_count += 1
-        return True, f"সফলভাবে {sync_count}টি প্রোডাক্ট ফেসবুক ক্যাটালগ থেকে সিঙ্ক হয়েছে!"
+        return True, f"সফলভাবে {sync_count}টি প্রোডাক্ট ফেসবুক ক্যাটালগ থেকে সিঙ্ক হয়েছে!"
     except Exception as e:
         return False, str(e)
 
@@ -333,9 +337,9 @@ def get_ai_answer(user_query, chat_history_str=""):
         full_prompt = f"চ্যাটের পূর্ববর্তী প্রসঙ্গ:\n{chat_history_str}\n\nকাস্টমারের বর্তমান মেসেজ: {user_query}"
         return client.models.generate_content(model="gemini-2.5-flash", contents=full_prompt, config=cfg).text
     except Exception as e:
-        return "আপনার মেসেজটি আমাদের প্যানেলে জমা হয়েছে। লাইভ এজেন্ট কিছুক্ষণের মধ্যে উত্তর দেবে।"
+        return "আপনার মেসেজটি আমাদের প্যানেলে জমা হয়েছে। লাইভ এজেন্ট কিছুক্ষণের মধ্যে উত্তর দেবে।"
 
-def send_main_menu_buttons(from_number, text_content="Dhaka Exclusive এ আপনাকে স্বাগতম! নিচে থেকে আপনার প্রয়োজনীয় বাটনটি সিলেক্ট করুন:"):
+def send_main_menu_buttons(from_number, text_content="Dhaka Exclusive এ আপনাকে স্বাগতম! নিচে থেকে আপনার প্রয়োজনীয় বাটনটি সিলেক্ট করুন:"):
     btns = {
         "type": "button",
         "body": {"text": text_content},
@@ -379,18 +383,18 @@ def process_webhook_async(msg, from_number):
     if body_text == "menu_call":
         db_query("INSERT INTO orders (phone, name, address, product_id, quantity, total, delivery_fee, pathao_consignment_id, status) VALUES (?, 'Call Request', 'Customer requested a callback', 0, 0, 0, 0, 'CALL_REQUEST', 'pending')", (from_number,), commit=True)
         db_query("UPDATE sessions SET state='idle', context='{}' WHERE phone=?", (from_number,), commit=True)
-        send_whatsapp(from_number, "text", "📞 আপনার কল রিকোয়েস্টটি এডমিন প্যানেলে পাঠানো হয়েছে। আমাদের প্রতিনিধি খুব দ্রুত আপনাকে কল করবেন। ধন্যবাদ!")
+        send_whatsapp(from_number, "text", "📞 আপনার কল রিকোয়েস্টটি এডমিন প্যানেলে পাঠানো হয়েছে। আমাদের প্রতিনিধি খুব দ্রুত আপনাকে কল করবেন। ধন্যবাদ!")
         return
     
     if body_text == "menu_complain":
         db_query("INSERT INTO sessions (phone, state, context, bot_paused) VALUES (?, 'awaiting_complain', '{}', 0) ON CONFLICT(phone) DO UPDATE SET state='awaiting_complain'", (from_number,), commit=True)
-        send_whatsapp(from_number, "text", "⚠️ আপনার অভিযোগটি দয়া করে বিস্তারিত লিখে মেসেজ আকারে পাঠান:")
+        send_whatsapp(from_number, "text", "⚠️ আপনার অভিযোগটি দয়া করে বিস্তারিত লিখে মেসেজ আকারে পাঠান:")
         return
     
     if state == "awaiting_complain":
         db_query("INSERT INTO complaints (phone, complaint_text) VALUES (?, ?)", (from_number, body_text), commit=True)
         db_query("UPDATE sessions SET state='idle' WHERE phone=?", (from_number,), commit=True)
-        send_whatsapp(from_number, "text", "✅ আপনার অভিযোগটি নথিভুক্ত করা হয়েছে। আমাদের কমপ্লেইন টিম এটি দ্রুত সমাধান করবে।")
+        send_whatsapp(from_number, "text", "✅ আপনার অভিযোগটি নথিভুক্ত করা হয়েছে। আমাদের কমপ্লেইন টিম এটি দ্রুত সমাধান করবে।")
         return
     
     # Product and order processing flow
@@ -436,9 +440,9 @@ def process_webhook_async(msg, from_number):
             total_cod = ctx["subtotal"] + ctx["delivery_fee"]
             db_query("INSERT INTO orders (phone, name, address, product_id, quantity, total, delivery_fee, pathao_consignment_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_BOOKING', 'pending')",
                      (from_number, ctx["cust_name"], ctx["address"], ctx["product_id"], ctx["quantity"], total_cod, ctx["delivery_fee"]), commit=True)
-            send_whatsapp(from_number, "text", "🎉 অভিনন্দন! আপনার অর্ডারটি সিস্টেমে নেওয়া হয়েছে। আমাদের প্রতিনিধি দ্রুত কল করে কনফার্ম করবেন।")
+            send_whatsapp(from_number, "text", "🎉 অভিনন্দন! আপনার অর্ডারটি সিস্টেমে নেওয়া হয়েছে। আমাদের প্রতিনিধি দ্রুত কল করে কনফার্ম করবেন।")
         else:
-            send_whatsapp(from_number, "text", "❌ আপনার অর্ডারটি বাতিল করা হয়েছে।")
+            send_whatsapp(from_number, "text", "❌ আপনার অর্ডারটি বাতিল করা হয়েছে।")
         db_query("UPDATE sessions SET state='idle', context='{}' WHERE phone=?", (from_number,), commit=True)
         return
     
@@ -451,9 +455,9 @@ def process_webhook_async(msg, from_number):
 
 
 # =====================================================================
-# FULLY RESPONSIVE ADMIN DASHBOARD
+# ADMIN DASHBOARD HTML TEMPLATE (stored as a variable)
 # =====================================================================
-<!DOCTYPE html>
+ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
 <head>
 <meta charset="UTF-8">
@@ -461,9 +465,7 @@ def process_webhook_async(msg, from_number):
 <title>{{ settings.get('business_name', 'Ultimate Control Station') }} — ড্যাশবোর্ড</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-{# Socket.IO for real-time updates #}
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-{# Chart.js for analytics #}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
@@ -481,19 +483,17 @@ body { background: #0f172a; }
 </head>
 <body class="min-h-screen font-sans antialiased flex flex-col md:flex-row text-slate-100">
 
-{# ====== SIDEBAR ====== #}
 <aside class="w-full md:w-72 bg-slate-950 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col shrink-0">
 <div class="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center md:block text-center">
 <h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2">
 <i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}
 </h1>
 <div class="text-xs text-slate-400 mt-1">
-ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span>
+User: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span>
 <span class="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">{{ session.get('role', 'agent')|upper }}</span>
 </div>
 </div>
 
-{# Live Notification Badge #}
 <div id="live-notif" class="hidden mx-3 mt-2 p-2 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-xs text-indigo-300 flex items-center gap-2">
 <i class="fa-solid fa-circle text-emerald-400 text-[6px]"></i>
 <span id="notif-text">New update received</span>
@@ -501,13 +501,13 @@ body { background: #0f172a; }
 
 <nav class="p-3 grid grid-cols-2 md:flex md:flex-col gap-1 overflow-x-auto flex-1">
 {% set tabs = [
-('orders', 'fa-wallet', 'অর্ডার প্যানেল'),
-('analytics', 'fa-chart-line', 'অ্যানালিটিক্স'),
-('livechat', 'fa-comments', 'লাইভ ইনবক্স'),
-('complaints', 'fa-triangle-exclamation', 'কমপ্লেইন বক্স'),
-('inventory', 'fa-box-open', 'প্রোডাক্ট সিঙ্ক'),
-('agents', 'fa-users', 'প্রতিনিধি ট্র্যাকার'),
-('config', 'fa-sliders', 'সেটিংস')
+('orders', 'fa-wallet', 'Orders'),
+('analytics', 'fa-chart-line', 'Analytics'),
+('livechat', 'fa-comments', 'Live Chat'),
+('complaints', 'fa-triangle-exclamation', 'Complaints'),
+('inventory', 'fa-box-open', 'Inventory'),
+('agents', 'fa-users', 'Agents'),
+('config', 'fa-sliders', 'Settings')
 ] %}
 {% for tab_id, icon, label in tabs %}
 <button onclick="switchTab('{{ tab_id }}')"
@@ -524,24 +524,22 @@ transition-all duration-200">
 </button>
 {% endfor %}
 <a href="/admin/logout" class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-rose-400 hover:bg-rose-950/20 transition mt-auto">
-<i class="fa-solid fa-right-from-bracket w-4 text-center"></i>লগআউট
+<i class="fa-solid fa-right-from-bracket w-4 text-center"></i>Logout
 </a>
 </nav>
 </aside>
 
-{# ====== MAIN CONTENT ====== #}
 <main class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-x-hidden">
 
-{# ====== TOP BAR ====== #}
 <header class="glass border-b border-slate-800 px-4 md:px-6 py-3 flex items-center justify-between sticky top-0 z-30">
 <div class="flex items-center gap-3">
 <button onclick="document.querySelector('aside').classList.toggle('-translate-x-full')" class="md:hidden text-slate-400 hover:text-white text-xl">
 <i class="fa-solid fa-bars"></i>
 </button>
-<h2 class="text-sm md:text-base font-bold text-slate-200" id="page-title">অর্ডার প্যানেল</h2>
+<h2 class="text-sm md:text-base font-bold text-slate-200" id="page-title">Dashboard</h2>
 </div>
 <div class="flex items-center gap-3 text-xs">
-<span class="text-slate-500 hidden md:inline"><i class="fa-regular fa-clock mr-1"></i><span id="live-clock">{{ now }}</span></span>
+<span class="text-slate-500 hidden md:inline"><i class="fa-regular fa-clock mr-1"></i><span id="live-clock"></span></span>
 <a href="/admin/activity-log" class="text-slate-400 hover:text-white transition" title="Activity Log">
 <i class="fa-solid fa-clock-rotate-left"></i>
 </a>
@@ -551,7 +549,6 @@ transition-all duration-200">
 </div>
 </header>
 
-{# ====== FLASH MESSAGES ====== #}
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% if messages %}
 <div class="mx-4 md:mx-6 mt-4 space-y-2">
@@ -573,22 +570,21 @@ transition-all duration-200">
 <div id="tab-orders" class="tab-content active p-4 md:p-8 space-y-6">
 <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
 <div>
-<h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
-<p class="text-xs text-slate-500 mt-1">মোট {{ orders|length }} টি অর্ডার</p>
+<h2 class="text-xl md:text-2xl font-black">Order Tracking & Booking</h2>
+<p class="text-xs text-slate-500 mt-1">Total {{ orders|length }} orders</p>
 </div>
 <div class="flex gap-2">
 <select id="order-filter" onchange="filterOrders()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
-<option value="all">সকল অর্ডার</option>
+<option value="all">All Orders</option>
 <option value="pending">Pending</option>
 <option value="booked">Booked</option>
 <option value="delivered">Delivered</option>
 <option value="call_request">Call Request</option>
 </select>
-<input type="text" id="order-search" oninput="filterOrders()" placeholder="🔍 সার্চ (নাম/ফোন/আইডি)..." class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-40 md:w-56">
+<input type="text" id="order-search" oninput="filterOrders()" placeholder="Search name/phone/ID..." class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-40 md:w-56">
 </div>
 </div>
 
-{# Stats cards #}
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
 {% set statuses = [('pending','Pending','text-amber-400','bg-amber-500/10'),('booked','Booked','text-indigo-400','bg-indigo-500/10'),('delivered','Delivered','text-emerald-400','bg-emerald-500/10'),('call_request','Call Request','text-rose-400','bg-rose-500/10')] %}
 {% for key,label,color,bg in statuses %}
@@ -614,11 +610,11 @@ data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
 <b class="text-white">{{ o.name }}</b><br>
 <span class="text-xs text-slate-500">{{ o.phone }}</span>
 {% if o.pathao_consignment_id == 'CALL_REQUEST' %}
-<span class="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">📞 Call</span>
+<span class="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">Call</span>
 {% endif %}
 </td>
 <td class="p-4 text-xs max-w-xs truncate" title="{{ o.address }}">{{ o.address }}</td>
-<td class="p-4 font-bold text-emerald-400">{{ o.total }}৳</td>
+<td class="p-4 font-bold text-emerald-400">{{ o.total }}</td>
 <td class="p-4 text-slate-300 font-medium">{{ o.agent_name or '-' }}</td>
 <td class="p-4">
 {% set status_colors = {'pending':'bg-amber-500/20 text-amber-400','booked':'bg-indigo-500/20 text-indigo-400','delivered':'bg-emerald-500/20 text-emerald-400','cancelled':'bg-rose-500/20 text-rose-400','call_request':'bg-amber-500/20 text-amber-400'} %}
@@ -631,13 +627,13 @@ data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
 {% if o.status == 'pending' and o.pathao_consignment_id != 'CALL_REQUEST' %}
 <form action="/admin/order/book/{{ o.id }}" method="POST" class="inline" onsubmit="return confirm('Book this order with Pathao?')">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button type="submit" class="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold">📦 Pathao Book</button>
+<button type="submit" class="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold">Pathao Book</button>
 </form>
 {% endif %}
 {% if o.status == 'pending' and o.pathao_consignment_id == 'CALL_REQUEST' %}
 <form action="/admin/order/resolve-call/{{ o.id }}" method="POST" class="inline">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button type="submit" class="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold">📞 Call Done</button>
+<button type="submit" class="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold">Call Done</button>
 </form>
 {% endif %}
 <button onclick="quickStatusModal({{ o.id }}, '{{ o.status }}')" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-xs" title="Quick Status Update">
@@ -646,7 +642,7 @@ data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
 </td>
 </tr>
 {% else %}
-<tr><td colspan="7" class="p-8 text-center text-slate-500"><i class="fa-solid fa-inbox text-2xl mb-2 block"></i>কোন অর্ডার নেই</td></tr>
+<tr><td colspan="7" class="p-8 text-center text-slate-500"><i class="fa-solid fa-inbox text-2xl mb-2 block"></i>No orders</td></tr>
 {% endfor %}
 </tbody>
 </table>
@@ -655,21 +651,21 @@ data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
 
 {# ====== TAB: ANALYTICS ====== #}
 <div id="tab-analytics" class="tab-content hidden p-4 md:p-8 space-y-6">
-<h2 class="text-xl md:text-2xl font-black"><i class="fa-solid fa-chart-line text-indigo-400 mr-2"></i>অ্যানালিটিক্স ড্যাশবোর্ড</h2>
+<h2 class="text-xl md:text-2xl font-black"><i class="fa-solid fa-chart-line text-indigo-400 mr-2"></i>Analytics Dashboard</h2>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 <div class="bg-gradient-to-br from-indigo-950 to-slate-950 rounded-2xl border border-indigo-800/30 p-5">
 <div class="text-xs text-slate-400 uppercase mb-1">Today's Revenue</div>
-<div class="text-3xl font-black text-emerald-400">৳{{ analytics.today_revenue }}</div>
+<div class="text-3xl font-black text-emerald-400">{{ analytics.today_revenue }}</div>
 <div class="text-xs text-slate-500 mt-1">{% if analytics.revenue_change >= 0 %}<span class="text-emerald-400">↑</span>{% else %}<span class="text-rose-400">↓</span>{% endif %} {{ analytics.revenue_change }}% vs yesterday</div>
 </div>
 <div class="bg-gradient-to-br from-blue-950 to-slate-950 rounded-2xl border border-blue-800/30 p-5">
 <div class="text-xs text-slate-400 uppercase mb-1">Total Orders</div>
 <div class="text-3xl font-black text-white">{{ analytics.total_orders }}</div>
-<div class="text-xs text-slate-500 mt-1">{{ analytics.pending_orders }} pending · {{ analytics.delivered_today }} delivered today</div>
+<div class="text-xs text-slate-500 mt-1">{{ analytics.pending_orders }} pending</div>
 </div>
 <div class="bg-gradient-to-br from-emerald-950 to-slate-950 rounded-2xl border border-emerald-800/30 p-5">
 <div class="text-xs text-slate-400 uppercase mb-1">Avg Order Value</div>
-<div class="text-3xl font-black text-indigo-400">৳{{ analytics.avg_order_value }}</div>
+<div class="text-3xl font-black text-indigo-400">{{ analytics.avg_order_value }}</div>
 <div class="text-xs text-slate-500 mt-1">Based on last 30 days</div>
 </div>
 </div>
@@ -683,28 +679,14 @@ data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
 <canvas id="statusChart" height="150"></canvas>
 </div>
 </div>
-<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4">
-<h3 class="text-xs font-bold text-slate-400 uppercase mb-4">Top Agents by Delivery</h3>
-<div class="space-y-2">
-{% for agent in analytics.top_agents %}
-<div class="flex items-center gap-3">
-<div class="w-24 text-xs font-bold text-slate-300 truncate">{{ agent.name }}</div>
-<div class="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
-<div class="bg-indigo-500 h-full rounded-full" style="width:{{ agent.percentage }}%"></div>
-</div>
-<div class="text-xs text-slate-400 w-10 text-right">{{ agent.count }}</div>
-</div>
-{% endfor %}
-</div>
-</div>
 </div>
 
-{# ====== TAB: LIVECHAT ====== #}
+{# ====== TAB: LIVE CHAT ====== #}
 <div id="tab-livechat" class="tab-content hidden grid grid-cols-1 md:grid-cols-3 gap-4 p-4 md:p-8 h-full max-h-[calc(100vh-8rem)]">
 <div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden flex flex-col">
 <div class="bg-slate-900 p-3 border-b border-slate-800">
-<h3 class="text-xs font-bold text-slate-400 uppercase">কাস্টমার লিস্ট <span class="text-slate-500">({{ users|length }})</span></h3>
-<input type="text" id="chat-search" oninput="filterChatUsers()" placeholder="🔍 ফোন নাম্বার..." class="w-full mt-2 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:outline-none">
+<h3 class="text-xs font-bold text-slate-400 uppercase">Customers <span class="text-slate-500">({{ users|length }})</span></h3>
+<input type="text" id="chat-search" oninput="filterChatUsers()" placeholder="Phone number..." class="w-full mt-2 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:outline-none">
 </div>
 <div id="chat-user-list" class="flex-1 overflow-y-auto p-2 space-y-1">
 {% for u in users %}
@@ -717,61 +699,37 @@ data-phone="{{ u.phone }}">
 </div>
 <div>
 <div class="text-xs font-bold text-white">{{ u.phone }}</div>
-{% if u.last_message %}
-<div class="text-[10px] text-slate-500 truncate max-w-[120px]">{{ u.last_message }}</div>
-{% endif %}
 </div>
-{% if u.unread %}
-<span class="ml-auto px-1.5 py-0.5 bg-indigo-500 text-white rounded-full text-[9px] font-bold">{{ u.unread }}</span>
-{% endif %}
 </div>
 </a>
 {% else %}
-<div class="text-center text-slate-500 text-xs py-8">কোন কাস্টমার নেই</div>
+<div class="text-center text-slate-500 text-xs py-8">No customers</div>
 {% endfor %}
 </div>
 </div>
 <div class="md:col-span-2 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col overflow-hidden">
 <div class="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-<div class="flex items-center gap-2">
-<div class="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-<i class="fa-solid fa-user text-indigo-400 text-xs"></i>
-</div>
-<div>
-<div class="text-sm font-bold text-indigo-400">{{ active_chat or 'কাস্টমার সিলেক্ট করুন' }}</div>
-{% if active_chat %}<div class="text-[10px] text-slate-500">Online</div>{% endif %}
-</div>
-</div>
-<div class="flex gap-1">
+<div class="text-sm font-bold text-indigo-400">{{ active_chat or 'Select a customer' }}</div>
 {% if active_chat %}
-<a href="/admin/chat/toggle-bot/{{ active_chat }}" class="px-2 py-1 bg-amber-500/20 text-amber-400 rounded-lg font-bold text-xs hover:bg-amber-500/30 transition">
-<i class="fa-solid fa-robot"></i> বট
-</a>
-<button onclick="clearChat('{{ active_chat }}')" class="px-2 py-1 bg-rose-500/20 text-rose-400 rounded-lg font-bold text-xs hover:bg-rose-500/30 transition">
-<i class="fa-solid fa-trash-can"></i>
-</button>
+<a href="/admin/chat/toggle-bot/{{ active_chat }}" class="px-2 py-1 bg-amber-500/20 text-amber-400 rounded-lg font-bold text-xs">Toggle Bot</a>
 {% endif %}
-</div>
 </div>
 <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col">
 {% for m in chat_history %}
 <div class="max-w-xs md:max-w-md p-3 rounded-2xl text-xs chat-msg
 {% if m.direction == 'inbound' %}bg-slate-800 text-white self-start{% else %}bg-indigo-600 text-white self-end{% endif %}">
-{% if m.agent_id %}<div class="font-semibold text-[10px] text-slate-400 mb-0.5">{{ m.agent_id }}</div>{% endif %}
 <div>{{ m.content }}</div>
-<div class="text-[9px] text-slate-400 mt-1 text-right">{{ m.timestamp }}</div>
 </div>
 {% else %}
-<div class="text-center text-slate-500 text-xs py-8 mt-auto">মেসেজ শুরু করুন</div>
+<div class="text-center text-slate-500 text-xs py-8 mt-auto">Start a conversation</div>
 {% endfor %}
-<div id="chat-typing" class="hidden text-xs text-slate-500 italic self-start">টাইপিং...</div>
 </div>
 {% if active_chat %}
 <form id="chat-form" action="/admin/chat/send" method="POST" class="p-3 bg-slate-900 border-t border-slate-800 flex gap-2">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="phone" value="{{ active_chat }}">
-<input type="text" id="chat-input" name="message" placeholder="এখানে উত্তর লিখুন..." autocomplete="off"
-class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none focus:border-indigo-500">
+<input type="text" id="chat-input" name="message" placeholder="Type your reply..." autocomplete="off"
+class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-indigo-500">
 <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 rounded-xl text-xs font-bold transition">
 <i class="fa-solid fa-paper-plane"></i>
 </button>
@@ -782,10 +740,7 @@ class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:tex
 
 {# ====== TAB: COMPLAINTS ====== #}
 <div id="tab-complaints" class="tab-content hidden p-4 md:p-8 space-y-6">
-<div class="flex justify-between items-center">
-<h2 class="text-xl md:text-2xl font-black text-rose-400">⚠️ কাস্টমার কমপ্লেইন বক্স</h2>
-<span class="text-xs text-slate-500">মোট {{ complaints|length }} টি</span>
-</div>
+<h2 class="text-xl md:text-2xl font-black text-rose-400">Complaint Box</h2>
 <div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
 <table class="w-full text-left text-xs md:text-sm min-w-[700px]">
 <thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400">
@@ -802,21 +757,21 @@ class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:tex
 {{ c.status|upper }}
 </span>
 </td>
-<td class="p-4 text-xs"><b>{{ c.resolved_by or '-' }}</b><br><span class="text-slate-400 text-[11px]">{{ c.resolution_notes }}</span></td>
+<td class="p-4 text-xs"><b>{{ c.resolved_by or '-' }}</b></td>
 <td class="p-4 text-right">
 {% if c.status == 'pending' %}
 <form action="/admin/complaint/resolve/{{ c.id }}" method="POST" class="flex flex-col md:flex-row gap-1 justify-end">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<input type="text" name="notes" placeholder="সমাধান নোট..." required class="bg-slate-900 border border-slate-800 rounded p-1.5 text-xs text-white w-full md:w-40">
+<input type="text" name="notes" placeholder="Resolution notes..." required class="bg-slate-900 border border-slate-800 rounded p-1.5 text-xs text-white w-full md:w-40">
 <button type="submit" class="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold">Resolve</button>
 </form>
 {% else %}
-<span class="text-slate-500 text-xs"><i class="fa-solid fa-circle-check text-emerald-500"></i> Solved ✓</span>
+<span class="text-slate-500 text-xs">Solved</span>
 {% endif %}
 </td>
 </tr>
 {% else %}
-<tr><td colspan="5" class="p-8 text-center text-slate-500"><i class="fa-solid fa-circle-check text-2xl mb-2 block"></i>কোন কমপ্লেইন নেই</td></tr>
+<tr><td colspan="5" class="p-8 text-center text-slate-500">No complaints</td></tr>
 {% endfor %}
 </tbody>
 </table>
@@ -825,19 +780,12 @@ class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:tex
 
 {# ====== TAB: INVENTORY ====== #}
 <div id="tab-inventory" class="tab-content hidden p-4 md:p-8 space-y-6">
-<div class="bg-gradient-to-r from-indigo-950 to-blue-950 border border-indigo-500/20 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+<div class="bg-gradient-to-r from-indigo-950 to-blue-950 border border-indigo-500/20 p-5 rounded-2xl flex justify-between items-center">
 <div>
-<h3 class="text-sm md:text-base font-black text-white">মেটা ক্যাটালগ অটো সিঙ্ক ইঞ্জিন</h3>
-<p class="text-xs text-slate-400 mt-1">{{ products|length }} টি প্রোডাক্ট সিঙ্ক করা আছে</p>
+<h3 class="text-sm md:text-base font-black text-white">Meta Catalogue Auto Sync</h3>
+<p class="text-xs text-slate-400 mt-1">{{ products|length }} products synced</p>
 </div>
-<div class="flex gap-2">
-<button onclick="showAddProductModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow-lg">
-<i class="fa-solid fa-plus"></i> Add Product
-</button>
-<a href="/admin/sync-facebook-trigger" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow-lg">
-<i class="fa-brands fa-facebook"></i> Sync Meta Catalogue
-</a>
-</div>
+<a href="/admin/sync-facebook-trigger" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow-lg">Sync Meta Catalogue</a>
 </div>
 <div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto">
 <table class="w-full text-left text-xs md:text-sm min-w-[600px]">
@@ -845,40 +793,20 @@ class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:tex
 <th class="p-4">Product ID</th><th class="p-4">Image</th><th class="p-4">Details</th><th class="p-4">Price</th><th class="p-4">Edit</th></tr></thead>
 <tbody>
 {% for p in products %}
-<tr class="border-b border-slate-800/40 hover:bg-slate-800/10" id="prod-row-{{ p.id }}">
+<tr class="border-b border-slate-800/40 hover:bg-slate-800/10">
 <td class="p-4 font-mono text-xs text-slate-500">{{ p.fb_product_id or 'Manual' }}</td>
+<td class="p-4"><img src="{{ p.image_url or DEFAULT_PRODUCT_IMAGE }}" class="h-12 w-12 object-cover rounded-lg"></td>
 <td class="p-4">
-<img src="{{ p.image_url or DEFAULT_PRODUCT_IMAGE }}" class="h-12 w-12 object-cover rounded-lg border border-slate-700"
-onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
-</td>
-<td class="p-4">
-<div class="view-mode" id="view-{{ p.id }}">
 <b class="text-white">{{ p.name }}</b><br>
-<span class="text-xs text-slate-400">Stock: <span class="text-white font-bold">{{ p.stock }}</span></span>
-</div>
-<form class="edit-mode hidden" id="edit-{{ p.id }}" action="/admin/product/edit/{{ p.id }}" method="POST" style="display:none">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<input type="text" name="name" value="{{ p.name }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white mb-1" required>
-<div class="flex gap-1">
-<input type="number" name="price" value="{{ p.price }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white" required>
-<input type="number" name="stock" value="{{ p.stock }}" class="w-20 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white">
-</div>
-<input type="text" name="image_url" value="{{ p.image_url or '' }}" placeholder="Image URL" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white mt-1">
-<div class="flex gap-1 mt-1">
-<button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded">💾 Save</button>
-<button type="button" onclick="toggleEdit({{ p.id }})" class="bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold px-3 py-1.5 rounded">Cancel</button>
-</div>
-</form>
+<span class="text-xs text-slate-400">Stock: {{ p.stock }}</span>
 </td>
-<td class="p-4 font-bold text-emerald-400">৳{{ p.price }}</td>
+<td class="p-4 font-bold text-emerald-400">{{ p.price }}</td>
 <td class="p-4">
-<button onclick="toggleEdit({{ p.id }})" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded font-bold transition" id="btn-{{ p.id }}">
-<i class="fa-solid fa-pen-to-square"></i> Edit
-</button>
+<a href="/admin/product/edit/{{ p.id }}" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded font-bold transition">Edit</a>
 </td>
 </tr>
 {% else %}
-<tr><td colspan="5" class="p-8 text-center text-slate-500"><i class="fa-solid fa-box-open text-2xl mb-2 block"></i>কোন প্রোডাক্ট নেই</td></tr>
+<tr><td colspan="5" class="p-8 text-center text-slate-500">No products</td></tr>
 {% endfor %}
 </tbody>
 </table>
@@ -889,51 +817,26 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 <div id="tab-agents" class="tab-content hidden p-4 md:p-8 space-y-6">
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 <div class="bg-slate-950 p-5 rounded-2xl border border-slate-800">
-<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">নতুন প্রতিনিধি যোগ করুন</h3>
+<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">Add New Agent</h3>
 <form action="/admin/agents/add" method="POST" class="space-y-3">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<div>
-<label class="block text-[10px] text-slate-500 mb-1">Username</label>
-<input type="text" name="username" placeholder="ইউজারনেম" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
-</div>
-<div>
-<label class="block text-[10px] text-slate-500 mb-1">Password</label>
-<input type="password" name="password" placeholder="পাসওয়ার্ড" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
-</div>
-<div>
-<label class="block text-[10px] text-slate-500 mb-1">Role</label>
-<select name="role" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
-<option value="agent">Agent</option>
-<option value="admin">Admin</option>
-<option value="manager">Manager</option>
-</select>
-</div>
-<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 p-2.5 text-xs font-bold rounded-xl text-white transition">➕ Create Agent</button>
+<input type="text" name="username" placeholder="Username" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+<input type="password" name="password" placeholder="Password" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 p-2.5 text-xs font-bold rounded-xl text-white transition">Create Agent</button>
 </form>
 </div>
-<div class="md:col-span-2 bg-slate-950 p-5 rounded-2xl border border-slate-800 overflow-x-auto">
-<div class="flex justify-between items-center mb-4">
-<h3 class="text-slate-400 text-xs font-bold uppercase">প্রতিনিধিদের কর্মক্ষমতা লগ</h3>
-<select id="agent-log-filter" onchange="filterAgentLogs()" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[10px] text-white">
-<option value="all">All Actions</option>
-<option value="login">Login</option>
-<option value="order_book">Order Book</option>
-<option value="complaint_resolve">Resolve</option>
-<option value="chat">Chat</option>
-</select>
-</div>
+<div class="md:col-span-2 bg-slate-950 p-5 rounded-2xl border border-slate-800">
+<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">Agent Activity Log</h3>
 <table class="w-full text-left text-xs">
 <thead><tr class="bg-slate-900 text-slate-400"><th class="p-2">Agent</th><th class="p-2">Action</th><th class="p-2">Details</th><th class="p-2">Time</th></tr></thead>
-<tbody id="agent-logs-tbody">
+<tbody>
 {% for l in agent_logs %}
-<tr class="log-row border-b border-slate-800/50" data-action="{{ l.action }}">
+<tr class="border-b border-slate-800/50">
 <td class="p-2 font-bold text-indigo-400">{{ l.username }}</td>
 <td class="p-2"><span class="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-[10px]">{{ l.action }}</span></td>
 <td class="p-2 text-slate-300 max-w-xs truncate">{{ l.details }}</td>
 <td class="p-2 text-slate-500">{{ l.timestamp }}</td>
 </tr>
-{% else %}
-<tr><td colspan="4" class="p-8 text-center text-slate-500">কোন লগ নেই</td></tr>
 {% endfor %}
 </tbody>
 </table>
@@ -944,37 +847,23 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 {# ====== TAB: SETTINGS ====== #}
 <div id="tab-config" class="tab-content hidden p-4 md:p-8">
 <div class="bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6 max-w-3xl">
-<div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
+<h3 class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">System Configuration</h3>
 <form action="/admin/settings/save" method="POST" class="space-y-6">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label>
-<input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none focus:border-indigo-500"></div>
-<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label>
-<input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white font-mono focus:outline-none focus:border-indigo-500"></div>
-<div class="md:col-span-2"><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Permanent Token</label>
-<div class="relative">
-<input type="password" id="wa-token" name="permanent_token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white font-mono focus:outline-none focus:border-indigo-500 pr-10">
-<button type="button" onclick="togglePassword('wa-token')" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
-<i class="fa-solid fa-eye"></i>
-</button>
-</div></div>
-<div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
-<div class="font-bold text-xs text-indigo-400 uppercase flex items-center gap-2"><i class="fa-brands fa-google"></i> Google Gemini AI Config</div>
-<div><label class="block text-[10px] text-slate-500 mb-1">API Key</label>
-<div class="relative">
-<input type="password" id="gemini-key" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-indigo-500 pr-10">
-<button type="button" onclick="togglePassword('gemini-key')" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
-<i class="fa-solid fa-eye"></i>
-</button>
-</div></div>
-<div><label class="block text-[10px] text-slate-500 mb-1">AI System Instruction</label>
-<textarea name="ai_system_instruction" rows="3" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">{{ settings.get('ai_system_instruction', '') }}</textarea></div>
+<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Name</label>
+<input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white"></div>
+<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Phone Number ID</label>
+<input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white"></div>
+<div class="md:col-span-2"><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Token</label>
+<input type="password" name="permanent_token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs text-white"></div>
+<div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl">
+<div class="font-bold text-xs text-indigo-400 uppercase mb-2">Gemini AI Config</div>
+<input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white mb-2">
+<textarea name="ai_system_instruction" rows="3" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea>
 </div>
 </div>
-<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold p-3 rounded-xl text-xs md:text-sm transition">
-<i class="fa-solid fa-floppy-disk mr-1"></i> Save Configurations
-</button>
+<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold p-3 rounded-xl text-xs transition">Save Settings</button>
 </form>
 </div>
 </div>
@@ -982,300 +871,48 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 </div>
 </main>
 
-{# ====== QUICK STATUS MODAL ====== #}
-<div id="status-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden p-4">
-<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-<h3 class="font-bold text-sm text-white mb-4">Quick Status Update</h3>
-<form id="status-form" method="POST">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<div class="space-y-3">
-<div>
-<label class="block text-xs text-slate-400 mb-1">Order ID</label>
-<div class="text-lg font-black text-indigo-400" id="modal-order-id">#0</div>
-</div>
-<div>
-<label class="block text-xs text-slate-400 mb-1">New Status</label>
-<select name="status" required class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white">
-<option value="pending">Pending</option>
-<option value="booked">Booked</option>
-<option value="delivered">Delivered</option>
-<option value="cancelled">Cancelled</option>
-<option value="call_request">Call Request</option>
-</select>
-</div>
-</div>
-<div class="flex gap-2 mt-5">
-<button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold p-2.5 rounded-xl transition">Update</button>
-<button type="button" onclick="closeModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold p-2.5 rounded-xl transition">Cancel</button>
-</div>
-</form>
-</div>
-</div>
-
-{# ====== ADD PRODUCT MODAL ====== #}
-<div id="add-product-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden p-4">
-<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-<h3 class="font-bold text-sm text-white mb-4">➕ Add New Product</h3>
-<form action="/admin/product/add" method="POST">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<div class="space-y-3">
-<div><label class="block text-xs text-slate-400 mb-1">Product Name</label>
-<input type="text" name="name" required class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
-<div class="grid grid-cols-2 gap-3">
-<div><label class="block text-xs text-slate-400 mb-1">Price (৳)</label>
-<input type="number" name="price" required step="0.01" class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
-<div><label class="block text-xs text-slate-400 mb-1">Stock</label>
-<input type="number" name="stock" value="1" class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
-</div>
-<div><label class="block text-xs text-slate-400 mb-1">Image URL</label>
-<input type="text" name="image_url" placeholder="https://..." class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
-</div>
-<div class="flex gap-2 mt-5">
-<button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold p-2.5 rounded-xl transition">Save Product</button>
-<button type="button" onclick="closeAddProductModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold p-2.5 rounded-xl transition">Cancel</button>
-</div>
-</form>
-</div>
-</div>
-
-{# ====== JAVASCRIPT ====== #}
 <script>
-// CSRF Token for AJAX requests
-const CSRF_TOKEN = '{{ csrf_token() }}';
-
-// ========== TAB SWITCHING ==========
 function switchTab(tabId) {
-document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
 document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-const target = document.getElementById('tab-' + tabId);
-if (target) { target.classList.remove('hidden'); target.classList.add('active'); }
-
+document.getElementById('tab-' + tabId).classList.remove('hidden');
 document.querySelectorAll('.tab-btn').forEach(btn => {
 btn.classList.remove('bg-indigo-600','text-white','font-bold');
 btn.classList.add('text-slate-400');
 });
-const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => {
-const match = b.getAttribute('onclick');
-return match && match.includes("'" + tabId + "'");
-});
+const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick') === "switchTab('" + tabId + "')");
 if (activeBtn) { activeBtn.classList.add('bg-indigo-600','text-white','font-bold'); activeBtn.classList.remove('text-slate-400'); }
-
-const titles = {
-orders:'অর্ডার প্যানেল', analytics:'অ্যানালিটিক্স', livechat:'লাইভ ইনবক্স',
-complaints:'কমপ্লেইন বক্স', inventory:'প্রোডাক্ট সিঙ্ক', agents:'প্রতিনিধি ট্র্যাকার', config:'সেটিংস'
-};
+const titles = {orders:'Orders', analytics:'Analytics', livechat:'Live Chat', complaints:'Complaints', inventory:'Inventory', agents:'Agents', config:'Settings'};
 const titleEl = document.getElementById('page-title');
 if (titleEl && titles[tabId]) titleEl.innerText = titles[tabId];
-
 window.location.hash = tabId;
 }
-
-// Hash-based tab switching
 const hash = window.location.hash.replace('#','');
-if (hash && ['orders','analytics','livechat','complaints','inventory','agents','config'].includes(hash)) {
-switchTab(hash);
-} else { switchTab('orders'); }
-
-// ========== TOGGLE EDIT PRODUCT ==========
-function toggleEdit(id) {
-const viewEl = document.getElementById('view-' + id);
-const editEl = document.getElementById('edit-' + id);
-const btnEl = document.getElementById('btn-' + id);
-if (!editEl || editEl.style.display === 'none' || !editEl.style.display) {
-viewEl.style.display = 'none'; editEl.style.display = 'block'; btnEl.innerHTML = '<i class="fa-solid fa-xmark"></i> Cancel';
-} else {
-viewEl.style.display = 'block'; editEl.style.display = 'none'; btnEl.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Edit';
-}
-}
-
-// ========== FILTER ORDERS ==========
+if (hash && ['orders','analytics','livechat','complaints','inventory','agents','config'].includes(hash)) { switchTab(hash); }
 function filterOrders() {
 const status = document.getElementById('order-filter').value;
 const query = document.getElementById('order-search').value.toLowerCase();
 document.querySelectorAll('.order-row').forEach(row => {
 const rowStatus = row.dataset.status;
 const rowSearch = row.dataset.search.toLowerCase();
-const matchStatus = status === 'all' || rowStatus === status;
-const matchSearch = !query || rowSearch.includes(query);
-row.style.display = (matchStatus && matchSearch) ? '' : 'none';
+row.style.display = (status === 'all' || rowStatus === status) && (!query || rowSearch.includes(query)) ? '' : 'none';
 });
 }
-
-// ========== FILTER CHAT USERS ==========
 function filterChatUsers() {
 const query = document.getElementById('chat-search').value.toLowerCase();
 document.querySelectorAll('.chat-user').forEach(el => {
 el.style.display = el.dataset.phone.toLowerCase().includes(query) ? '' : 'none';
 });
 }
-
-// ========== FILTER AGENT LOGS ==========
-function filterAgentLogs() {
-const action = document.getElementById('agent-log-filter').value;
-document.querySelectorAll('.log-row').forEach(row => {
-row.style.display = (action === 'all' || row.dataset.action === action) ? '' : 'none';
-});
-}
-
-// ========== MODALS ==========
 function quickStatusModal(orderId, currentStatus) {
 document.getElementById('modal-order-id').innerText = '#' + orderId;
-const form = document.getElementById('status-form');
-form.action = '/admin/order/status/' + orderId;
-const select = form.querySelector('select[name="status"]');
-if (select) select.value = currentStatus;
+document.getElementById('status-form').action = '/admin/order/status/' + orderId;
 document.getElementById('status-modal').classList.remove('hidden');
 }
 function closeModal() { document.getElementById('status-modal').classList.add('hidden'); }
-function showAddProductModal() { document.getElementById('add-product-modal').classList.remove('hidden'); }
-function closeAddProductModal() { document.getElementById('add-product-modal').classList.add('hidden'); }
-// Close modals on escape
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeAddProductModal(); } });
-// Close modals on backdrop click
-document.getElementById('status-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
-document.getElementById('add-product-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeAddProductModal(); });
-
-// ========== TOGGLE PASSWORD VISIBILITY ==========
-function togglePassword(id) {
-const el = document.getElementById(id);
-const icon = el.nextElementSibling.querySelector('i');
-if (el.type === 'password') {
-el.type = 'text';
-icon.classList.replace('fa-eye', 'fa-eye-slash');
-} else {
-el.type = 'password';
-icon.classList.replace('fa-eye-slash', 'fa-eye');
-}
-}
-
-// ========== LIVE CLOCK ==========
-function updateClock() {
-const now = new Date();
-const str = now.toLocaleDateString('bn-BD', { weekday:'short', year:'numeric', month:'short', day:'numeric' })
-+ ' ' + now.toLocaleTimeString('bn-BD');
-const el = document.getElementById('live-clock');
-if (el) el.innerText = str;
-}
-setInterval(updateClock, 1000);
-updateClock();
-
-// ========== CHAT FORM AJAX ==========
-const chatForm = document.getElementById('chat-form');
-if (chatForm) {
-chatForm.addEventListener('submit', function(e) {
-e.preventDefault();
-const input = document.getElementById('chat-input');
-const msg = input.value.trim();
-if (!msg) return;
-const formData = new FormData(this);
-fetch('/admin/chat/send', { method:'POST', body:formData })
-.then(r => r.json())
-.then(data => {
-if (data.success) {
-input.value = '';
-const container = document.getElementById('chat-messages');
-const div = document.createElement('div');
-div.className = 'max-w-xs md:max-w-md p-3 rounded-2xl text-xs bg-indigo-600 text-white self-end';
-div.innerHTML = '<div>' + msg + '</div><div class="text-[9px] text-slate-400 mt-1 text-right">Just now</div>';
-container.appendChild(div);
-container.scrollTop = container.scrollHeight;
-} else {
-alert('Error: ' + (data.error || 'Unknown'));
-}
-})
-.catch(err => { console.error(err); alert('Network error'); });
-});
-}
-
-// ========== CLEAR CHAT ==========
-function clearChat(phone) {
-if (!confirm('Clear this conversation?')) return;
-fetch('/admin/chat/clear/' + phone, { method:'POST', headers:{'X-CSRFToken': CSRF_TOKEN} })
-.then(r => r.json())
-.then(data => { if (data.success) location.reload(); });
-}
-
-// ========== REAL-TIME UPDATES (Socket.IO) ==========
-const socket = io({ transports: ['websocket', 'polling'], upgrade: false });
-socket.on('connect', function() { console.log('🔌 Real-time connected'); });
-socket.on('new_order', function(data) {
-const notif = document.getElementById('live-notif');
-document.getElementById('notif-text').innerText = '📦 New Order #' + data.id + ' from ' + data.name;
-notif.classList.remove('hidden');
-setTimeout(() => notif.classList.add('hidden'), 5000);
-});
-socket.on('new_chat', function(data) {
-const notif = document.getElementById('live-notif');
-document.getElementById('notif-text').innerText = '💬 New message from ' + data.phone;
-notif.classList.remove('hidden');
-setTimeout(() => notif.classList.add('hidden'), 5000);
-});
-socket.on('new_complaint', function() {
-const notif = document.getElementById('live-notif');
-document.getElementById('notif-text').innerText = '⚠️ New complaint received';
-notif.classList.remove('hidden');
-setTimeout(() => notif.classList.add('hidden'), 5000);
-});
-
-// ========== CHARTS (Analytics Tab) ==========
-document.addEventListener('DOMContentLoaded', function() {
-setTimeout(() => {
-try {
-const weeklyData = {{ chart_data.weekly_orders | tojson | safe }};
-if (document.getElementById('ordersChart')) {
-new Chart(document.getElementById('ordersChart'), {
-type: 'line',
-data: {
-labels: weeklyData.labels,
-datasets: [{
-label: 'Orders',
-data: weeklyData.values,
-borderColor: '#818cf8',
-backgroundColor: 'rgba(129, 140, 248, 0.1)',
-fill: true,
-tension: 0.3,
-pointBackgroundColor: '#818cf8',
-pointRadius: 3
-}]
-},
-options: {
-responsive: true,
-maintainAspectRatio: false,
-plugins: { legend: { display: false } },
-scales: {
-x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' } },
-y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' }, beginAtZero: true }
-}
-}
-});
-}
-if (document.getElementById('statusChart')) {
-const statusData = {{ chart_data.status_distribution | tojson | safe }};
-new Chart(document.getElementById('statusChart'), {
-type: 'doughnut',
-data: {
-labels: statusData.labels,
-datasets: [{
-data: statusData.values,
-backgroundColor: ['#f59e0b', '#818cf8', '#34d399', '#ef4444', '#94a3b8'],
-borderWidth: 0
-}]
-},
-options: {
-responsive: true,
-maintainAspectRatio: false,
-plugins: {
-legend: { position: 'bottom', labels: { color: '#64748b', font: { size: 10 }, padding: 10 } }
-}
-}
-});
-}
-} catch(e) { console.log('Chart init deferred:', e); }
-}, 500);
-});
 </script>
 </body>
-</html>
+</html>"""
+
 
 # =====================================================================
 # FLASK ROUTES
@@ -1290,7 +927,7 @@ def health():
     return jsonify({
         "status": "ok",
         "cpp_engine_loaded": lib is not None,
-        "asm_engine_loaded": asm_lib is not None,
+        "asm_engine_loaded": 'asm_lib' in dir() and asm_lib is not None,
         "timestamp": datetime.now().isoformat()
     })
 
@@ -1305,6 +942,8 @@ def execute():
 
 @app.route("/api/asm/execute", methods=["POST"])
 def asm_execute():
+    if not asm_engine:
+        return jsonify({"error": "Assembly engine not loaded"}), 503
     data = request.get_json(silent=True) or {}
     cmd = data.get("cmd", "").strip()
     if not cmd:
@@ -1314,12 +953,16 @@ def asm_execute():
 
 @app.route("/api/asm/strlen", methods=["GET"])
 def asm_strlen_route():
+    if not asm_engine:
+        return jsonify({"error": "Assembly engine not loaded"}), 503
     text = request.args.get("text", "")
     length = asm_engine.strlen(text)
     return jsonify({"engine": "asm", "operation": "strlen", "input": text, "result": length})
 
 @app.route("/api/asm/checksum", methods=["GET"])
 def asm_checksum_route():
+    if not asm_engine:
+        return jsonify({"error": "Assembly engine not loaded"}), 503
     text = request.args.get("text", "")
     cs = asm_engine.checksum(text)
     return jsonify({"engine": "asm", "operation": "checksum", "input": text, "result": cs})
@@ -1340,7 +983,7 @@ def admin_login():
             session["username"] = agent["username"]
             session["role"] = agent["role"]
             return redirect("/admin")
-        return render_template_string("""<div style='text-align:center;padding:50px;color:red'>লগইন ব্যর্থ!</div><a href='/admin/login'>Retry</a>""")
+        return render_template_string("""<div style='text-align:center;padding:50px;color:red'>Login Failed!</div><a href='/admin/login'>Retry</a>""")
     return render_template_string("""<form method='POST' style='max-width:300px;margin:100px auto;text-align:center'>
 <h2>Admin Login</h2><input name='username' placeholder='Username' style='width:100%;padding:10px;margin:5px 0'><br>
 <input name='password' type='password' placeholder='Password' style='width:100%;padding:10px;margin:5px 0'><br>
@@ -1364,21 +1007,52 @@ def admin_portal():
     complaints = db_query("SELECT * FROM complaints ORDER BY id DESC", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
     chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id ASC", (chat_with,), fetchall=True) or [] if chat_with else []
+    
+    # Compute simple stats for the dashboard
+    stats = {'pending': 0, 'booked': 0, 'delivered': 0, 'call_request': 0}
+    for o in orders:
+        status = o['status']
+        if status in stats:
+            stats[status] += 1
+        elif status == 'approved':
+            stats['booked'] += 1
+    
+    pending_complaints_count = sum(1 for c in complaints if c['status'] == 'pending')
+    
+    analytics = {
+        'today_revenue': sum(o['total'] for o in orders if o['status'] == 'delivered'),
+        'revenue_change': 0,
+        'total_orders': len(orders),
+        'pending_orders': stats['pending'],
+        'delivered_today': stats['delivered'],
+        'avg_order_value': sum(o['total'] for o in orders) // len(orders) if orders else 0,
+        'top_agents': []
+    }
+    
+    chart_data = {
+        'weekly_orders': {'labels': ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], 'values': [0,0,0,0,0,0,0]},
+        'status_distribution': {'labels': list(stats.keys()), 'values': list(stats.values())}
+    }
+    
     return render_template_string(ADMIN_HTML, settings=s, msg=msg, orders=orders, users=users,
                                   products=products, complaints=complaints, agent_logs=agent_logs,
-                                  active_chat=chat_with, chat_history=chat_history, DEFAULT_PRODUCT_IMAGE=DEFAULT_PRODUCT_IMAGE)
+                                  active_chat=chat_with, chat_history=chat_history,
+                                  DEFAULT_PRODUCT_IMAGE=DEFAULT_PRODUCT_IMAGE,
+                                  stats=stats, analytics=analytics, chart_data=chart_data,
+                                  pending_complaints_count=pending_complaints_count,
+                                  unread_chat_count=0)
 
 @app.route("/admin/agents/add", methods=["POST"])
 def add_agent():
     if not session.get("logged_in") or session.get("role") != 'admin':
-        return redirect("/admin?msg=শুধুমাত্র মেইন অ্যাডমিন এক্সেস আছে!")
+        return redirect("/admin?msg=Only admin can add agents!")
     u = request.form.get("username", "").strip()
     p = request.form.get("password", "").strip()
     if u and p:
         db_query("INSERT OR IGNORE INTO agents (username, password, role) VALUES (?, ?, 'representative')", (u, p), commit=True)
         db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'CREATE_AGENT', ?)",
                  (session.get("username"), f"Agent Username: {u}"), commit=True)
-    return redirect("/admin?msg=নতুন প্রতিনিধি অ্যাকাউন্ট সফলভাবে খোলা হয়েছে!#agents")
+    return redirect("/admin?msg=New agent created successfully!#agents")
 
 @app.route("/admin/complaint/resolve/<int:cid>", methods=["POST"])
 def resolve_complaint(cid):
@@ -1388,7 +1062,7 @@ def resolve_complaint(cid):
     agent = session.get("username")
     db_query("UPDATE complaints SET status='resolved', resolved_by=?, resolution_notes=? WHERE id=?", (agent, notes, cid), commit=True)
     db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'RESOLVE_COMPLAINT', ?)", (agent, f"Resolved complaint ID: {cid}"), commit=True)
-    return redirect("/admin?msg=কমপ্লেইন রেজোলিউশন সফলভাবে সেভ হয়েছে!#complaints")
+    return redirect("/admin?msg=Complaint resolved successfully!#complaints")
 
 @app.route("/admin/order/resolve-call/<int:order_id>")
 def resolve_call_request(order_id):
@@ -1397,7 +1071,7 @@ def resolve_call_request(order_id):
     agent = session.get("username")
     db_query("UPDATE orders SET status='approved', agent_name=? WHERE id=?", (agent, order_id), commit=True)
     db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'RESOLVE_CALL', ?)", (agent, f"Call Request ID: {order_id} handled"), commit=True)
-    return redirect("/admin?msg=কল রিকোয়েস্ট সমাধান সম্পন্ন!#orders")
+    return redirect("/admin?msg=Call request resolved successfully!#orders")
 
 @app.route("/admin/settings/save", methods=["POST"])
 def save_settings():
@@ -1405,16 +1079,16 @@ def save_settings():
         return redirect("/admin/login")
     for k, v in request.form.items():
         db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v.strip()), commit=True)
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'UPDATE_SETTINGS', 'সিস্টেম গ্লোবাল সেটিংস মডিফাই করেছেন')",
+    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'UPDATE_SETTINGS', 'Modified global settings')",
              (session.get("username"),), commit=True)
-    return redirect("/admin?msg=কনফিগারেশন আপডেট সফল হয়েছে!#config")
+    return redirect("/admin?msg=Configuration updated successfully!#config")
 
 @app.route("/admin/sync-facebook-trigger")
 def manual_fb_sync():
     if not session.get("logged_in"):
         return redirect("/admin/login")
     suc, detail = sync_facebook_catalogue()
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'SYNC_CATALOGUE', 'ম্যানুয়ালি মেটা শপ ক্যাটালগ সিঙ্ক করেছেন')",
+    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'SYNC_CATALOGUE', 'Manually synced Meta catalogue')",
              (session.get("username"),), commit=True)
     return redirect(f"/admin?msg={detail}#inventory")
 
@@ -1425,7 +1099,6 @@ def edit_product(pid):
     name = request.form.get("name", "").strip()
     price_str = request.form.get("price", "0").strip()
     stock_str = request.form.get("stock", "10").strip()
-    desc = request.form.get("description", "").strip()
     img = request.form.get("image_url", "").strip()
     try:
         price = int(price_str)
@@ -1433,11 +1106,11 @@ def edit_product(pid):
     except:
         price = 100
         stock = 10
-    db_query("UPDATE products SET name=?, price=?, stock=?, description=?, image_url=? WHERE id=?",
-             (name, price, stock, desc, img, pid), commit=True)
+    db_query("UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE id=?",
+             (name, price, stock, img, pid), commit=True)
     db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'EDIT_PRODUCT', ?)",
-             (session.get("username"), f"Edited product #{pid}: {name} @ {price}৳"), commit=True)
-    return redirect(f"/admin?msg=প্রোডাক্ট #{pid} আপডেট সফল!#inventory")
+             (session.get("username"), f"Edited product #{pid}: {name} @ {price}"), commit=True)
+    return redirect(f"/admin?msg=Product #{pid} updated successfully!#inventory")
 
 @app.route("/admin/chat/send", methods=["POST"])
 def admin_send_message():
@@ -1460,9 +1133,7 @@ def toggle_bot_pause(phone):
     s = db_query("SELECT bot_paused FROM sessions WHERE phone=?", (phone,), fetchone=True)
     nxt = 0 if s and s["bot_paused"] == 1 else 1
     db_query("UPDATE sessions SET bot_paused = ? WHERE phone = ?", (nxt, phone), commit=True)
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'TOGGLE_BOT', ?)",
-             (session.get("username"), f"Toggled bot to {nxt} for {phone}"), commit=True)
-    return redirect(f"/admin?chat_with={phone}&msg=বট স্ট্যাটাস পরিবর্তন সফল!#livechat")
+    return redirect(f"/admin?chat_with={phone}&msg=Bot status toggled!#livechat")
 
 @app.route("/admin/order/book/<int:order_id>")
 def book_pathao(order_id):
@@ -1471,7 +1142,7 @@ def book_pathao(order_id):
     agent = session.get("username")
     order = db_query("SELECT * FROM orders WHERE id = ?", (order_id,), fetchone=True)
     if not order:
-        return redirect("/admin?msg=অর্ডার পাওয়া যায়নি#orders")
+        return redirect("/admin?msg=Order not found#orders")
     prod = db_query("SELECT name FROM products WHERE id=?", (order["product_id"],), fetchone=True)
     o_ctx = {"cust_name": order["name"], "address": order["address"], "quantity": order["quantity"],
              "name": prod["name"] if prod else "Ecom Item"}
@@ -1481,34 +1152,85 @@ def book_pathao(order_id):
                  (res, agent, order_id), commit=True)
         db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'PATHAO_BOOKING', ?)",
                  (agent, f"Booked order #{order_id} via Pathao ID: {res}"), commit=True)
-        return redirect(f"/admin?msg=পাঠাও বুকিং সফল! কনসাইনমেন্ট আইডি: {res}#orders")
-    return redirect(f"/admin?msg=পাঠাও এরর: {res}#orders")
+        return redirect(f"/admin?msg=Pathao booking successful! Consignment ID: {res}#orders")
+    return redirect(f"/admin?msg=Pathao error: {res}#orders")
+
+@app.route("/admin/order/status/<int:order_id>", methods=["POST"])
+def update_order_status(order_id):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    new_status = request.form.get("status", "pending")
+    agent = session.get("username")
+    db_query("UPDATE orders SET status=?, agent_name=? WHERE id=?", (new_status, agent, order_id), commit=True)
+    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'UPDATE_STATUS', ?)",
+             (agent, f"Order #{order_id} status changed to {new_status}"), commit=True)
+    return redirect(f"/admin?msg=Order #{order_id} status updated to {new_status}#orders")
+
+@app.route("/admin/chat/clear/<phone>", methods=["POST"])
+def clear_chat(phone):
+    if not session.get("logged_in"):
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
+    return jsonify({"success": True})
+
+@app.route("/admin/activity-log")
+def activity_log():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 200", fetchall=True) or []
+    rows = "".join([f"<tr><td>{l['username']}</td><td>{l['action']}</td><td>{l['details']}</td><td>{l['timestamp']}</td></tr>" for l in logs])
+    return f"""<html><head><title>Activity Log</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-slate-900 text-white p-8"><h1 class="text-2xl font-bold mb-4">Activity Log</h1>
+<a href="/admin" class="text-indigo-400 mb-4 block">&larr; Back</a>
+<table class="w-full text-left text-xs"><thead><tr class="text-slate-400"><th>Agent</th><th>Action</th><th>Details</th><th>Time</th></tr></thead>
+<tbody>{rows}</tbody></table></body></html>"""
+
+@app.route("/admin/product/add", methods=["POST"])
+def add_product():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    name = request.form.get("name", "").strip()
+    price_str = request.form.get("price", "0").strip()
+    stock_str = request.form.get("stock", "1").strip()
+    img = request.form.get("image_url", "").strip()
+    try:
+        price = int(price_str)
+        stock = int(stock_str)
+    except:
+        price = 100
+        stock = 1
+    if name:
+        db_query("INSERT INTO products (name, price, stock, image_url) VALUES (?, ?, ?, ?)",
+                 (name, price, stock, img), commit=True)
+    return redirect("/admin?msg=Product added successfully!#inventory")
 
 @app.route("/invoice/<int:order_id>")
 def print_invoice(order_id):
     order = db_query("SELECT * FROM orders WHERE id = ?", (order_id,), fetchone=True)
     if not order:
-        return "মেমো পাওয়া যায়নি", 404
+        return "Invoice not found", 404
     s = get_all_settings()
     prod = db_query("SELECT name, price FROM products WHERE id=?", (order["product_id"],), fetchone=True)
     html = f"""<html><head><title>Invoice #{order['id']}</title><script src="https://cdn.tailwindcss.com"></script></head>
 <body class="bg-white p-10 text-slate-800" onload="window.print()">
 <div class="max-w-xl mx-auto border p-8 rounded-lg shadow-sm">
 <div class="flex justify-between items-center border-b pb-6">
-<div><h1 class="text-2xl font-black text-indigo-600">{s.get('business_name')}</h1><p class="text-xs text-slate-500">অফিসিয়াল ক্যাশ মেমো</p></div>
-<div class="text-right"><h2 class="text-lg font-bold">মেমো নং: #{order['id']}</h2><p class="text-xs text-slate-500">তারিখ: {order['created_at']}</p></div>
+<div><h1 class="text-2xl font-black text-indigo-600">{s.get('business_name')}</h1><p class="text-xs text-slate-500">Official Cash Memo</p></div>
+<div class="text-right"><h2 class="text-lg font-bold">Memo No: #{order['id']}</h2><p class="text-xs text-slate-500">Date: {order['created_at']}</p></div>
 </div>
-<div class="my-6 text-sm"><b class="text-slate-900">ডেলিভারি ঠিকানা:</b><p>{order['name']}</p><p>{order['phone']}</p><p>{order['address']}</p></div>
+<div class="my-6 text-sm"><b class="text-slate-900">Delivery Address:</b><p>{order['name']}</p><p>{order['phone']}</p><p>{order['address']}</p></div>
 <table class="w-full text-left text-xs mb-6 border-collapse">
-<tr class="bg-slate-100 font-bold border-b"><th class="p-2">আইটেম বিবরণ</th><th class="p-2">পরিমাণ</th><th class="p-2 text-right">মূল্য</th></tr>
-<tr class="border-b"><td class="p-2">{prod['name'] if prod else 'Product Item'}</td><td class="p-2">{order['quantity']} টি</td><td class="p-2 text-right">{prod['price'] if prod else 0}৳</td></tr>
+<tr class="bg-slate-100 font-bold border-b"><th class="p-2">Item</th><th class="p-2">Qty</th><th class="p-2 text-right">Price</th></tr>
+<tr class="border-b"><td class="p-2">{prod['name'] if prod else 'Product'}</td><td class="p-2">{order['quantity']}</td><td class="p-2 text-right">{prod['price'] if prod else 0}</td></tr>
 </table>
 <div class="text-right text-xs space-y-1 font-semibold border-t pt-4">
-<p>ডেলিভারি ফি: {order['delivery_fee']}৳</p>
-<p class="text-lg font-black text-indigo-600">সর্বমোট প্রদেয় বিল (COD): {order['total']}৳</p>
+<p>Delivery Fee: {order['delivery_fee']}</p>
+<p class="text-lg font-black text-indigo-600">Total COD: {order['total']}</p>
 </div>
 </div>
 </body></html>"""
+    return html
+
 
 # =====================================================================
 # WHATSAPP WEBHOOK
@@ -1537,4 +1259,6 @@ def webhook():
 # =====================================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    print(f"🚀 Server starting on port {port}")
+    print(f"🔑 Login: admin / admin123")
+    app.run(host="0.0.0.0", port=port, debug=True)
