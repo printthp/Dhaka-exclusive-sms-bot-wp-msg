@@ -455,83 +455,824 @@ def process_webhook_async(msg, from_number):
 # =====================================================================
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
-
-
-
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ settings.get('business_name', 'Control Station') }} — Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ settings.get('business_name', 'Ultimate Control Station') }} — ড্যাশবোর্ড</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+{# Socket.IO for real-time updates #}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+{# Chart.js for analytics #}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+@keyframes slideIn { from { opacity:0; transform:translateX(-12px); } to { opacity:1; transform:translateX(0); } }
+.tab-content.active { animation: fadeIn 0.25s ease-out; }
+.toast { animation: slideIn 0.3s ease-out; }
+.notif-badge { animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius:10px; }
+body { background: #0f172a; }
+.glass { background: rgba(15,23,42,0.8); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+</style>
 </head>
-<body class="min-h-screen font-sans antialiased flex flex-col md:flex-row text-slate-100 bg-slate-900">
-    <aside class="w-full md:w-72 bg-slate-950 border-r border-slate-800 flex flex-col shrink-0">
-        <div class="p-5 border-b border-slate-800 text-center">
-            <h1 class="text-xl font-black text-indigo-400"><i class="fa-solid fa-robot"></i> {{ settings.get('business_name') }}</h1>
-        </div>
-        <nav class="p-3 flex-1 space-y-1">
-            {% for id, icon, label in [('orders','fa-wallet','Orders'),('analytics','fa-chart-line','Analytics'),('livechat','fa-comments','Live Chat'),('complaints','fa-triangle-exclamation','Complaints'),('inventory','fa-box-open','Inventory'),('agents','fa-users','Agents'),('config','fa-sliders','Settings')] %}
-            <button onclick="switchTab('{{ id }}')" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-slate-400 hover:bg-slate-800 transition">
-                <i class="fa-solid {{ icon }} w-4"></i> {{ label }}
-            </button>
-            {% endfor %}
-        </nav>
-    </aside>
+<body class="min-h-screen font-sans antialiased flex flex-col md:flex-row text-slate-100">
 
-    <main class="flex-1 p-8 overflow-y-auto">
-        <div id="tab-orders" class="tab-content space-y-6">
-            <h2 class="text-2xl font-black">Orders</h2>
-            <div class="overflow-x-auto bg-slate-950 rounded-2xl border border-slate-800">
-                <table class="w-full text-sm">
-                    <thead><tr class="text-slate-400 uppercase text-[10px] border-b border-slate-800"><th class="p-4">Order</th><th class="p-4">Customer</th><th class="p-4">COD</th><th class="p-4">Action</th></tr></thead>
-                    <tbody>
-                        {% for o in orders %}
-                        <tr class="order-row border-b border-slate-800/50" data-status="{{ o.status }}" data-search="{{ o.name }} {{ o.phone }}">
-                            <td class="p-4 font-mono font-bold text-indigo-400">#{{ o.id }}</td>
-                            <td class="p-4">{{ o.name }}<br><span class="text-xs text-slate-500">{{ o.phone }}</span></td>
-                            <td class="p-4 font-bold text-emerald-400">{{ o.total }}</td>
-                            <td class="p-4"><button onclick="quickStatusModal({{ o.id }}, '{{ o.status }}')" class="bg-slate-800 px-3 py-1 rounded text-xs">Update</button></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+{# ====== SIDEBAR ====== #}
+<aside class="w-full md:w-72 bg-slate-950 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col shrink-0">
+<div class="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center md:block text-center">
+<h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2">
+<i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}
+</h1>
+<div class="text-xs text-slate-400 mt-1">
+ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span>
+<span class="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">{{ session.get('role', 'agent')|upper }}</span>
+</div>
+</div>
 
-        <div id="status-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
-            <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm">
-                <h3 class="font-bold mb-4">Update Status <span id="modal-order-id"></span></h3>
-                <form id="status-form" method="POST">
-                    <select name="status" class="w-full bg-slate-950 p-3 rounded-lg mb-4">
-                        <option value="pending">Pending</option>
-                        <option value="booked">Booked</option>
-                        <option value="delivered">Delivered</option>
-                    </select>
-                    <div class="flex gap-2">
-                        <button type="button" onclick="closeModal()" class="flex-1 bg-slate-700 py-2 rounded-lg">Cancel</button>
-                        <button type="submit" class="flex-1 bg-indigo-600 py-2 rounded-lg font-bold">Update</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </main>
+{# Live Notification Badge #}
+<div id="live-notif" class="hidden mx-3 mt-2 p-2 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-xs text-indigo-300 flex items-center gap-2">
+<i class="fa-solid fa-circle text-emerald-400 text-[6px]"></i>
+<span id="notif-text">New update received</span>
+</div>
 
-    <script>
-    function switchTab(id) {
-        document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden'));
-        document.getElementById('tab-' + id).classList.remove('hidden');
-    }
-    function quickStatusModal(id, status) {
-        document.getElementById('modal-order-id').innerText = '#' + id;
-        document.getElementById('status-form').action = '/admin/order/status/' + id;
-        document.getElementById('status-modal').classList.remove('hidden');
-    }
-    function closeModal() { document.getElementById('status-modal').classList.add('hidden'); }
-    </script>
+<nav class="p-3 grid grid-cols-2 md:flex md:flex-col gap-1 overflow-x-auto flex-1">
+{% set tabs = [
+('orders', 'fa-wallet', 'অর্ডার প্যানেল'),
+('analytics', 'fa-chart-line', 'অ্যানালিটিক্স'),
+('livechat', 'fa-comments', 'লাইভ ইনবক্স'),
+('complaints', 'fa-triangle-exclamation', 'কমপ্লেইন বক্স'),
+('inventory', 'fa-box-open', 'প্রোডাক্ট সিঙ্ক'),
+('agents', 'fa-users', 'প্রতিনিধি ট্র্যাকার'),
+('config', 'fa-sliders', 'সেটিংস')
+] %}
+{% for tab_id, icon, label in tabs %}
+<button onclick="switchTab('{{ tab_id }}')"
+class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm
+{% if loop.first %}bg-indigo-600 text-white font-bold{% else %}text-slate-400 hover:bg-slate-800/50{% endif %}
+transition-all duration-200">
+<i class="fa-solid {{ icon }} w-4 text-center"></i>{{ label }}
+{% if tab_id == 'complaints' and pending_complaints_count > 0 %}
+<span class="ml-auto px-1.5 py-0.5 bg-rose-500/20 text-rose-400 rounded text-[10px] font-bold notif-badge">{{ pending_complaints_count }}</span>
+{% endif %}
+{% if tab_id == 'livechat' and unread_chat_count > 0 %}
+<span class="ml-auto px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px] font-bold notif-badge">{{ unread_chat_count }}</span>
+{% endif %}
+</button>
+{% endfor %}
+<a href="/admin/logout" class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-rose-400 hover:bg-rose-950/20 transition mt-auto">
+<i class="fa-solid fa-right-from-bracket w-4 text-center"></i>লগআউট
+</a>
+</nav>
+</aside>
+
+{# ====== MAIN CONTENT ====== #}
+<main class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-x-hidden">
+
+{# ====== TOP BAR ====== #}
+<header class="glass border-b border-slate-800 px-4 md:px-6 py-3 flex items-center justify-between sticky top-0 z-30">
+<div class="flex items-center gap-3">
+<button onclick="document.querySelector('aside').classList.toggle('-translate-x-full')" class="md:hidden text-slate-400 hover:text-white text-xl">
+<i class="fa-solid fa-bars"></i>
+</button>
+<h2 class="text-sm md:text-base font-bold text-slate-200" id="page-title">অর্ডার প্যানেল</h2>
+</div>
+<div class="flex items-center gap-3 text-xs">
+<span class="text-slate-500 hidden md:inline"><i class="fa-regular fa-clock mr-1"></i><span id="live-clock">{{ now }}</span></span>
+<a href="/admin/activity-log" class="text-slate-400 hover:text-white transition" title="Activity Log">
+<i class="fa-solid fa-clock-rotate-left"></i>
+</a>
+<button onclick="location.reload()" class="text-slate-400 hover:text-white transition" title="Refresh">
+<i class="fa-solid fa-rotate"></i>
+</button>
+</div>
+</header>
+
+{# ====== FLASH MESSAGES ====== #}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="mx-4 md:mx-6 mt-4 space-y-2">
+{% for category, message in messages %}
+<div class="toast p-3 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2
+{% if category == 'success' %}bg-emerald-500/10 border border-emerald-500/20 text-emerald-400
+{% elif category == 'error' %}bg-rose-500/10 border border-rose-500/20 text-rose-400
+{% else %}bg-indigo-500/10 border border-indigo-500/20 text-indigo-400{% endif %}">
+<i class="fa-solid {% if category == 'success' %}fa-circle-check{% elif category == 'error' %}fa-circle-xmark{% else %}fa-circle-info{% endif %}"></i>
+{{ message }}
+<button onclick="this.parentElement.remove()" class="ml-auto text-slate-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+{# ====== TAB: ORDERS ====== #}
+<div id="tab-orders" class="tab-content active p-4 md:p-8 space-y-6">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div>
+<h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
+<p class="text-xs text-slate-500 mt-1">মোট {{ orders|length }} টি অর্ডার</p>
+</div>
+<div class="flex gap-2">
+<select id="order-filter" onchange="filterOrders()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+<option value="all">সকল অর্ডার</option>
+<option value="pending">Pending</option>
+<option value="booked">Booked</option>
+<option value="delivered">Delivered</option>
+<option value="call_request">Call Request</option>
+</select>
+<input type="text" id="order-search" oninput="filterOrders()" placeholder="🔍 সার্চ (নাম/ফোন/আইডি)..." class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-40 md:w-56">
+</div>
+</div>
+
+{# Stats cards #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+{% set statuses = [('pending','Pending','text-amber-400','bg-amber-500/10'),('booked','Booked','text-indigo-400','bg-indigo-500/10'),('delivered','Delivered','text-emerald-400','bg-emerald-500/10'),('call_request','Call Request','text-rose-400','bg-rose-500/10')] %}
+{% for key,label,color,bg in statuses %}
+<div class="{{ bg }} border border-slate-800 rounded-xl p-3">
+<div class="text-2xl font-black {{ color }}">{{ stats.get(key, 0) }}</div>
+<div class="text-[10px] text-slate-400 uppercase">{{ label }}</div>
+</div>
+{% endfor %}
+</div>
+
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
+<table class="w-full text-left text-xs md:text-sm min-w-[700px]">
+<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400 uppercase text-[11px]">
+<th class="p-4">Order</th><th class="p-4">Customer</th><th class="p-4">Address</th><th class="p-4">COD</th><th class="p-4">Agent</th><th class="p-4">Status</th><th class="p-4 text-right">Actions</th>
+</tr></thead>
+<tbody id="orders-tbody">
+{% for o in orders %}
+<tr class="order-row border-b border-slate-800/60 hover:bg-slate-800/20 transition"
+data-status="{{ o.status }}"
+data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
+<td class="p-4 font-mono text-indigo-400 font-bold">#{{ o.id }}</td>
+<td class="p-4">
+<b class="text-white">{{ o.name }}</b><br>
+<span class="text-xs text-slate-500">{{ o.phone }}</span>
+{% if o.pathao_consignment_id == 'CALL_REQUEST' %}
+<span class="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">📞 Call</span>
+{% endif %}
+</td>
+<td class="p-4 text-xs max-w-xs truncate" title="{{ o.address }}">{{ o.address }}</td>
+<td class="p-4 font-bold text-emerald-400">{{ o.total }}৳</td>
+<td class="p-4 text-slate-300 font-medium">{{ o.agent_name or '-' }}</td>
+<td class="p-4">
+{% set status_colors = {'pending':'bg-amber-500/20 text-amber-400','booked':'bg-indigo-500/20 text-indigo-400','delivered':'bg-emerald-500/20 text-emerald-400','cancelled':'bg-rose-500/20 text-rose-400','call_request':'bg-amber-500/20 text-amber-400'} %}
+<span class="px-2 py-0.5 rounded text-[11px] font-bold {{ status_colors.get(o.status, 'bg-slate-800 text-slate-400') }}">
+{{ o.status|upper }}
+</span>
+</td>
+<td class="p-4 text-right space-x-1">
+<a href="/invoice/{{ o.id }}" target="_blank" class="inline-block p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-xs" title="Print Invoice"><i class="fa-solid fa-print"></i></a>
+{% if o.status == 'pending' and o.pathao_consignment_id != 'CALL_REQUEST' %}
+<form action="/admin/order/book/{{ o.id }}" method="POST" class="inline" onsubmit="return confirm('Book this order with Pathao?')">
+<button type="submit" class="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold">📦 Pathao Book</button>
+</form>
+{% endif %}
+{% if o.status == 'pending' and o.pathao_consignment_id == 'CALL_REQUEST' %}
+<form action="/admin/order/resolve-call/{{ o.id }}" method="POST" class="inline">
+<button type="submit" class="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold">📞 Call Done</button>
+</form>
+{% endif %}
+<button onclick="quickStatusModal({{ o.id }}, '{{ o.status }}')" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-xs" title="Quick Status Update">
+<i class="fa-solid fa-pen"></i>
+</button>
+</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="p-8 text-center text-slate-500"><i class="fa-solid fa-inbox text-2xl mb-2 block"></i>কোন অর্ডার নেই</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+{# ====== TAB: ANALYTICS ====== #}
+<div id="tab-analytics" class="tab-content hidden p-4 md:p-8 space-y-6">
+<h2 class="text-xl md:text-2xl font-black"><i class="fa-solid fa-chart-line text-indigo-400 mr-2"></i>অ্যানালিটিক্স ড্যাশবোর্ড</h2>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<div class="bg-gradient-to-br from-indigo-950 to-slate-950 rounded-2xl border border-indigo-800/30 p-5">
+<div class="text-xs text-slate-400 uppercase mb-1">Today's Revenue</div>
+<div class="text-3xl font-black text-emerald-400">৳{{ analytics.today_revenue }}</div>
+<div class="text-xs text-slate-500 mt-1">{% if analytics.revenue_change >= 0 %}<span class="text-emerald-400">↑</span>{% else %}<span class="text-rose-400">↓</span>{% endif %} {{ analytics.revenue_change }}% vs yesterday</div>
+</div>
+<div class="bg-gradient-to-br from-blue-950 to-slate-950 rounded-2xl border border-blue-800/30 p-5">
+<div class="text-xs text-slate-400 uppercase mb-1">Total Orders</div>
+<div class="text-3xl font-black text-white">{{ analytics.total_orders }}</div>
+<div class="text-xs text-slate-500 mt-1">{{ analytics.pending_orders }} pending · {{ analytics.delivered_today }} delivered today</div>
+</div>
+<div class="bg-gradient-to-br from-emerald-950 to-slate-950 rounded-2xl border border-emerald-800/30 p-5">
+<div class="text-xs text-slate-400 uppercase mb-1">Avg Order Value</div>
+<div class="text-3xl font-black text-indigo-400">৳{{ analytics.avg_order_value }}</div>
+<div class="text-xs text-slate-500 mt-1">Based on last 30 days</div>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4">
+<h3 class="text-xs font-bold text-slate-400 uppercase mb-4">Weekly Orders Trend</h3>
+<canvas id="ordersChart" height="150"></canvas>
+</div>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4">
+<h3 class="text-xs font-bold text-slate-400 uppercase mb-4">Status Distribution</h3>
+<canvas id="statusChart" height="150"></canvas>
+</div>
+</div>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4">
+<h3 class="text-xs font-bold text-slate-400 uppercase mb-4">Top Agents by Delivery</h3>
+<div class="space-y-2">
+{% for agent in analytics.top_agents %}
+<div class="flex items-center gap-3">
+<div class="w-24 text-xs font-bold text-slate-300 truncate">{{ agent.name }}</div>
+<div class="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
+<div class="bg-indigo-500 h-full rounded-full" style="width:{{ agent.percentage }}%"></div>
+</div>
+<div class="text-xs text-slate-400 w-10 text-right">{{ agent.count }}</div>
+</div>
+{% endfor %}
+</div>
+</div>
+</div>
+
+{# ====== TAB: LIVECHAT ====== #}
+<div id="tab-livechat" class="tab-content hidden grid grid-cols-1 md:grid-cols-3 gap-4 p-4 md:p-8 h-full max-h-[calc(100vh-8rem)]">
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden flex flex-col">
+<div class="bg-slate-900 p-3 border-b border-slate-800">
+<h3 class="text-xs font-bold text-slate-400 uppercase">কাস্টমার লিস্ট <span class="text-slate-500">({{ users|length }})</span></h3>
+<input type="text" id="chat-search" oninput="filterChatUsers()" placeholder="🔍 ফোন নাম্বার..." class="w-full mt-2 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:outline-none">
+</div>
+<div id="chat-user-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+{% for u in users %}
+<a href="/admin?chat_with={{ u.phone }}#livechat"
+class="chat-user block p-2 rounded-xl hover:bg-slate-800/50 transition border border-transparent hover:border-indigo-500/30"
+data-phone="{{ u.phone }}">
+<div class="flex items-center gap-2">
+<div class="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px] font-bold text-indigo-400">
+{{ u.phone[:2] }}
+</div>
+<div>
+<div class="text-xs font-bold text-white">{{ u.phone }}</div>
+{% if u.last_message %}
+<div class="text-[10px] text-slate-500 truncate max-w-[120px]">{{ u.last_message }}</div>
+{% endif %}
+</div>
+{% if u.unread %}
+<span class="ml-auto px-1.5 py-0.5 bg-indigo-500 text-white rounded-full text-[9px] font-bold">{{ u.unread }}</span>
+{% endif %}
+</div>
+</a>
+{% else %}
+<div class="text-center text-slate-500 text-xs py-8">কোন কাস্টমার নেই</div>
+{% endfor %}
+</div>
+</div>
+<div class="md:col-span-2 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col overflow-hidden">
+<div class="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
+<i class="fa-solid fa-user text-indigo-400 text-xs"></i>
+</div>
+<div>
+<div class="text-sm font-bold text-indigo-400">{{ active_chat or 'কাস্টমার সিলেক্ট করুন' }}</div>
+{% if active_chat %}<div class="text-[10px] text-slate-500">Online</div>{% endif %}
+</div>
+</div>
+<div class="flex gap-1">
+{% if active_chat %}
+<a href="/admin/chat/toggle-bot/{{ active_chat }}" class="px-2 py-1 bg-amber-500/20 text-amber-400 rounded-lg font-bold text-xs hover:bg-amber-500/30 transition">
+<i class="fa-solid fa-robot"></i> বট
+</a>
+<button onclick="clearChat('{{ active_chat }}')" class="px-2 py-1 bg-rose-500/20 text-rose-400 rounded-lg font-bold text-xs hover:bg-rose-500/30 transition">
+<i class="fa-solid fa-trash-can"></i>
+</button>
+{% endif %}
+</div>
+</div>
+<div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col">
+{% for m in chat_history %}
+<div class="max-w-xs md:max-w-md p-3 rounded-2xl text-xs chat-msg
+{% if m.direction == 'inbound' %}bg-slate-800 text-white self-start{% else %}bg-indigo-600 text-white self-end{% endif %}">
+{% if m.agent_id %}<div class="font-semibold text-[10px] text-slate-400 mb-0.5">{{ m.agent_id }}</div>{% endif %}
+<div>{{ m.content }}</div>
+<div class="text-[9px] text-slate-400 mt-1 text-right">{{ m.timestamp }}</div>
+</div>
+{% else %}
+<div class="text-center text-slate-500 text-xs py-8 mt-auto">মেসেজ শুরু করুন</div>
+{% endfor %}
+<div id="chat-typing" class="hidden text-xs text-slate-500 italic self-start">টাইপিং...</div>
+</div>
+{% if active_chat %}
+<form id="chat-form" action="/admin/chat/send" method="POST" class="p-3 bg-slate-900 border-t border-slate-800 flex gap-2">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="phone" value="{{ active_chat }}">
+<input type="text" id="chat-input" name="message" placeholder="এখানে উত্তর লিখুন..." autocomplete="off"
+class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none focus:border-indigo-500">
+<button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 rounded-xl text-xs font-bold transition">
+<i class="fa-solid fa-paper-plane"></i>
+</button>
+</form>
+{% endif %}
+</div>
+</div>
+
+{# ====== TAB: COMPLAINTS ====== #}
+<div id="tab-complaints" class="tab-content hidden p-4 md:p-8 space-y-6">
+<div class="flex justify-between items-center">
+<h2 class="text-xl md:text-2xl font-black text-rose-400">⚠️ কাস্টমার কমপ্লেইন বক্স</h2>
+<span class="text-xs text-slate-500">মোট {{ complaints|length }} টি</span>
+</div>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
+<table class="w-full text-left text-xs md:text-sm min-w-[700px]">
+<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400">
+<th class="p-4">Customer</th><th class="p-4">Complaint</th><th class="p-4">Status</th><th class="p-4">Resolved By</th><th class="p-4 text-right">Action</th>
+</tr></thead>
+<tbody>
+{% for c in complaints %}
+<tr class="border-b border-slate-800/60 hover:bg-slate-800/20 transition">
+<td class="p-4 font-bold">{{ c.phone }}<br><span class="text-[10px] text-slate-500">{{ c.created_at }}</span></td>
+<td class="p-4 text-xs max-w-xs whitespace-normal">{{ c.complaint_text }}</td>
+<td class="p-4">
+<span class="px-2 py-0.5 rounded text-[11px] font-bold
+{% if c.status=='pending' %}bg-rose-500/20 text-rose-400{% else %}bg-emerald-500/20 text-emerald-400{% endif %}">
+{{ c.status|upper }}
+</span>
+</td>
+<td class="p-4 text-xs"><b>{{ c.resolved_by or '-' }}</b><br><span class="text-slate-400 text-[11px]">{{ c.resolution_notes }}</span></td>
+<td class="p-4 text-right">
+{% if c.status == 'pending' %}
+<form action="/admin/complaint/resolve/{{ c.id }}" method="POST" class="flex flex-col md:flex-row gap-1 justify-end">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="text" name="notes" placeholder="সমাধান নোট..." required class="bg-slate-900 border border-slate-800 rounded p-1.5 text-xs text-white w-full md:w-40">
+<button type="submit" class="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold">Resolve</button>
+</form>
+{% else %}
+<span class="text-slate-500 text-xs"><i class="fa-solid fa-circle-check text-emerald-500"></i> Solved ✓</span>
+{% endif %}
+</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="p-8 text-center text-slate-500"><i class="fa-solid fa-circle-check text-2xl mb-2 block"></i>কোন কমপ্লেইন নেই</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+{# ====== TAB: INVENTORY ====== #}
+<div id="tab-inventory" class="tab-content hidden p-4 md:p-8 space-y-6">
+<div class="bg-gradient-to-r from-indigo-950 to-blue-950 border border-indigo-500/20 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+<div>
+<h3 class="text-sm md:text-base font-black text-white">মেটা ক্যাটালগ অটো সিঙ্ক ইঞ্জিন</h3>
+<p class="text-xs text-slate-400 mt-1">{{ products|length }} টি প্রোডাক্ট সিঙ্ক করা আছে</p>
+</div>
+<div class="flex gap-2">
+<button onclick="showAddProductModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow-lg">
+<i class="fa-solid fa-plus"></i> Add Product
+</button>
+<a href="/admin/sync-facebook-trigger" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition shadow-lg">
+<i class="fa-brands fa-facebook"></i> Sync Meta Catalogue
+</a>
+</div>
+</div>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto">
+<table class="w-full text-left text-xs md:text-sm min-w-[600px]">
+<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400">
+<th class="p-4">Product ID</th><th class="p-4">Image</th><th class="p-4">Details</th><th class="p-4">Price</th><th class="p-4">Edit</th></tr></thead>
+<tbody>
+{% for p in products %}
+<tr class="border-b border-slate-800/40 hover:bg-slate-800/10" id="prod-row-{{ p.id }}">
+<td class="p-4 font-mono text-xs text-slate-500">{{ p.fb_product_id or 'Manual' }}</td>
+<td class="p-4">
+<img src="{{ p.image_url or DEFAULT_PRODUCT_IMAGE }}" class="h-12 w-12 object-cover rounded-lg border border-slate-700"
+onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
+</td>
+<td class="p-4">
+<div class="view-mode" id="view-{{ p.id }}">
+<b class="text-white">{{ p.name }}</b><br>
+<span class="text-xs text-slate-400">Stock: <span class="text-white font-bold">{{ p.stock }}</span></span>
+</div>
+<form class="edit-mode hidden" id="edit-{{ p.id }}" action="/admin/product/edit/{{ p.id }}" method="POST" style="display:none">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="text" name="name" value="{{ p.name }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white mb-1" required>
+<div class="flex gap-1">
+<input type="number" name="price" value="{{ p.price }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white" required>
+<input type="number" name="stock" value="{{ p.stock }}" class="w-20 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white">
+</div>
+<input type="text" name="image_url" value="{{ p.image_url or '' }}" placeholder="Image URL" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white mt-1">
+<div class="flex gap-1 mt-1">
+<button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded">💾 Save</button>
+<button type="button" onclick="toggleEdit({{ p.id }})" class="bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold px-3 py-1.5 rounded">Cancel</button>
+</div>
+</form>
+</td>
+<td class="p-4 font-bold text-emerald-400">৳{{ p.price }}</td>
+<td class="p-4">
+<button onclick="toggleEdit({{ p.id }})" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded font-bold transition" id="btn-{{ p.id }}">
+<i class="fa-solid fa-pen-to-square"></i> Edit
+</button>
+</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="p-8 text-center text-slate-500"><i class="fa-solid fa-box-open text-2xl mb-2 block"></i>কোন প্রোডাক্ট নেই</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+{# ====== TAB: AGENTS ====== #}
+<div id="tab-agents" class="tab-content hidden p-4 md:p-8 space-y-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<div class="bg-slate-950 p-5 rounded-2xl border border-slate-800">
+<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">নতুন প্রতিনিধি যোগ করুন</h3>
+<form action="/admin/agents/add" method="POST" class="space-y-3">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div>
+<label class="block text-[10px] text-slate-500 mb-1">Username</label>
+<input type="text" name="username" placeholder="ইউজারনেম" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
+</div>
+<div>
+<label class="block text-[10px] text-slate-500 mb-1">Password</label>
+<input type="password" name="password" placeholder="পাসওয়ার্ড" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
+</div>
+<div>
+<label class="block text-[10px] text-slate-500 mb-1">Role</label>
+<select name="role" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
+<option value="agent">Agent</option>
+<option value="admin">Admin</option>
+<option value="manager">Manager</option>
+</select>
+</div>
+<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 p-2.5 text-xs font-bold rounded-xl text-white transition">➕ Create Agent</button>
+</form>
+</div>
+<div class="md:col-span-2 bg-slate-950 p-5 rounded-2xl border border-slate-800 overflow-x-auto">
+<div class="flex justify-between items-center mb-4">
+<h3 class="text-slate-400 text-xs font-bold uppercase">প্রতিনিধিদের কর্মক্ষমতা লগ</h3>
+<select id="agent-log-filter" onchange="filterAgentLogs()" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[10px] text-white">
+<option value="all">All Actions</option>
+<option value="login">Login</option>
+<option value="order_book">Order Book</option>
+<option value="complaint_resolve">Resolve</option>
+<option value="chat">Chat</option>
+</select>
+</div>
+<table class="w-full text-left text-xs">
+<thead><tr class="bg-slate-900 text-slate-400"><th class="p-2">Agent</th><th class="p-2">Action</th><th class="p-2">Details</th><th class="p-2">Time</th></tr></thead>
+<tbody id="agent-logs-tbody">
+{% for l in agent_logs %}
+<tr class="log-row border-b border-slate-800/50" data-action="{{ l.action }}">
+<td class="p-2 font-bold text-indigo-400">{{ l.username }}</td>
+<td class="p-2"><span class="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-[10px]">{{ l.action }}</span></td>
+<td class="p-2 text-slate-300 max-w-xs truncate">{{ l.details }}</td>
+<td class="p-2 text-slate-500">{{ l.timestamp }}</td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="p-8 text-center text-slate-500">কোন লগ নেই</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+{# ====== TAB: SETTINGS ====== #}
+<div id="tab-config" class="tab-content hidden p-4 md:p-8">
+<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6 max-w-3xl">
+<div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
+<form action="/admin/settings/save" method="POST" class="space-y-6">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label>
+<input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none focus:border-indigo-500"></div>
+<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label>
+<input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white font-mono focus:outline-none focus:border-indigo-500"></div>
+<div class="md:col-span-2"><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Permanent Token</label>
+<div class="relative">
+<input type="password" id="wa-token" name="permanent_token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white font-mono focus:outline-none focus:border-indigo-500 pr-10">
+<button type="button" onclick="togglePassword('wa-token')" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+<i class="fa-solid fa-eye"></i>
+</button>
+</div></div>
+<div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
+<div class="font-bold text-xs text-indigo-400 uppercase flex items-center gap-2"><i class="fa-brands fa-google"></i> Google Gemini AI Config</div>
+<div><label class="block text-[10px] text-slate-500 mb-1">API Key</label>
+<div class="relative">
+<input type="password" id="gemini-key" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-indigo-500 pr-10">
+<button type="button" onclick="togglePassword('gemini-key')" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+<i class="fa-solid fa-eye"></i>
+</button>
+</div></div>
+<div><label class="block text-[10px] text-slate-500 mb-1">AI System Instruction</label>
+<textarea name="ai_system_instruction" rows="3" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">{{ settings.get('ai_system_instruction', '') }}</textarea></div>
+</div>
+</div>
+<button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold p-3 rounded-xl text-xs md:text-sm transition">
+<i class="fa-solid fa-floppy-disk mr-1"></i> Save Configurations
+</button>
+</form>
+</div>
+</div>
+
+</div>
+</main>
+
+{# ====== QUICK STATUS MODAL ====== #}
+<div id="status-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden p-4">
+<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+<h3 class="font-bold text-sm text-white mb-4">Quick Status Update</h3>
+<form id="status-form" method="POST">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="space-y-3">
+<div>
+<label class="block text-xs text-slate-400 mb-1">Order ID</label>
+<div class="text-lg font-black text-indigo-400" id="modal-order-id">#0</div>
+</div>
+<div>
+<label class="block text-xs text-slate-400 mb-1">New Status</label>
+<select name="status" required class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white">
+<option value="pending">Pending</option>
+<option value="booked">Booked</option>
+<option value="delivered">Delivered</option>
+<option value="cancelled">Cancelled</option>
+<option value="call_request">Call Request</option>
+</select>
+</div>
+</div>
+<div class="flex gap-2 mt-5">
+<button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold p-2.5 rounded-xl transition">Update</button>
+<button type="button" onclick="closeModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold p-2.5 rounded-xl transition">Cancel</button>
+</div>
+</form>
+</div>
+</div>
+
+{# ====== ADD PRODUCT MODAL ====== #}
+<div id="add-product-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden p-4">
+<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+<h3 class="font-bold text-sm text-white mb-4">➕ Add New Product</h3>
+<form action="/admin/product/add" method="POST">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="space-y-3">
+<div><label class="block text-xs text-slate-400 mb-1">Product Name</label>
+<input type="text" name="name" required class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
+<div class="grid grid-cols-2 gap-3">
+<div><label class="block text-xs text-slate-400 mb-1">Price (৳)</label>
+<input type="number" name="price" required step="0.01" class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
+<div><label class="block text-xs text-slate-400 mb-1">Stock</label>
+<input type="number" name="stock" value="1" class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
+</div>
+<div><label class="block text-xs text-slate-400 mb-1">Image URL</label>
+<input type="text" name="image_url" placeholder="https://..." class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
+</div>
+<div class="flex gap-2 mt-5">
+<button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold p-2.5 rounded-xl transition">Save Product</button>
+<button type="button" onclick="closeAddProductModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold p-2.5 rounded-xl transition">Cancel</button>
+</div>
+</form>
+</div>
+</div>
+
+{# ====== JAVASCRIPT ====== #}
+<script>
+// CSRF Token for AJAX requests
+const CSRF_TOKEN = '{{ csrf_token() }}';
+
+// ========== TAB SWITCHING ==========
+function switchTab(tabId) {
+document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+const target = document.getElementById('tab-' + tabId);
+if (target) { target.classList.remove('hidden'); target.classList.add('active'); }
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+btn.classList.remove('bg-indigo-600','text-white','font-bold');
+btn.classList.add('text-slate-400');
+});
+const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => {
+const match = b.getAttribute('onclick');
+return match && match.includes("'" + tabId + "'");
+});
+if (activeBtn) { activeBtn.classList.add('bg-indigo-600','text-white','font-bold'); activeBtn.classList.remove('text-slate-400'); }
+
+const titles = {
+orders:'অর্ডার প্যানেল', analytics:'অ্যানালিটিক্স', livechat:'লাইভ ইনবক্স',
+complaints:'কমপ্লেইন বক্স', inventory:'প্রোডাক্ট সিঙ্ক', agents:'প্রতিনিধি ট্র্যাকার', config:'সেটিংস'
+};
+const titleEl = document.getElementById('page-title');
+if (titleEl && titles[tabId]) titleEl.innerText = titles[tabId];
+
+window.location.hash = tabId;
+}
+
+// Hash-based tab switching
+const hash = window.location.hash.replace('#','');
+if (hash && ['orders','analytics','livechat','complaints','inventory','agents','config'].includes(hash)) {
+switchTab(hash);
+} else { switchTab('orders'); }
+
+// ========== TOGGLE EDIT PRODUCT ==========
+function toggleEdit(id) {
+const viewEl = document.getElementById('view-' + id);
+const editEl = document.getElementById('edit-' + id);
+const btnEl = document.getElementById('btn-' + id);
+if (!editEl || editEl.style.display === 'none' || !editEl.style.display) {
+viewEl.style.display = 'none'; editEl.style.display = 'block'; btnEl.innerHTML = '<i class="fa-solid fa-xmark"></i> Cancel';
+} else {
+viewEl.style.display = 'block'; editEl.style.display = 'none'; btnEl.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Edit';
+}
+}
+
+// ========== FILTER ORDERS ==========
+function filterOrders() {
+const status = document.getElementById('order-filter').value;
+const query = document.getElementById('order-search').value.toLowerCase();
+document.querySelectorAll('.order-row').forEach(row => {
+const rowStatus = row.dataset.status;
+const rowSearch = row.dataset.search.toLowerCase();
+const matchStatus = status === 'all' || rowStatus === status;
+const matchSearch = !query || rowSearch.includes(query);
+row.style.display = (matchStatus && matchSearch) ? '' : 'none';
+});
+}
+
+// ========== FILTER CHAT USERS ==========
+function filterChatUsers() {
+const query = document.getElementById('chat-search').value.toLowerCase();
+document.querySelectorAll('.chat-user').forEach(el => {
+el.style.display = el.dataset.phone.toLowerCase().includes(query) ? '' : 'none';
+});
+}
+
+// ========== FILTER AGENT LOGS ==========
+function filterAgentLogs() {
+const action = document.getElementById('agent-log-filter').value;
+document.querySelectorAll('.log-row').forEach(row => {
+row.style.display = (action === 'all' || row.dataset.action === action) ? '' : 'none';
+});
+}
+
+// ========== MODALS ==========
+function quickStatusModal(orderId, currentStatus) {
+document.getElementById('modal-order-id').innerText = '#' + orderId;
+const form = document.getElementById('status-form');
+form.action = '/admin/order/status/' + orderId;
+const select = form.querySelector('select[name="status"]');
+if (select) select.value = currentStatus;
+document.getElementById('status-modal').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('status-modal').classList.add('hidden'); }
+function showAddProductModal() { document.getElementById('add-product-modal').classList.remove('hidden'); }
+function closeAddProductModal() { document.getElementById('add-product-modal').classList.add('hidden'); }
+// Close modals on escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeAddProductModal(); } });
+// Close modals on backdrop click
+document.getElementById('status-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+document.getElementById('add-product-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeAddProductModal(); });
+
+// ========== TOGGLE PASSWORD VISIBILITY ==========
+function togglePassword(id) {
+const el = document.getElementById(id);
+const icon = el.nextElementSibling.querySelector('i');
+if (el.type === 'password') {
+el.type = 'text';
+icon.classList.replace('fa-eye', 'fa-eye-slash');
+} else {
+el.type = 'password';
+icon.classList.replace('fa-eye-slash', 'fa-eye');
+}
+}
+
+// ========== LIVE CLOCK ==========
+function updateClock() {
+const now = new Date();
+const str = now.toLocaleDateString('bn-BD', { weekday:'short', year:'numeric', month:'short', day:'numeric' })
++ ' ' + now.toLocaleTimeString('bn-BD');
+const el = document.getElementById('live-clock');
+if (el) el.innerText = str;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ========== CHAT FORM AJAX ==========
+const chatForm = document.getElementById('chat-form');
+if (chatForm) {
+chatForm.addEventListener('submit', function(e) {
+e.preventDefault();
+const input = document.getElementById('chat-input');
+const msg = input.value.trim();
+if (!msg) return;
+const formData = new FormData(this);
+fetch('/admin/chat/send', { method:'POST', body:formData })
+.then(r => r.json())
+.then(data => {
+if (data.success) {
+input.value = '';
+const container = document.getElementById('chat-messages');
+const div = document.createElement('div');
+div.className = 'max-w-xs md:max-w-md p-3 rounded-2xl text-xs bg-indigo-600 text-white self-end';
+div.innerHTML = '<div>' + msg + '</div><div class="text-[9px] text-slate-400 mt-1 text-right">Just now</div>';
+container.appendChild(div);
+container.scrollTop = container.scrollHeight;
+} else {
+alert('Error: ' + (data.error || 'Unknown'));
+}
+})
+.catch(err => { console.error(err); alert('Network error'); });
+});
+}
+
+// ========== CLEAR CHAT ==========
+function clearChat(phone) {
+if (!confirm('Clear this conversation?')) return;
+fetch('/admin/chat/clear/' + phone, { method:'POST', headers:{'X-CSRFToken': CSRF_TOKEN} })
+.then(r => r.json())
+.then(data => { if (data.success) location.reload(); });
+}
+
+// ========== REAL-TIME UPDATES (Socket.IO) ==========
+const socket = io({ transports: ['websocket', 'polling'], upgrade: false });
+socket.on('connect', function() { console.log('🔌 Real-time connected'); });
+socket.on('new_order', function(data) {
+const notif = document.getElementById('live-notif');
+document.getElementById('notif-text').innerText = '📦 New Order #' + data.id + ' from ' + data.name;
+notif.classList.remove('hidden');
+setTimeout(() => notif.classList.add('hidden'), 5000);
+});
+socket.on('new_chat', function(data) {
+const notif = document.getElementById('live-notif');
+document.getElementById('notif-text').innerText = '💬 New message from ' + data.phone;
+notif.classList.remove('hidden');
+setTimeout(() => notif.classList.add('hidden'), 5000);
+});
+socket.on('new_complaint', function() {
+const notif = document.getElementById('live-notif');
+document.getElementById('notif-text').innerText = '⚠️ New complaint received';
+notif.classList.remove('hidden');
+setTimeout(() => notif.classList.add('hidden'), 5000);
+});
+
+// ========== CHARTS (Analytics Tab) ==========
+document.addEventListener('DOMContentLoaded', function() {
+setTimeout(() => {
+try {
+const weeklyData = {{ chart_data.weekly_orders | tojson | safe }};
+if (document.getElementById('ordersChart')) {
+new Chart(document.getElementById('ordersChart'), {
+type: 'line',
+data: {
+labels: weeklyData.labels,
+datasets: [{
+label: 'Orders',
+data: weeklyData.values,
+borderColor: '#818cf8',
+backgroundColor: 'rgba(129, 140, 248, 0.1)',
+fill: true,
+tension: 0.3,
+pointBackgroundColor: '#818cf8',
+pointRadius: 3
+}]
+},
+options: {
+responsive: true,
+maintainAspectRatio: false,
+plugins: { legend: { display: false } },
+scales: {
+x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' } },
+y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' }, beginAtZero: true }
+}
+}
+});
+}
+if (document.getElementById('statusChart')) {
+const statusData = {{ chart_data.status_distribution | tojson | safe }};
+new Chart(document.getElementById('statusChart'), {
+type: 'doughnut',
+data: {
+labels: statusData.labels,
+datasets: [{
+data: statusData.values,
+backgroundColor: ['#f59e0b', '#818cf8', '#34d399', '#ef4444', '#94a3b8'],
+borderWidth: 0
+}]
+},
+options: {
+responsive: true,
+maintainAspectRatio: false,
+plugins: {
+legend: { position: 'bottom', labels: { color: '#64748b', font: { size: 10 }, padding: 10 } }
+}
+}
+});
+}
+} catch(e) { console.log('Chart init deferred:', e); }
+}, 500);
+});
+</script>
 </body>
-
-
-
 
 </html>"""
 
