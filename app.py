@@ -659,6 +659,45 @@ def process_webhook_async(msg, from_number):
 </form>
 </div>
 
+<div class="p-4 md:p-8 flex-1 overflow-y-auto">
+
+<div id="tab-config" class="tab-content hidden bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6">
+<div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
+<form action="/admin/settings/save" method="POST" class="space-y-6">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label><input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
+    <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label><input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
+
+    <div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
+        <div class="font-bold text-xs text-indigo-400 uppercase">Meta (Facebook) Config</div>
+        <div class="grid md:grid-cols-2 gap-4">
+            <input type="text" name="fb_catalogue_id" placeholder="Facebook Catalogue ID" value="{{ settings.get('fb_catalogue_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <input type="password" name="fb_access_token" placeholder="FB Access Token" value="{{ settings.get('fb_access_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <input type="password" name="permanent_token" placeholder="WhatsApp Permanent Token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+        </div>
+    </div>
+
+    <div class="md:col-span-2 p-4 bg-rose-950/20 border border-rose-500/20 rounded-xl space-y-3">
+        <div class="font-bold text-xs text-rose-400 uppercase">Pathao Courier Config</div>
+        <div class="grid md:grid-cols-3 gap-4">
+            <input type="text" name="pathao_store_id" placeholder="Store ID" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <input type="text" name="pathao_client_id" placeholder="Client ID" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <input type="password" name="pathao_client_secret" placeholder="Client Secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <input type="text" name="pathao_merchant_email" placeholder="Merchant Email" value="{{ settings.get('pathao_merchant_email', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+            <input type="password" name="pathao_merchant_password" placeholder="Merchant Password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+        </div>
+    </div>
+
+    <div class="md:col-span-2 p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl space-y-3">
+        <div class="font-bold text-xs text-emerald-400 uppercase">Google Gemini AI Config</div>
+        <input type="password" name="gemini_key" placeholder="Gemini API Key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">
+        <textarea name="ai_system_instruction" rows="2" placeholder="AI System Instruction" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea>
+    </div>
+</div>
+<button type="submit" class="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl text-xs md:text-sm hover:bg-indigo-500 transition">Save Configurations</button>
+</form>
+</div>
+
 </div>
 </div>
 
