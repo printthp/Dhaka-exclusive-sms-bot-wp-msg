@@ -974,19 +974,9 @@ def admin_portal():
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
     chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id ASC", (chat_with,), fetchall=True) or [] if chat_with else []
    # app.py এর ৯৭৬ নম্বর লাইনের আশেপাশে এভাবে লিখুন
-return render_template_string(
-    ADMIN_HTML, 
-    settings=s, 
-    msg=msg, 
-    orders=orders, 
-    users=users, 
-    chat_history=chat_history, 
-    active_chat=active_chat, 
-    complaints=complaints, 
-    products=products, 
-    agent_logs=agent_logs,
-    unread_chat_count=0  # এই লাইনটি যোগ করা বাধ্যতামূলক
-)
+    return render_template_string(ADMIN_HTML, settings=s, msg=msg, orders=orders, users=users,
+                                  products=products, complaints=complaints, agent_logs=agent_logs,unread_chat_count=0
+                                  active_chat=chat_with, chat_history=chat_history, DEFAULT_PRODUCT_IMAGE=DEFAULT_PRODUCT_IMAGE)
 
 @app.route("/admin/agents/add", methods=["POST"])
 def add_agent():
