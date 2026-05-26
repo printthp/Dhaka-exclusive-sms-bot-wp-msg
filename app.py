@@ -468,14 +468,12 @@ ADMIN_HTML = """<!DOCTYPE html>
 <h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2"><i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}</h1>
 <div class="text-xs text-slate-400 mt-1">ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span></div>
 </div>
-<nav class="p-3 grid grid-cols-2 md:flex md:flex-col gap-1 overflow-x-auto">
-<button onclick="switchTab('orders')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm bg-indigo-600 text-white font-bold transition"><i class="fa-solid fa-wallet"></i> অর্ডার প্যানেল</button>
-<button onclick="switchTab('livechat')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-comments"></i> লাইভ ইনবক্স</button>
-<button onclick="switchTab('complaints')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-triangle-exclamation"></i> কমপ্লেইন বক্স</button>
-<button onclick="switchTab('inventory')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-box-open"></i> প্রোডাক্ট সিঙ্ক</button>
-<button onclick="switchTab('agents')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-users"></i> প্রতিনিধি ট্র্যাকার</button>
-<button onclick="switchTab('config')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-sliders"></i> সেটিংস</button>
-<a href="/admin/logout" class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-rose-400 hover:bg-rose-950/20 transition mt-auto"><i class="fa-solid fa-right-from-bracket"></i> লগআউট</a>
+<nav class="p-3 flex-1 space-y-1">
+{% for id, icon, label in [('orders','fa-wallet','Orders'),('analytics','fa-chart-line','Analytics'),('livechat','fa-comments','Live Chat'),('complaints','fa-triangle-exclamation','Complaints'),('inventory','fa-box-open','Inventory'),('agents','fa-users','Agents'),('config','fa-sliders','Settings')] %}
+<button onclick="switchTab('{{ id }}')" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-slate-400 hover:bg-slate-800 transition">
+<i class="fa-solid {{ icon }} w-4"></i> {{ label }}
+</button>
+{% endfor %}
 </nav>
 </div>
 
