@@ -502,7 +502,6 @@ ADMIN_HTML = """<!DOCTYPE html>
             <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm">
                 <h3 class="font-bold mb-4">Update Status <span id="modal-order-id"></span></h3>
                 <form id="status-form" method="POST">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="status" class="w-full bg-slate-950 p-3 rounded-lg mb-4">
                         <option value="pending">Pending</option>
                         <option value="booked">Booked</option>
