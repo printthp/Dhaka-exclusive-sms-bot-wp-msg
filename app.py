@@ -35,35 +35,11 @@ application = app
 # =====================================================================
 # C++ ENGINE LOADER
 # =====================================================================
-lib = None
-try:
-    so_candidates = ["engine.so", "core_engine.so"]
-    for candidate in so_candidates:
-        if os.path.exists(candidate):
-            lib = ctypes.CDLL(os.path.abspath(candidate))
-            lib.process_business_logic.restype = ctypes.c_char_p
-            logger.info(f"C++ Engine loaded: {candidate}")
-            break
-    if not lib:
-        logger.warning("No C++ engine .so file found")
-except Exception as e:
-    logger.error(f"C++ Engine Load Error: {e}")
+
 
 # =====================================================================
 # ASSEMBLY ENGINE LOADER
 # =====================================================================
-asm_lib = None
-try:
-    if os.path.exists("asm_engine.so"):
-        asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
-        asm_lib.asm_process_command.restype = ctypes.c_char_p
-        asm_lib.asm_strlen.restype = ctypes.c_uint64
-        asm_lib.asm_checksum.restype = ctypes.c_uint64
-        logger.info("Assembly Engine loaded: asm_engine.so")
-    else:
-        logger.warning("No Assembly engine .so file found")
-except Exception as e:
-    logger.error(f"Assembly Engine Load Error: {e}")
 
 # =====================================================================
 # HYBRID ENGINES
