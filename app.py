@@ -766,7 +766,6 @@ data-phone="{{ u.phone }}">
 </div>
 {% if active_chat %}
 <form id="chat-form" action="/admin/chat/send" method="POST" class="p-3 bg-slate-900 border-t border-slate-800 flex gap-2">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="phone" value="{{ active_chat }}">
 <input type="text" id="chat-input" name="message" placeholder="এখানে উত্তর লিখুন..." autocomplete="off"
 class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none focus:border-indigo-500">
@@ -804,7 +803,6 @@ class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:tex
 <td class="p-4 text-right">
 {% if c.status == 'pending' %}
 <form action="/admin/complaint/resolve/{{ c.id }}" method="POST" class="flex flex-col md:flex-row gap-1 justify-end">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="text" name="notes" placeholder="সমাধান নোট..." required class="bg-slate-900 border border-slate-800 rounded p-1.5 text-xs text-white w-full md:w-40">
 <button type="submit" class="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold">Resolve</button>
 </form>
@@ -855,7 +853,6 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 <span class="text-xs text-slate-400">Stock: <span class="text-white font-bold">{{ p.stock }}</span></span>
 </div>
 <form class="edit-mode hidden" id="edit-{{ p.id }}" action="/admin/product/edit/{{ p.id }}" method="POST" style="display:none">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="text" name="name" value="{{ p.name }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white mb-1" required>
 <div class="flex gap-1">
 <input type="number" name="price" value="{{ p.price }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white" required>
@@ -889,7 +886,6 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 <div class="bg-slate-950 p-5 rounded-2xl border border-slate-800">
 <h3 class="text-slate-400 text-xs font-bold uppercase mb-4">নতুন প্রতিনিধি যোগ করুন</h3>
 <form action="/admin/agents/add" method="POST" class="space-y-3">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <div>
 <label class="block text-[10px] text-slate-500 mb-1">Username</label>
 <input type="text" name="username" placeholder="ইউজারনেম" required class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500">
@@ -944,7 +940,6 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 <div class="bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6 max-w-3xl">
 <div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
 <form action="/admin/settings/save" method="POST" class="space-y-6">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
 <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label>
 <input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none focus:border-indigo-500"></div>
@@ -985,7 +980,6 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
 <h3 class="font-bold text-sm text-white mb-4">Quick Status Update</h3>
 <form id="status-form" method="POST">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <div class="space-y-3">
 <div>
 <label class="block text-xs text-slate-400 mb-1">Order ID</label>
@@ -1015,7 +1009,6 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
 <h3 class="font-bold text-sm text-white mb-4">➕ Add New Product</h3>
 <form action="/admin/product/add" method="POST">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <div class="space-y-3">
 <div><label class="block text-xs text-slate-400 mb-1">Product Name</label>
 <input type="text" name="name" required class="w-full bg-slate-900 border border-slate-700 p-2.5 rounded-xl text-xs text-white"></div>
@@ -1038,8 +1031,7 @@ onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'">
 
 {# ====== JAVASCRIPT ====== #}
 <script>
-// CSRF Token for AJAX requests
-const CSRF_TOKEN = '{{ csrf_token() }}';
+// 
 
 // ========== TAB SWITCHING ==========
 function switchTab(tabId) {
