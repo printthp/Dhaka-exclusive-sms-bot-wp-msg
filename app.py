@@ -10,6 +10,7 @@ from datetime import datetime
 from threading import Thread, Lock
 
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
+from flask_wtf.csrf import CSRFProtect
 
 # =====================================================================
 # LOGGING
@@ -25,9 +26,8 @@ logger = logging.getLogger(__name__)
 # FLASK APP SETUP
 # =====================================================================
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY")
-if not app.secret_key:
-    raise ValueError("SECRET_KEY environment variable is required. Set a strong random string.")
+app.secret_key = os.environ.get("SECRET_KEY", "super-secret-key-change-this")
+csrf = CSRFProtect(app)
 
 # For Gunicorn deployment on Render
 application = app
@@ -35,19 +35,19 @@ application = app
 # =====================================================================
 # C++ ENGINE LOADER
 # =====================================================================
-lib = None
-try:
-    so_candidates = ["engine.so", "core_engine.so"]
-    for candidate in so_candidates:
-        if os.path.exists(candidate):
-            lib = ctypes.CDLL(os.path.abspath(candidate))
-            lib.process_business_logic.restype = ctypes.c_char_p
-            logger.info(f"C++ Engine loaded: {candidate}")
-            break
-    if not lib:
-        logger.warning("No C++ engine .so file found")
-except Exception as e:
-    logger.error(f"C++ Engine Load Error: {e}")
+#lib = None
+#try:
+    #so_candidates = ["engine.so", "core_engine.so"]
+    #for candidate in so_candidates:
+        #if os.path.exists(candidate):
+            #lib = ctypes.CDLL(os.path.abspath(candidate))
+            #lib.process_business_logic.restype = ctypes.c_char_p
+            #logger.info(f"C++ Engine loaded: {candidate}")
+            #break
+    #if not lib:
+        #logger.warning("No C++ engine .so file found")
+#except Exception as e:
+    #logger.error(f"C++ Engine Load Error: {e}")
 
 # =====================================================================
 # ASSEMBLY ENGINE LOADER (COMMENTED OUT - UNCOMMENT IF NEEDED)
@@ -918,8 +918,8 @@ function closeModal() { document.getElementById('status-modal').classList.add('h
 # FLASK ROUTES
 # =====================================================================
 
-@app.route("/")
-def index():
+@app.route("/admin/dashboard")
+def admin_dashboard():
     return redirect("/admin")
 
 @app.route("/health")
@@ -1064,7 +1064,7 @@ def resolve_complaint(cid):
     db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'RESOLVE_COMPLAINT', ?)", (agent, f"Resolved complaint ID: {cid}"), commit=True)
     return redirect("/admin?msg=Complaint resolved successfully!#complaints")
 
-@app.route("/admin/order/resolve-call/<int:order_id>")
+@app.route("/admin/order/resolve-call/<int:order_id>", methods=["POST"])
 def resolve_call_request(order_id):
     if not session.get("logged_in"):
         return redirect("/admin/login")
