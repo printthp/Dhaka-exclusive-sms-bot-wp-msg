@@ -657,7 +657,7 @@ data-search="{{ o.id }} {{ o.name }} {{ o.phone }} {{ o.agent_name }}">
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 <div class="bg-gradient-to-br from-indigo-950 to-slate-950 rounded-2xl border border-indigo-800/30 p-5">
 <div class="text-xs text-slate-400 uppercase mb-1">Today's Revenue</div>
-<div class="text-3xl font-black text-emerald-400">৳{{ analytics.today_revenue }}</div>
+<div class="text-3xl font-black text-emerald-400">৳{{ analytics.get('today_revenue', 0) if analytics else 0 }}</div>
 <div class="text-xs text-slate-500 mt-1">{% if analytics.revenue_change >= 0 %}<span class="text-emerald-400">↑</span>{% else %}<span class="text-rose-400">↓</span>{% endif %} {{ analytics.revenue_change }}% vs yesterday</div>
 </div>
 <div class="bg-gradient-to-br from-blue-950 to-slate-950 rounded-2xl border border-blue-800/30 p-5">
