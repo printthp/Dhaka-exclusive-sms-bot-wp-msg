@@ -485,7 +485,7 @@ body { background: #0f172a; }
 <aside class="w-full md:w-72 bg-slate-950 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col shrink-0">
 <div class="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center md:block text-center">
 <h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2">
-<i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}
+<i class="fa-solid fa-robot"></i>{{ settings.get('business_name', 'Dashboard') if settings else 'Dashboard' }}
 </h1>
 <div class="text-xs text-slate-400 mt-1">
 ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span>
