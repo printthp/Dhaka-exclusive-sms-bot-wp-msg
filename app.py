@@ -574,7 +574,7 @@ transition-all duration-200">
 <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
 <div>
 <h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
-<p class="text-xs text-slate-500 mt-1">মোট {{ orders|length }} টি অর্ডার</p>
+<p class="text-xs text-slate-500 mt-1">মোট {{ orders|default([])|length }} টি অর্ডার</p>
 </div>
 <div class="flex gap-2">
 <select id="order-filter" onchange="filterOrders()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
