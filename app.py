@@ -456,83 +456,236 @@ def process_webhook_async(msg, from_number):
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="bn">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Control Station</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultimate Control Station</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen font-sans antialiased flex flex-col md:flex-row">
 
-    <div class="w-full md:w-72 bg-slate-950 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col">
-        <div class="p-6 border-b border-slate-800 text-center">
-            <h1 class="text-xl font-black text-indigo-400"><i class="fa-solid fa-robot"></i> {{ settings.get('business_name', 'BOT') }}</h1>
-        </div>
-        <nav class="p-4 space-y-2">
-            <button onclick="switchTab('orders')" class="tab-btn w-full text-left p-3 rounded-xl bg-indigo-600 text-white font-bold"><i class="fa-solid fa-wallet mr-2"></i> অর্ডার প্যানেল</button>
-            <button onclick="switchTab('livechat')" class="tab-btn w-full text-left p-3 rounded-xl text-slate-400 hover:bg-slate-800"><i class="fa-solid fa-comments mr-2"></i> লাইভ ইনবক্স</button>
-            <button onclick="switchTab('inventory')" class="tab-btn w-full text-left p-3 rounded-xl text-slate-400 hover:bg-slate-800"><i class="fa-solid fa-box-open mr-2"></i> প্রোডাক্ট সিঙ্ক</button>
-            <button onclick="switchTab('config')" class="tab-btn w-full text-left p-3 rounded-xl text-slate-400 hover:bg-slate-800"><i class="fa-solid fa-sliders mr-2"></i> সেটিংস</button>
-            <a href="/admin/logout" class="block p-3 text-rose-400 hover:bg-rose-950/20 rounded-xl"><i class="fa-solid fa-right-from-bracket mr-2"></i> লগআউট</a>
-        </nav>
-    </div>
+<div class="w-full md:w-72 bg-slate-950 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col">
+<div class="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center md:block text-center">
+<h1 class="text-xl font-black text-indigo-400 tracking-wider flex items-center justify-center gap-2"><i class="fa-solid fa-robot"></i>{{ settings.get('business_name') }}</h1>
+<div class="text-xs text-slate-400 mt-1">ইউজার: <span class="text-emerald-400 font-bold">{{ session.get('username', 'Guest') }}</span></div>
+</div>
+<nav class="p-3 grid grid-cols-2 md:flex md:flex-col gap-1 overflow-x-auto">
+<button onclick="switchTab('orders')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm bg-indigo-600 text-white font-bold transition"><i class="fa-solid fa-wallet"></i> অর্ডার প্যানেল</button>
+<button onclick="switchTab('livechat')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-comments"></i> লাইভ ইনবক্স</button>
+<button onclick="switchTab('complaints')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-triangle-exclamation"></i> কমপ্লেইন বক্স</button>
+<button onclick="switchTab('inventory')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-box-open"></i> প্রোডাক্ট সিঙ্ক</button>
+<button onclick="switchTab('agents')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-users"></i> প্রতিনিধি ট্র্যাকার</button>
+<button onclick="switchTab('config')" class="tab-btn flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-slate-400 hover:bg-slate-800/50 transition"><i class="fa-solid fa-sliders"></i> সেটিংস</button>
+<a href="/admin/logout" class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs md:text-sm text-rose-400 hover:bg-rose-950/20 transition mt-auto"><i class="fa-solid fa-right-from-bracket"></i> লগআউট</a>
+</nav>
+</div>
 
-    <div class="flex-1 p-8 overflow-y-auto">
-        
-        <div id="tab-orders" class="tab-content">
-            <h2 class="text-2xl font-black mb-6">অর্ডার প্যানেল</h2>
-            <div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto">
-                <table class="w-full text-left">
-                    <thead class="bg-slate-900 border-b border-slate-800">
-                        <tr><th class="p-4">Customer</th><th class="p-4">Total</th><th class="p-4">Action</th></tr>
-                    </thead>
-                    <tbody>
-                    {% for o in orders %}
-                    <tr class="border-b border-slate-800">
-                        <td class="p-4">{{ o.name }}<br><span class="text-xs text-slate-500">{{ o.phone }}</span></td>
-                        <td class="p-4 text-emerald-400 font-bold">{{ o.total }}৳</td>
-                        <td class="p-4"><a href="/admin/order/book/{{ o.id }}" class="bg-indigo-600 px-4 py-2 rounded-lg text-sm font-bold">Pathao Book</a></td>
-                    </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+<div class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-x-hidden">
+{% if msg %}
+<div class="m-4 md:m-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold rounded-xl text-xs md:text-sm flex items-center gap-2"><i class="fa-solid fa-circle-check"></i> {{ msg }}</div>
+{% endif %}
 
-        <div id="tab-livechat" class="tab-content hidden">
-            <h2 class="text-2xl font-black mb-6">লাইভ ইনবক্স</h2>
-            <div class="bg-slate-950 p-6 rounded-2xl border border-slate-800 text-slate-400">চ্যাট হিস্ট্রি এখানে লোড হবে...</div>
-        </div>
+<div class="p-4 md:p-8 flex-1 overflow-y-auto">
 
-        <div id="tab-inventory" class="tab-content hidden">
-            <h2 class="text-2xl font-black mb-6">প্রোডাক্ট সিঙ্ক</h2>
-            <a href="/admin/sync-facebook-trigger" class="bg-indigo-600 px-6 py-3 rounded-xl font-bold">Sync Facebook Catalog</a>
-        </div>
+<div id="tab-orders" class="tab-content space-y-6">
+<h2 class="text-xl md:text-2xl font-black">অর্ডার ট্র্যাকিং ও বুকিং</h2>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
+<table class="w-full text-left text-xs md:text-sm min-w-[600px]">
+<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400 uppercase">
+<th class="p-4">Customer</th><th class="p-4">Address</th><th class="p-4">COD Total</th><th class="p-4">Agent Assigned</th><th class="p-4 text-right">Actions</th>
+</tr></thead>
+<tbody>
+{% for o in orders %}
+<tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
+<td class="p-4">
+<span class="font-mono text-indigo-400 font-bold">#{{ o.id }}</span>
+{% if o.pathao_consignment_id == 'CALL_REQUEST' %}<span class="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">Call Request</span>{% endif %}<br>
+<b class="text-white">{{ o.name }}</b><br><span class="text-xs text-slate-500">{{ o.phone }}</span>
+</td>
+<td class="p-4 text-xs max-w-xs truncate">{{ o.address }}</td>
+<td class="p-4 font-bold text-emerald-400">{{ o.total }}৳</td>
+<td class="p-4 text-slate-300 font-medium">{{ o.agent_name }}</td>
+<td class="p-4 text-right space-y-1 md:space-y-0 md:space-x-1">
+<a href="/invoice/{{ o.id }}" target="_blank" class="inline-block p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-xs"><i class="fa-solid fa-print"></i></a>
+{% if o.status == 'pending' and o.pathao_consignment_id != 'CALL_REQUEST' %}
+<a href="/admin/order/book/{{ o.id }}" class="inline-block p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold">Pathao Book</a>
+{% endif %}
+{% if o.status == 'pending' and o.pathao_consignment_id == 'CALL_REQUEST' %}
+<a href="/admin/order/resolve-call/{{ o.id }}" class="inline-block p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold">Call Done</a>
+{% endif %}
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
 
-        <div id="tab-config" class="tab-content hidden">
-            <h2 class="text-2xl font-black mb-6">সিস্টেম সেটিংস</h2>
-            <form action="/admin/settings/save" method="POST" class="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-4">
-                <div class="grid grid-cols-2 gap-4">
-                    <input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" placeholder="Business Name" class="bg-slate-900 p-3 rounded-xl border border-slate-800 w-full">
-                    <input type="text" name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" placeholder="Pathao Store ID" class="bg-slate-900 p-3 rounded-xl border border-slate-800 w-full">
-                </div>
-                <input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" placeholder="Gemini API Key" class="bg-slate-900 p-3 rounded-xl border border-slate-800 w-full">
-                <button type="submit" class="w-full bg-indigo-600 py-3 rounded-xl font-bold">Save Configuration</button>
-            </form>
-        </div>
-    </div>
+<div id="tab-livechat" class="tab-content hidden grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+<div class="bg-slate-950 rounded-2xl border border-slate-800 p-4 h-[50vh] md:h-full overflow-y-auto">
+<h3 class="text-xs font-bold text-slate-400 uppercase mb-4">কাস্টমার লিস্ট</h3>
+<div class="space-y-2">
+{% for u in users %}
+<a href="/admin?chat_with={{ u.phone }}#livechat" class="block p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/50 transition">
+<div class="font-bold text-white text-xs md:text-sm">{{ u.phone }}</div>
+</a>
+{% endfor %}
+</div>
+</div>
+<div class="md:col-span-2 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col h-[50vh] md:h-full overflow-hidden">
+<div class="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-xs md:text-sm">
+<div class="font-bold text-indigo-400">💬 কাস্টমার: {{ active_chat or 'সিলেক্ট করুন' }}</div>
+{% if active_chat %}<a href="/admin/chat/toggle-bot/{{ active_chat }}" class="px-2 py-1 bg-amber-500 text-slate-950 rounded-lg font-bold text-xs">বট পজ/অন</a>{% endif %}
+</div>
+<div class="flex-1 p-4 overflow-y-auto space-y-3 flex flex-col">
+{% for m in chat_history %}
+<div class="max-w-xs md:max-w-md p-3 rounded-2xl text-xs {% if m.direction == 'inbound' %}bg-slate-800 text-white self-start{% else %}bg-indigo-600 text-white self-end{% endif %}">
+<div class="font-semibold text-[10px] text-slate-400 mb-0.5">{{ m.agent_id }}</div>
+<div>{{ m.content }}</div>
+</div>
+{% endfor %}
+</div>
+{% if active_chat %}
+<form action="/admin/chat/send" method="POST" class="p-3 bg-slate-900 border-t border-slate-800 flex gap-2">
+<input type="hidden" name="phone" value="{{ active_chat }}">
+<input type="text" name="message" placeholder="এখানে উত্তর লিখুন..." class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none">
+<button type="submit" class="bg-indigo-600 text-white px-4 md:px-5 rounded-xl text-xs font-bold hover:bg-indigo-500"><i class="fa-solid fa-paper-plane"></i></button>
+</form>
+{% endif %}
+</div>
+</div>
 
-    <script>
-    function switchTab(tabId) {
-        document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-        document.getElementById('tab-' + tabId).classList.remove('hidden');
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.classList.remove('bg-indigo-600', 'text-white');
-            btn.classList.add('text-slate-400');
-        });
-        event.currentTarget.classList.add('bg-indigo-600', 'text-white');
-        event.currentTarget.classList.remove('text-slate-400');
-    }
-    </script>
+<div id="tab-complaints" class="tab-content hidden space-y-6">
+<h2 class="text-xl md:text-2xl font-black text-rose-400">⚠️ কাস্টমার কমপ্লেইন বক্স</h2>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto shadow-2xl">
+<table class="w-full text-left text-xs md:text-sm min-w-[600px]">
+<thead><tr class="bg-slate-900 border-b border-slate-800 text-slate-400"><th class="p-4">Customer</th><th class="p-4">Complaint Note</th><th class="p-4">Status</th><th class="p-4">Resolved By</th><th class="p-4 text-right">Action</th></tr></thead>
+<tbody>
+{% for c in complaints %}
+<tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
+<td class="p-4 font-bold">{{ c.phone }}<br><span class="text-[10px] text-slate-500">{{ c.created_at }}</span></td>
+<td class="p-4 text-xs max-w-xs whitespace-normal">{{ c.complaint_text }}</td>
+<td class="p-4"><span class="px-2 py-0.5 rounded text-[11px] font-bold {% if c.status=='pending' %}bg-rose-500/20 text-rose-400{% else %}bg-emerald-500/20 text-emerald-400{% endif %}">{{ c.status.upper() }}</span></td>
+<td class="p-4 text-xs"><b>{{ c.resolved_by or '-' }}</b><br><span class="text-slate-400 text-[11px]">{{ c.resolution_notes }}</span></td>
+<td class="p-4 text-right">
+{% if c.status == 'pending' %}
+<form action="/admin/complaint/resolve/{{ c.id }}" method="POST" class="flex flex-col md:flex-row gap-1 justify-end">
+<input type="text" name="notes" placeholder="সমাধান নোট লিখুন..." required class="bg-slate-900 border border-slate-800 rounded p-1 text-xs text-white">
+<button type="submit" class="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold">Resolve</button>
+</form>
+{% else %}<span class="text-slate-500 text-xs"><i class="fa-solid fa-circle-check text-emerald-500"></i> Solved</span>{% endif %}
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div id="tab-inventory" class="tab-content hidden space-y-6">
+<div class="bg-gradient-to-r from-indigo-950 to-blue-950 border border-indigo-500/20 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+<h3 class="text-sm md:text-base font-black text-white">মেটা ক্যাটালগ অটো সিঙ্ক ইঞ্জিন</h3>
+<a href="/admin/sync-facebook-trigger" class="w-full md:w-auto text-center bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-lg">Sync Meta Catalogue</a>
+</div>
+<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto">
+<table class="w-full text-left text-xs md:text-sm min-w-[500px]">
+<thead><tr class="bg-slate-900 text-slate-400"><th class="p-4">Product ID</th><th class="p-4">Image</th><th class="p-4">Details</th><th class="p-4">Price</th><th class="p-4">Edit</th></tr></thead>
+<tbody>
+{% for p in products %}
+<tr class="border-b border-slate-800/40" id="prod-row-{{ p.id }}">
+<td class="p-4 font-mono text-xs text-slate-500">{{ p.fb_product_id or 'Manual' }}</td>
+<td class="p-4"><img src="{{ p.image_url or DEFAULT_PRODUCT_IMAGE }}" class="h-10 w-10 object-cover rounded-lg" onerror="this.src='{{ DEFAULT_PRODUCT_IMAGE }}'"></td>
+<td class="p-4">
+<div class="view-mode" id="view-{{ p.id }}"><b class="text-white">{{ p.name }}</b><br><span class="text-xs text-slate-400">Stock: {{ p.stock }}</span></div>
+<form class="edit-mode hidden" id="edit-{{ p.id }}" action="/admin/product/edit/{{ p.id }}" method="POST" style="display:none">
+<input type="text" name="name" value="{{ p.name }}" class="w-full bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white mb-1" required><br>
+<input type="number" name="price" value="{{ p.price }}" class="w-20 bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white mr-1" required>
+<input type="number" name="stock" value="{{ p.stock }}" class="w-16 bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white"><br>
+<input type="text" name="image_url" value="{{ p.image_url or '' }}" placeholder="Image URL" class="w-full bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white mt-1">
+<button type="submit" class="mt-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded">Save</button>
+</form>
+</td>
+<td class="p-4 font-bold text-emerald-400">{{ p.price }}৳</td>
+<td class="p-4"><button onclick="toggleEdit({{ p.id }})" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded font-bold" id="btn-{{ p.id }}">Edit</button></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div id="tab-agents" class="tab-content hidden space-y-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<div class="bg-slate-950 p-5 rounded-2xl border border-slate-800">
+<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">নতুন প্রতিনিধি যোগ করুন</h3>
+<form action="/admin/agents/add" method="POST" class="space-y-3">
+<input type="text" name="username" placeholder="ইউজারনেম" required class="w-full bg-slate-900 border border-slate-800 p-2 rounded-xl text-xs text-white">
+<input type="password" name="password" placeholder="পাসওয়ার্ড" required class="w-full bg-slate-900 border border-slate-800 p-2 rounded-xl text-xs text-white">
+<button type="submit" class="w-full bg-indigo-600 p-2 text-xs font-bold rounded-xl text-white">Save Agent</button>
+</form>
+</div>
+<div class="md:col-span-2 bg-slate-950 p-5 rounded-2xl border border-slate-800 overflow-x-auto">
+<h3 class="text-slate-400 text-xs font-bold uppercase mb-4">প্রতিনিধিদের কর্মক্ষমতা লগ</h3>
+<table class="w-full text-left text-xs">
+<thead><tr class="bg-slate-900 text-slate-400"><th class="p-2">Agent Name</th><th class="p-2">Action</th><th class="p-2">Details</th><th class="p-2">Time</th></tr></thead>
+<tbody>
+{% for l in agent_logs %}
+<tr class="border-b border-slate-800/50">
+<td class="p-2 font-bold text-indigo-400">{{ l.username }}</td>
+<td class="p-2"><span class="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-[10px]">{{ l.action }}</span></td>
+<td class="p-2 text-slate-300 max-w-xs truncate">{{ l.details }}</td>
+<td class="p-2 text-slate-500">{{ l.timestamp }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div id="tab-config" class="tab-content hidden bg-slate-950 rounded-2xl border border-slate-800 p-4 md:p-6">
+<div class="font-bold text-sm md:text-base text-slate-300 mb-6 border-b border-slate-800 pb-3">সিস্টেম প্যারামিটার কনফিগ</div>
+<form action="/admin/settings/save" method="POST" class="space-y-6">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:grid-cols-2 gap-6">
+<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Business Brand Name</label><input type="text" name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
+<div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Phone ID</label><input type="text" name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
+<div class="md:col-span-2"><label class="block text-xs font-bold text-slate-400 uppercase mb-2">WhatsApp Permanent Token</label><input type="password" name="permanent_token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-xs md:text-sm text-white focus:outline-none"></div>
+<div class="md:col-span-2 p-4 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-3">
+<div class="font-bold text-xs text-indigo-400 uppercase">Google Gemini AI Config</div>
+<div><input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white"></div>
+<div><textarea name="ai_system_instruction" rows="3" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-white">{{ settings.get('ai_system_instruction', '') }}</textarea></div>
+</div>
+</div>
+<button type="submit" class="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl text-xs md:text-sm hover:bg-indigo-500 transition">Save Configurations</button>
+</form>
+</div>
+
+</div>
+</div>
+
+<script>
+function toggleEdit(id) {
+const viewEl = document.getElementById('view-' + id);
+const editEl = document.getElementById('edit-' + id);
+const btnEl = document.getElementById('btn-' + id);
+if (editEl.style.display === 'none') {
+viewEl.style.display = 'none'; editEl.style.display = 'block'; btnEl.innerText = 'Cancel';
+} else {
+viewEl.style.display = 'block'; editEl.style.display = 'none'; btnEl.innerText = 'Edit';
+}
+}
+function switchTab(tabId) {
+document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+document.getElementById('tab-' + tabId).classList.remove('hidden');
+document.querySelectorAll('.tab-btn').forEach(btn => {
+btn.classList.remove('bg-indigo-600','text-white','font-bold');
+btn.classList.add('text-slate-400');
+});
+const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick') === "switchTab('" + tabId + "')");
+if (activeBtn) { activeBtn.classList.add('bg-indigo-600','text-white','font-bold'); activeBtn.classList.remove('text-slate-400'); }
+}
+const hash = window.location.hash.replace('#','');
+if (hash) switchTab(hash);
+</script>
 </body>
 </html>"""
 
