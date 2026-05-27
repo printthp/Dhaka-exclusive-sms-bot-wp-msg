@@ -1011,27 +1011,48 @@ def admin_portal():
     if not session.get("logged_in"):
         return redirect("/admin/login")
     
-    # ... আগের সব ডেটা কুয়েরি ...
+    # প্রথমে সব ভেরিয়েবল নিশ্চিত করুন
+    s = get_all_settings() # সেশন সেটিংস
+    msg = request.args.get("msg", "")
+    chat_with = request.args.get("chat_with", "")
     
-    # নতুন করে stats হিসাব করার লজিক
     orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
-    
+    users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
+    products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+    complaints = db_query("SELECT * FROM complaints ORDER BY id DESC", fetchall=True) or []
+    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id ASC", (chat_with,), fetchall=True) or [] if chat_with else []
+
+    # পরিসংখ্যান (Stats) হিসাব
     stats = {
         'pending': len([o for o in orders if o['status'] == 'pending']),
         'booked': len([o for o in orders if o['status'] == 'booked']),
         'delivered': len([o for o in orders if o['status'] == 'delivered']),
         'call_request': len([o for o in orders if o['pathao_consignment_id'] == 'CALL_REQUEST'])
     }
+    
+    # কাউন্ট হিসাব
+    pending_complaints = db_query("SELECT count(*) as cnt FROM complaints WHERE status='pending'", fetchone=True)
+    pending_complaints_count = pending_complaints['cnt'] if pending_complaints else 0
+    unread_chat_count = 0 
 
-    # বাকি ভেরিয়েবলগুলো আগে যা ছিল তাই থাকবে
-    return render_template_string(ADMIN_HTML, 
-                                  settings=s, msg=msg, orders=orders, 
-                                  users=users, products=products, 
-                                  complaints=complaints, agent_logs=agent_logs,
-                                  active_chat=chat_with, chat_history=chat_history,
-                                  pending_complaints_count=pending_complaints_count,
-                                  unread_chat_count=unread_chat_count,
-                                  stats=stats) # <--- এই stats ভেরিয়েবলটি যোগ করুন
+    # রেন্ডার করা
+    return render_template_string(
+        ADMIN_HTML, 
+        settings=s, 
+        msg=msg, 
+        orders=orders, 
+        users=users,
+        products=products, 
+        complaints=complaints, 
+        agent_logs=agent_logs,
+        active_chat=chat_with, 
+        chat_history=chat_history, 
+        DEFAULT_PRODUCT_IMAGE=DEFAULT_PRODUCT_IMAGE,
+        pending_complaints_count=pending_complaints_count,
+        unread_chat_count=unread_chat_count,
+        stats=stats
+    )
     
 @app.route("/admin/agents/add", methods=["POST"])
 def add_agent():
