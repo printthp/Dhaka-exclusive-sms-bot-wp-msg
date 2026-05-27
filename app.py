@@ -368,5 +368,28 @@ def print_invoice(order_id):
     if not order: return "Not Found", 404
     return f"<h1>Invoice #{order['id']}</h1><p>Customer: {order['name']}</p><p>Total: {order['total']} BDT</p><button onclick='window.print()'>Print</button>"
 
+# app.py এর একদম নিচের দিকে এই অংশটি খুঁজুন এবং রিপ্লেস করুন
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # ডাটাবেস টেবিলগুলো তৈরি করার জন্য এই অংশটি যোগ করুন
+    with db_lock:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        # এখানে সব প্রয়োজনীয় টেবিল একসাথে তৈরি করা হচ্ছে
+        c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, stock INTEGER, image_url TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS complaints (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, complaint_text TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
+        
+        # ডিফল্ট অ্যাডমিন এবং সেটিংস যোগ করা (যদি না থাকে)
+        c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
+        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Dhaka Exclusive')")
+        conn.commit()
+        conn.close()
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
