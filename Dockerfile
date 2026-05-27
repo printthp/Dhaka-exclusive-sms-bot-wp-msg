@@ -1,16 +1,25 @@
-# ১. পাইথন ইমেজ ব্যবহার করে পাইথন লজিক ও Flask সার্ভার রান করবে
+# পাইথন বেস ইমেজ
 FROM python:3.10-slim
 
-# ২. সার্ভারে C++ এবং Assembly টুলসগুলো ইন্সটল করে নেবে
-RUN apt-get update && apt-get install -y nasm g++ make gcc
+# প্রয়োজনীয় বিল্ড টুলস ইন্সটল
+RUN apt-get update && apt-get install -y \
+    nasm \
+    g++ \
+    make \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# ৩. আপনার সব ফাইল কপি করবে
+# কাজের ডিরেক্টরি
 WORKDIR /app
+
+# সব ফাইল কপি করা
 COPY . .
 
-# ৪. Makefile চালিয়ে ইঞ্জিনগুলোকে বাইনারি ফাইলে রূপান্তর করবে (এটিই আপনার মেইন পাওয়ার)
+# ইঞ্জিন কম্পাইল করা
 RUN make
 
-# ৫. সব ডিপেন্ডেন্সি ইন্সটল করে ওয়েব সার্ভার চালু করবে
-RUN pip install -r requirements.txt
+# পাইথন লাইব্রেরি ইন্সটল
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Gunicorn দিয়ে সার্ভার চালু করা
 CMD gunicorn --bind 0.0.0.0:$PORT app:application
