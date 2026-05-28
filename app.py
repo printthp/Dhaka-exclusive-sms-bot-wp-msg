@@ -351,5 +351,133 @@ def admin_logout():
     session.clear()
     return redirect("/admin/login")
 
+# =====================================================================
+# GEMINI AI & WHATSAPP CLOUD API INTEGRATION
+# =====================================================================
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
+VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
+
+def get_gemini_reply(user_message: str) -> str:
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY missing")
+        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        system_prompt = (
+            "তুমি Dhaka Exclusive নামক একটি ই-কমার্স স্টোরের AI সহায়ক। "
+            "তুমি বাংলা এবং ইংরেজি উভয় ভাষায় কথা বলতে পারো। "
+            "গ্রাহকদের অর্ডার, পণ্য এবং ডেলিভারি সম্পর্কিত তথ্য দাও। "
+            "সংক্ষিপ্ত এবং সুন্দরভাবে উত্তর দাও।"
+        )
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": f"{system_prompt}\n\nCustomer: {user_message}"}]
+            }]
+        }
+        headers = {"Content-Type": "application/json"}
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        res = r.json()
+        candidates = res.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                return parts[0].get("text", "").strip()
+        logger.error(f"Gemini unexpected response: {res}")
+        return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
+    except Exception as e:
+        logger.error(f"Gemini API error: {e}")
+        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
+
+def send_whatsapp_message(to_phone: str, message: str) -> bool:
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning("WhatsApp credentials missing")
+        return False
+    try:
+        url = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to_phone,
+            "type": "text",
+            "text": {"body": message}
+        }
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        if r.status_code in (200, 201):
+            logger.info(f"WhatsApp message sent to {to_phone}")
+            return True
+        logger.error(f"WhatsApp send failed: {r.status_code} {r.text}")
+        return False
+    except Exception as e:
+        logger.error(f"WhatsApp send error: {e}")
+        return False
+
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            logger.info("Webhook verified successfully.")
+            return challenge, 200
+        logger.warning(f"Webhook verification failed. mode={mode}, token={token}")
+        return "Verification failed", 403
+
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        logger.info(f"Webhook received: {json.dumps(data, ensure_ascii=False)}")
+        try:
+            entry_list = data.get("entry", [])
+            for entry in entry_list:
+                changes = entry.get("changes", [])
+                for change in changes:
+                    value = change.get("value", {})
+                    if value.get("messaging_product") != "whatsapp":
+                        continue
+                    messages = value.get("messages", [])
+                    contacts = value.get("contacts", [])
+                    sender_name = contacts[0].get("profile", {}).get("name", "Customer") if contacts else "Customer"
+                    for msg in messages:
+                        if msg.get("type") != "text":
+                            continue
+                        phone = msg.get("from", "")
+                        content = msg.get("text", {}).get("body", "")
+                        if not phone or not content:
+                            continue
+                        db_query(
+                            "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', ?)",
+                            (phone, content, "whatsapp"),
+                            commit=True
+                        )
+                        db_query(
+                            "INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)",
+                            (phone, sender_name),
+                            commit=True
+                        )
+                        db_query(
+                            "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?",
+                            (phone,),
+                            commit=True
+                        )
+                        logger.info(f"Received from {phone}: {content}")
+                        reply = get_gemini_reply(content)
+                        sent = send_whatsapp_message(phone, reply)
+                        if sent:
+                            db_query(
+                                "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
+                                (phone, reply, "gemini_ai"),
+                                commit=True
+                            )
+        except Exception as e:
+            logger.error(f"Webhook processing error: {e}")
+        return "EVENT_RECEIVED", 200
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
