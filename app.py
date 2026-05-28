@@ -136,13 +136,22 @@ def admin_portal():
     chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id ASC", (chat_with,), fetchall=True) or [] if chat_with else []
 
     # টেমপ্লেট ফাইল থেকে রেন্ডার করা (আপনার templates ফোল্ডার থাকতে হবে)
-    try:
+   try:
         return render_template(f"{tab}.html", 
-                               settings=s, analytics=analytics, orders=orders, 
-                               users=users, unread_chat_count=unread_chat_count,
-                               active_chat=chat_with, chat_history=chat_history)
-    except:
-        return f"<h1>Error: Template '{tab}.html' not found in templates/ folder.</h1>"
+                               settings=s, 
+                               analytics=analytics, 
+                               orders=orders, 
+                               users=users, 
+                               products=products, 
+                               agent_logs=agent_logs, 
+                               unread_chat_count=unread_chat_count,
+                               pending_complaints_count=pending_complaints_count,
+                               active_chat=chat_with,
+                               chat_history=chat_history)
+    except Exception as e:
+        logger.error(f"Template rendering error: {e}")
+        return f"<h1>Error: '{tab}.html' ফাইলটি 'templates' ফোল্ডারে পাওয়া যায়নি।</h1>"
+
 
 @app.route("/admin/logout")
 def admin_logout():
