@@ -3,185 +3,116 @@
 {% block content %}
 
 <style>
-    .chat-page {
-        max-width: 900px;
-        margin: 0 auto;
-        display: flex;
-        flex-direction: column;
-        min-height: 100%;
-    }
-    .chat-header-sticky {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        background: rgba(15, 23, 42, 0.95);
-        backdrop-filter: blur(10px);
-        border-bottom: 1px solid rgba(255,255,255,0.06);
-        padding: 14px 0;
-        margin-bottom: 12px;
-    }
-    .messages-list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        padding-bottom: 20px;
-    }
-    .msg-in {
-        align-self: flex-start;
-        background: rgba(30, 41, 59, 0.95);
-        padding: 10px 14px;
-        border-radius: 16px 16px 16px 4px;
-        max-width: 80%;
-        word-break: break-word;
-        font-size: 14px;
-        border: 1px solid rgba(255,255,255,0.04);
-    }
-    .msg-out {
-        align-self: flex-end;
-        background: linear-gradient(135deg, #6366f1, #818cf8);
-        color: white;
-        padding: 10px 14px;
-        border-radius: 16px 16px 4px 16px;
-        max-width: 80%;
-        word-break: break-word;
-        font-size: 14px;
-    }
-    .msg-time {
-        font-size: 10px;
-        opacity: 0.5;
-        margin-top: 4px;
-        display: block;
-    }
-    .chat-input-sticky {
-        position: sticky;
-        bottom: 0;
-        z-index: 10;
-        background: rgba(15, 23, 42, 0.98);
-        border-top: 1px solid rgba(255,255,255,0.06);
-        padding: 12px 0;
-        margin-top: auto;
-    }
-    .input-bar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        background: rgba(30, 41, 59, 0.8);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 24px;
-        padding: 6px 6px 6px 14px;
-    }
-    .input-bar input {
-        flex: 1;
-        background: transparent;
-        border: none;
-        color: #e2e8f0;
-        font-size: 15px;
-        padding: 6px 0;
-        outline: none;
-    }
-    .input-bar input::placeholder { color: #64748b; }
-    .ibtn {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        cursor: pointer;
-        font-size: 14px;
-        flex-shrink: 0;
-        text-decoration: none;
-    }
-    .ibtn-img { background: rgba(16,185,129,0.12); color: #34d399; }
-    .ibtn-voice { background: rgba(245,158,11,0.12); color: #fbbf24; }
-    .ibtn-call { background: rgba(99,102,241,0.12); color: #818cf8; }
+    /* === DYNAMIC CHAT LAYOUT === */
+    .chat-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 800px; margin: 0 auto; }
+    .chat-card { background: rgba(30,41,59,0.5); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; overflow: hidden; }
+    .chat-header { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between; }
+    .chat-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #a855f7); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px; }
+    .chat-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; }
+    @media (min-width: 768px) { .chat-body { max-height: 60vh; } }
+    .msg-in { align-self: flex-start; background: rgba(30,41,59,0.9); padding: 10px 14px; border-radius: 16px 16px 16px 4px; max-width: 80%; word-break: break-word; font-size: 14px; border: 1px solid rgba(255,255,255,0.04); }
+    .msg-out { align-self: flex-end; background: linear-gradient(135deg, #6366f1, #818cf8); color: white; padding: 10px 14px; border-radius: 16px 16px 4px 16px; max-width: 80%; word-break: break-word; font-size: 14px; }
+    .msg-time { font-size: 10px; opacity: 0.5; margin-top: 4px; display: block; }
+    .chat-footer { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.05); background: rgba(15,23,42,0.8); }
+    .input-wrap { display: flex; align-items: center; gap: 8px; background: rgba(30,41,59,0.8); border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 6px 6px 6px 14px; }
+    .input-wrap input { flex: 1; background: transparent; border: none; color: #e2e8f0; font-size: 15px; outline: none; }
+    .input-wrap input::placeholder { color: #64748b; }
+    .ibtn { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: none; cursor: pointer; font-size: 14px; flex-shrink: 0; text-decoration: none; }
+    .ibtn-green { background: rgba(16,185,129,0.15); color: #34d399; }
+    .ibtn-amber { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .ibtn-indigo { background: rgba(99,102,241,0.15); color: #818cf8; }
     .ibtn-send { background: linear-gradient(135deg, #6366f1, #818cf8); color: white; }
-    .empty-chat {
-        text-align: center;
-        padding: 60px 20px;
-        color: #475569;
-    }
+    .contact-list { display: flex; flex-direction: column; gap: 8px; }
+    .contact-item { display: flex; align-items: center; justify-content: space-between; padding: 14px; background: rgba(30,41,59,0.5); border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); text-decoration: none; color: inherit; transition: all 0.2s; }
+    .contact-item:hover, .contact-item.active { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.2); }
+    .contact-phone { font-weight: bold; color: white; font-size: 14px; }
+    .contact-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .empty { text-align: center; padding: 50px 20px; color: #475569; }
 </style>
 
-<div class="chat-page">
-    <!-- Header -->
-    <div class="chat-header-sticky">
-        <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
-                    {{ active_chat[-4:] if active_chat else '?' }}
-                </div>
+<div class="chat-wrap">
+    <!-- Customer List -->
+    <div class="chat-card">
+        <div class="chat-header">
+            <h3 class="font-bold text-white"><i class="fa-solid fa-users text-indigo-400 mr-2"></i>Active Customers</h3>
+            <span class="text-xs bg-indigo-600/20 text-indigo-400 px-3 py-1 rounded-full">{{ users|length }} total</span>
+        </div>
+        <div class="chat-body contact-list">
+            {% for user in users %}
+            <a href="/admin?tab=chat&chat_with={{ user.phone }}" class="contact-item {% if active_chat == user.phone %}active{% endif %}">
                 <div>
-                    <h2 class="font-bold text-white text-sm">{{ active_chat or 'Select Chat' }}</h2>
-                    {% if active_chat %}
-                    <p class="text-[10px] text-emerald-400 flex items-center gap-1">
+                    <div class="contact-phone">{{ user.phone }}</div>
+                    <div class="contact-meta">{{ user.name or 'Customer' }} &bull; {{ user.last_active }}</div>
+                </div>
+                <i class="fa-solid fa-chevron-right text-slate-600 text-xs"></i>
+            </a>
+            {% else %}
+            <div class="empty">No customers yet</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Chat Area -->
+    {% if active_chat %}
+    <div class="chat-card">
+        <div class="chat-header">
+            <div class="flex items-center gap-3">
+                <div class="chat-avatar">{{ active_chat[-4:] }}</div>
+                <div>
+                    <div class="font-bold text-white text-sm">{{ active_chat }}</div>
+                    <div class="text-[10px] text-emerald-400 flex items-center gap-1">
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Online
-                    </p>
-                    {% endif %}
+                    </div>
                 </div>
             </div>
-            {% if active_chat %}
             <div class="flex items-center gap-2">
-                <a href="tel:{{ active_chat }}" class="ibtn ibtn-call" title="Call"><i class="fa-solid fa-phone"></i></a>
-                <a href="/admin/chat/delete/{{ active_chat }}" class="ibtn" style="background:rgba(244,63,94,0.12);color:#fb7185;" onclick="return confirm('Delete?')" title="Delete"><i class="fa-solid fa-trash"></i></a>
+                <a href="tel:{{ active_chat }}" class="ibtn ibtn-indigo" title="Call"><i class="fa-solid fa-phone"></i></a>
+                <a href="/admin/chat/delete/{{ active_chat }}" class="ibtn" style="background:rgba(244,63,94,0.15);color:#fb7185;" onclick="return confirm('Delete chat?')" title="Delete"><i class="fa-solid fa-trash"></i></a>
             </div>
-            {% endif %}
         </div>
-    </div>
 
-    <!-- Messages -->
-    <div class="messages-list" id="msgBox">
-        {% if not active_chat %}
-        <div class="empty-chat">
-            <i class="fa-solid fa-comments text-4xl mb-3 opacity-30"></i>
-            <p class="font-semibold text-sm">Select a customer to chat</p>
+        <div class="chat-body" id="msgBox">
+            {% for msg in chat_history %}
+            <div class="{% if msg.direction == 'outbound' %}msg-out{% else %}msg-in{% endif %}">
+                {{ msg.content }}
+                <span class="msg-time">{{ msg.created_at or '' }}</span>
+            </div>
+            {% endfor %}
         </div>
-        {% else %}
-        {% for m in chat_history %}
-        <div class="{% if m.direction == 'outbound' %}msg-out{% else %}msg-in{% endif %}">
-            {{ m.content }}
-            <span class="msg-time">{{ m.created_at or '' }}</span>
+
+        <div class="chat-footer">
+            <form action="/admin/chat/send" method="POST" class="input-wrap" enctype="multipart/form-data">
+                <input type="hidden" name="phone" value="{{ active_chat }}">
+
+                <label class="ibtn ibtn-green cursor-pointer" title="Send Image">
+                    <i class="fa-solid fa-image"></i>
+                    <input type="file" name="image" accept="image/*" class="hidden" onchange="this.form.submit()">
+                </label>
+
+                <button type="button" class="ibtn ibtn-amber" title="Voice Note" onclick="alert('Voice recording coming soon!')">
+                    <i class="fa-solid fa-microphone"></i>
+                </button>
+
+                <a href="tel:{{ active_chat }}" class="ibtn ibtn-indigo" title="Call Customer">
+                    <i class="fa-solid fa-phone"></i>
+                </a>
+
+                <input type="text" name="message" placeholder="Type a message..." autocomplete="off" required>
+
+                <button type="submit" class="ibtn ibtn-send" title="Send Message">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </form>
         </div>
-        {% endfor %}
-        {% endif %}
-    </div>
-
-    <!-- Input (sticky bottom) -->
-    {% if active_chat %}
-    <div class="chat-input-sticky">
-        <form action="/admin/chat/send" method="POST" class="input-bar" enctype="multipart/form-data">
-            <input type="hidden" name="phone" value="{{ active_chat }}">
-
-            <label class="ibtn ibtn-img cursor-pointer" title="Image">
-                <i class="fa-solid fa-image"></i>
-                <input type="file" name="image" accept="image/*" class="hidden" onchange="this.form.submit()">
-            </label>
-
-            <button type="button" class="ibtn ibtn-voice" title="Voice" onclick="alert('Coming soon!')">
-                <i class="fa-solid fa-microphone"></i>
-            </button>
-
-            <a href="tel:{{ active_chat }}" class="ibtn ibtn-call" title="Call">
-                <i class="fa-solid fa-phone"></i>
-            </a>
-
-            <input type="text" name="message" placeholder="Type message..." autocomplete="off" required>
-
-            <button type="submit" class="ibtn ibtn-send" title="Send">
-                <i class="fa-solid fa-paper-plane"></i>
-            </button>
-        </form>
     </div>
     {% endif %}
 </div>
 
 <script>
-    // Scroll to bottom on load
-    const box = document.getElementById('msgBox');
-    if (box && box.lastElementChild) {
-        box.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
+    (function() {
+        const box = document.getElementById('msgBox');
+        if (box) box.scrollTop = box.scrollHeight;
+    })();
 </script>
 
 {% endblock %}
