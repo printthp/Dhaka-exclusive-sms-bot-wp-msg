@@ -1,27 +1,121 @@
 {% extends "base.html" %}
-{% block title %}Settings{% endblock %}
+{% block title %}Advanced Settings{% endblock %}
 {% block content %}
-<div class="max-w-2xl mx-auto">
-    <div class="mb-8">
-        <h2 class="text-3xl font-black text-white">সিস্টেম কনফিগারেশন</h2>
-        <p class="text-slate-500 text-sm">বটের মেইন সেটিংস গুলো এখান থেকে পরিবর্তন করুন।</p>
+<div class="max-w-4xl mx-auto pb-20">
+    <div class="mb-10 flex justify-between items-end">
+        <div>
+            <h2 class="text-4xl font-black text-white tracking-tighter">সিস্টেম কন্ট্রোল সেন্টার</h2>
+            <p class="text-slate-500 text-sm mt-2">আপনার ব্যবসার প্রতিটি প্যারামিটার এখান থেকে ম্যানেজ করুন।</p>
+        </div>
+        <div class="text-right">
+            <span class="text-[10px] bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full font-bold uppercase tracking-widest">System v7.0 PRO</span>
+        </div>
     </div>
-    <form action="/admin/settings/save" method="POST" class="glass p-10 rounded-[2.5rem] space-y-8 shadow-2xl">
-        <div class="space-y-4">
-            <div>
-                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">দোকানের নাম</label>
-                <input name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 px-6 py-4 rounded-2xl mt-2 focus:border-indigo-500 outline-none transition focus:ring-2 focus:ring-indigo-500/20">
-            </div>
-            <div>
-                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Gemini API Key</label>
-                <input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 px-6 py-4 rounded-2xl mt-2 focus:border-indigo-500 outline-none transition">
-            </div>
-            <div>
-                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">AI ইনস্ট্রাকশন (System Prompt)</label>
-                <textarea name="ai_system_instruction" rows="5" class="w-full bg-slate-900 border border-slate-800 px-6 py-4 rounded-2xl mt-2 focus:border-indigo-500 outline-none transition">{{ settings.get('ai_system_instruction', '') }}</textarea>
+
+    <form action="/admin/settings/save" method="POST" class="space-y-8">
+        
+        <!-- ১. জেনারেল ও ব্র্যান্ডিং -->
+        <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
+            <h3 class="text-indigo-400 font-black text-xs uppercase mb-6 tracking-widest flex items-center gap-2">
+                <i class="fa-solid fa- shop"></i> জেনারেল ও ব্র্যান্ডিং
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">দোকানের নাম (Business Name)</label>
+                    <input name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">ভেরিফিকেশন টোকেন (Webhook)</label>
+                    <input name="verify_token" value="{{ settings.get('verify_token', 'dhakaex0020') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
             </div>
         </div>
-        <button type="submit" class="w-full bg-indigo-600 py-5 rounded-[1.5rem] font-black uppercase text-xs tracking-widest shadow-xl shadow-indigo-500/20 hover:bg-indigo-500 hover:-translate-y-1 transition-all">কনফিগারেশন সেভ করুন</button>
+
+        <!-- ২. হোয়াটসঅ্যাপ এপিআই কনফিগ -->
+        <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
+            <h3 class="text-indigo-400 font-black text-xs uppercase mb-6 tracking-widest flex items-center gap-2">
+                <i class="fa-brands fa-whatsapp"></i> হোয়াটসঅ্যাপ এপিআই সেটিংস
+            </h3>
+            <div class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Phone Number ID</label>
+                        <input name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">WhatsApp Business ID</label>
+                        <input name="waba_id" value="{{ settings.get('waba_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Permanent Access Token</label>
+                    <textarea name="permanent_token" rows="2" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition font-mono text-xs">{{ settings.get('permanent_token', '') }}</textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- ৩. পাঠাও কুরিয়ার ইন্টিগ্রেশন -->
+        <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
+            <h3 class="text-orange-400 font-black text-xs uppercase mb-6 tracking-widest flex items-center gap-2">
+                <i class="fa-solid fa-truck-fast"></i> পাঠাও কুরিয়ার সেটিংস
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Pathao Client ID</label>
+                    <input name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Pathao Client Secret</label>
+                    <input type="password" name="pathao_client_secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Store ID</label>
+                    <input name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Merchant Password</label>
+                    <input type="password" name="pathao_merchant_password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
+            </div>
+        </div>
+
+        <!-- ৪. ডেলিভারি চার্জ ও এআই ইনস্ট্রাকশন -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="glass p-8 rounded-[2.5rem]">
+                <h3 class="text-emerald-400 font-black text-xs uppercase mb-6 tracking-widest">ডেলিভারি চার্জ (৳)</h3>
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                        <span class="text-xs font-bold text-slate-400 uppercase">ঢাকার ভেতরে</span>
+                        <input name="delivery_inside_dhaka" value="{{ settings.get('delivery_inside_dhaka', '60') }}" class="w-20 bg-transparent text-right font-black text-white outline-none">
+                    </div>
+                    <div class="flex justify-between items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                        <span class="text-xs font-bold text-slate-400 uppercase">ঢাকার বাইরে</span>
+                        <input name="delivery_outside_dhaka" value="{{ settings.get('delivery_outside_dhaka', '120') }}" class="w-20 bg-transparent text-right font-black text-white outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass p-8 rounded-[2.5rem]">
+                <h3 class="text-purple-400 font-black text-xs uppercase mb-6 tracking-widest">এআই কন্ট্রোল (Gemini)</h3>
+                <div class="space-y-4">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase">Gemini API Key</label>
+                    <input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                </div>
+            </div>
+        </div>
+
+        <!-- ৫. ফুল এআই প্রম্পট -->
+        <div class="glass p-8 rounded-[2.5rem]">
+            <h3 class="text-indigo-400 font-black text-xs uppercase mb-6 tracking-widest">বট ইনস্ট্রাকশন (System Prompt)</h3>
+            <textarea name="ai_system_instruction" rows="6" class="w-full bg-slate-900/50 border border-slate-800 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition text-sm leading-relaxed">{{ settings.get('ai_system_instruction', '') }}</textarea>
+            <p class="text-[9px] text-slate-600 mt-4 leading-relaxed uppercase font-bold tracking-widest text-center">Caution: Changing prompt may affect bot behavior and customer interaction logic.</p>
+        </div>
+
+        <!-- সেভ বাটন -->
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-white hover:text-indigo-600 py-6 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl shadow-indigo-500/30 transition-all duration-500 transform hover:-translate-y-2 active:scale-95">
+            কনফিগারেশন আপডেট করুন
+        </button>
+
     </form>
 </div>
 {% endblock %}
