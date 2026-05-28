@@ -3,181 +3,106 @@
 {% block content %}
 
 <style>
-    .wp-box { display:flex; height:calc(100vh - 48px); background:#0f172a; font-family:'Segoe UI',system-ui,sans-serif; }
-    @media(max-width:768px){ .wp-box { height:100vh; } }
+    *{margin:0;padding:0;box-sizing:border-box}
+    .wp{display:flex;height:calc(100vh - 48px);background:#0f172a;font-family:'Segoe UI',system-ui,sans-serif}
+    @media(max-width:768px){.wp{height:100vh}}
 
-    /* LEFT - CONTACTS */
-    .wp-left { width:380px; min-width:380px; border-right:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; background:#0f172a; }
-    @media(max-width:768px){ .wp-left{ width:100%; min-width:auto; } .wp-left.off{ display:none; } }
+    /* LEFT */
+    .wp-l{width:360px;min-width:360px;border-right:1px solid rgba(255,255,255,0.06);display:flex;flex-direction:column;background:#0f172a}
+    @media(max-width:768px){.wp-l{width:100%;min-width:auto}.wp-l.off{display:none}}
+    .wp-hd{padding:12px 16px;background:#1e293b;display:flex;justify-content:space-between;align-items:center}
+    .wp-hd h3{color:#e2e8f0;font-size:20px;font-weight:600;margin:0}
+    .wp-hd i{color:#94a3b8;font-size:18px;margin-left:18px;cursor:pointer}
+    .wp-src{padding:8px 12px;background:#0f172a}
+    .wp-src div{background:#1e293b;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:10px}
+    .wp-src i{color:#64748b;font-size:14px}
+    .wp-src input{background:transparent;border:none;color:#e2e8f0;font-size:14px;outline:none;width:100%}
+    .wp-src input::placeholder{color:#64748b}
+    .wp-lst{flex:1;overflow-y:auto}
+    .wp-it{display:flex;align-items:center;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);text-decoration:none;color:inherit;transition:background .2s}
+    .wp-it:hover,.wp-it.on{background:rgba(99,102,241,0.08)}
+    .wp-it.on{border-left:3px solid #6366f1}
+    .wp-av{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:16px;flex-shrink:0;position:relative;overflow:hidden}
+    .wp-av img{width:100%;height:100%;object-fit:cover}
+    .wp-info{flex:1;margin-left:12px;min-width:0}
+    .wp-r1{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+    .wp-nm{font-size:15px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .wp-tm{font-size:11px;color:#64748b;flex-shrink:0}
+    .wp-r2{font-size:13px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-    .wp-head { padding:12px 16px; background:#1e293b; display:flex; justify-content:space-between; align-items:center; }
-    .wp-head h3 { color:#e2e8f0; font-size:20px; font-weight:600; margin:0; }
-    .wp-head i { color:#94a3b8; font-size:18px; margin-left:18px; cursor:pointer; }
+    /* RIGHT */
+    .wp-r{flex:1;display:flex;flex-direction:column;background:#0b1120;position:relative}
+    @media(max-width:768px){.wp-r{display:none;position:fixed;inset:0;z-index:100}.wp-r.on{display:flex !important}}
+    .wp-bg{position:absolute;inset:0;opacity:.03;background:repeating-linear-gradient(45deg,transparent,transparent 35px,rgba(255,255,255,.03) 35px,rgba(255,255,255,.03) 70px);pointer-events:none}
+    .wp-top{padding:10px 16px;background:#1e293b;display:flex;align-items:center;border-bottom:1px solid rgba(255,255,255,0.05);position:relative;z-index:2}
+    .wp-back{display:none;color:#e2e8f0;font-size:20px;margin-right:12px;cursor:pointer}
+    @media(max-width:768px){.wp-back{display:block}}
+    .wp-top-nfo{flex:1}
+    .wp-top-nm{font-size:16px;font-weight:600;color:#e2e8f0}
+    .wp-top-st{font-size:12px;color:#34d399}
+    .wp-top-ic{display:flex;gap:20px;color:#94a3b8;font-size:18px}
+    .wp-top-ic a{color:inherit;text-decoration:none}
+    .wp-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:6px;position:relative;z-index:1}
+    .wp-msg{max-width:78%;padding:8px 12px;border-radius:8px;font-size:14.5px;line-height:1.4;word-wrap:break-word}
+    .wp-msg-in{align-self:flex-start;background:#1e293b;color:#e2e8f0;border-top-left-radius:0}
+    .wp-msg-out{align-self:flex-end;background:#005c4b;color:#e2e8f0;border-top-right-radius:0}
+    .wp-msg-time{font-size:10px;opacity:.55;margin-top:4px;display:flex;justify-content:flex-end;align-items:center;gap:4px}
+    .wp-tick{color:#53bdeb;font-size:13px}
 
-    /* Filter Tabs */
-    .wp-tabs { display:flex; gap:8px; padding:10px 12px; background:#0f172a; overflow-x:auto; border-bottom:1px solid rgba(255,255,255,0.04); }
-    .wp-tabs::-webkit-scrollbar { display:none; }
-    .wp-tab { padding:6px 14px; border-radius:20px; background:#1e293b; color:#94a3b8; font-size:12px; font-weight:600; cursor:pointer; border:none; white-space:nowrap; transition:all .2s; }
-    .wp-tab.on { background:#6366f1; color:#fff; }
-    .wp-tab:hover { background:#334155; color:#e2e8f0; }
+    /* Voice message bubble */
+    .wp-msg-voice{display:flex;align-items:center;gap:10px;padding:10px 14px !important}
+    .wp-msg-voice .wp-voice-play{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;border:none}
+    .wp-msg-voice .wp-voice-bar{flex:1;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;position:relative}
+    .wp-msg-voice .wp-voice-fill{position:absolute;left:0;top:0;height:100%;width:0%;background:rgba(255,255,255,0.6);border-radius:2px;transition:width .1s}
+    .wp-msg-voice .wp-voice-dur{font-size:12px;color:rgba(255,255,255,0.7)}
 
-    .wp-search { padding:8px 12px; background:#0f172a; }
-    .wp-search div { background:#1e293b; border-radius:8px; padding:8px 12px; display:flex; align-items:center; gap:10px; }
-    .wp-search i { color:#64748b; font-size:14px; }
-    .wp-search input { background:transparent; border:none; color:#e2e8f0; font-size:14px; outline:none; width:100%; }
-    .wp-search input::placeholder { color:#64748b; }
+    /* Image message */
+    .wp-msg-img{padding:4px !important;max-width:280px !important}
+    .wp-msg-img img{max-width:100%;border-radius:6px;display:block}
+    .wp-msg-img .wp-img-cap{font-size:12px;color:rgba(255,255,255,0.7);padding:4px 8px}
 
-    .wp-list { flex:1; overflow-y:auto; }
-    .wp-contact { display:flex; align-items:center; padding:10px 14px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.03); text-decoration:none; color:inherit; transition:background .2s; }
-    .wp-contact:hover,.wp-contact.on { background:rgba(99,102,241,0.08); }
-    .wp-contact.on { border-left:3px solid #6366f1; }
+    /* INPUT AREA */
+    .wp-in{padding:10px 16px;background:#1e293b;display:flex;align-items:flex-end;gap:10px;position:relative;z-index:2}
+    .wp-in form{display:flex;align-items:flex-end;gap:10px;width:100%}
+    .wp-in-box{flex:1;background:#0f172a;border-radius:24px;padding:10px 16px;display:flex;align-items:center;gap:10px}
+    .wp-in-box input{flex:1;background:transparent;border:none;color:#e2e8f0;font-size:15px;outline:none}
+    .wp-in-box input::placeholder{color:#64748b}
+    .wp-ic{color:#94a3b8;font-size:20px;cursor:pointer;transition:color .2s}
+    .wp-ic:hover{color:#e2e8f0}
+    .wp-send{width:46px;height:46px;border-radius:50%;background:#6366f1;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;font-size:18px;flex-shrink:0;transition:all .2s}
+    .wp-send:hover{background:#818cf8}
+    .wp-send.recording{background:#ef4444;animation:rec-pulse 1s infinite}
+    @keyframes rec-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
 
-    /* Avatar with photo */
-    .wp-av { width:50px; height:50px; border-radius:50%; flex-shrink:0; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:bold; font-size:18px; background:linear-gradient(135deg,#6366f1,#a855f7); }
-    .wp-av img { width:100%; height:100%; object-fit:cover; }
-    .wp-av .wp-status-dot { position:absolute; bottom:2px; right:2px; width:12px; height:12px; border-radius:50%; background:#34d399; border:2px solid #0f172a; }
-    .wp-av .wp-status-dot.away { background:#f59e0b; }
+    /* Voice recording overlay */
+    .wp-rec-overlay{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;padding:16px 28px;border-radius:40px;display:none;align-items:center;gap:14px;z-index:200;box-shadow:0 10px 40px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08)}
+    .wp-rec-overlay.on{display:flex}
+    .wp-rec-dot{width:14px;height:14px;border-radius:50%;background:#ef4444;animation:blink 1s infinite}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+    .wp-rec-txt{color:#e2e8f0;font-size:14px;font-weight:600}
+    .wp-rec-timer{color:#ef4444;font-size:18px;font-weight:bold;font-variant-numeric:tabular-nums}
+    .wp-rec-stop{padding:8px 20px;border-radius:20px;background:#ef4444;color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer}
 
-    .wp-info { flex:1; margin-left:12px; min-width:0; }
-    .wp-line1 { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
-    .wp-name { font-size:15px; font-weight:600; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .wp-time { font-size:11px; color:#64748b; flex-shrink:0; }
-    .wp-line2 { display:flex; justify-content:space-between; align-items:center; }
-    .wp-preview { font-size:13px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px; }
-    .wp-badge { background:#6366f1; color:#fff; font-size:11px; font-weight:600; min-width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0 6px; }
-    .wp-seen { color:#53bdeb; font-size:13px; }
+    .wp-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#475569;text-align:center;padding:20px}
+    .wp-empty i{font-size:100px;margin-bottom:20px;opacity:.15}
+    .wp-empty h2{font-size:28px;font-weight:300;margin-bottom:8px}
 
-    /* Tag labels */
-    .wp-tags { display:flex; gap:4px; margin-top:4px; }
-    .wp-tag { font-size:9px; padding:2px 8px; border-radius:10px; font-weight:600; text-transform:uppercase; }
-    .wp-tag-new { background:rgba(16,185,129,0.15); color:#34d399; }
-    .wp-tag-pending { background:rgba(245,158,11,0.15); color:#fbbf24; }
-    .wp-tag-order { background:rgba(99,102,241,0.15); color:#818cf8; }
-    .wp-tag-follow { background:rgba(236,72,153,0.15); color:#f472b6; }
-    .wp-tag-important { background:rgba(244,63,94,0.15); color:#fb7185; }
-
-    /* RIGHT - CHAT */
-    .wp-right { flex:1; display:flex; flex-direction:column; background:#0b1120; position:relative; }
-    @media(max-width:768px){ .wp-right{ display:none; position:fixed; inset:0; z-index:100; } .wp-right.on{ display:flex !important; } }
-
-    .wp-bg { position:absolute; inset:0; opacity:.03; background:repeating-linear-gradient(45deg,transparent,transparent 35px,rgba(255,255,255,.03) 35px,rgba(255,255,255,.03) 70px); pointer-events:none; }
-
-    .wp-top { padding:10px 16px; background:#1e293b; display:flex; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05); position:relative; z-index:2; }
-    .wp-back { display:none; color:#e2e8f0; font-size:20px; margin-right:12px; cursor:pointer; }
-    @media(max-width:768px){ .wp-back{ display:block; } }
-    .wp-top-info { flex:1; }
-    .wp-top-name { font-size:16px; font-weight:600; color:#e2e8f0; }
-    .wp-top-status { font-size:12px; color:#34d399; }
-    .wp-top-icons { display:flex; gap:20px; color:#94a3b8; font-size:18px; }
-    .wp-top-icons a { color:inherit; text-decoration:none; }
-
-    .wp-msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:4px; position:relative; z-index:1; }
-    .wp-msg { max-width:78%; padding:8px 12px; border-radius:8px; font-size:14.5px; line-height:1.4; word-wrap:break-word; }
-    .wp-msg-in { align-self:flex-start; background:#1e293b; color:#e2e8f0; border-top-left-radius:0; }
-    .wp-msg-out { align-self:flex-end; background:#005c4b; color:#e2e8f0; border-top-right-radius:0; }
-    .wp-msg-time { font-size:10px; opacity:.55; margin-top:4px; display:flex; justify-content:flex-end; align-items:center; gap:4px; }
-    .wp-blue { color:#53bdeb; font-size:13px; }
-
-    /* Action bar above input */
-    .wp-actions { display:flex; gap:8px; padding:6px 16px; background:#1e293b; border-top:1px solid rgba(255,255,255,0.04); }
-    .wp-act-btn { padding:6px 14px; border-radius:16px; background:rgba(99,102,241,0.1); color:#818cf8; font-size:12px; font-weight:600; border:none; cursor:pointer; transition:all .2s; }
-    .wp-act-btn:hover { background:rgba(99,102,241,0.2); }
-
-    .wp-bottom { padding:10px 16px; background:#1e293b; display:flex; align-items:flex-end; gap:10px; position:relative; z-index:2; }
-    .wp-bottom form { display:flex; align-items:flex-end; gap:10px; width:100%; }
-    .wp-input { flex:1; background:#0f172a; border-radius:24px; padding:10px 16px; display:flex; align-items:center; gap:10px; }
-    .wp-input input { flex:1; background:transparent; border:none; color:#e2e8f0; font-size:15px; outline:none; }
-    .wp-input input::placeholder { color:#64748b; }
-    .wp-ic { color:#94a3b8; font-size:20px; cursor:pointer; }
-    .wp-send { width:46px; height:46px; border-radius:50%; background:#6366f1; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; font-size:18px; flex-shrink:0; }
-    .wp-send:hover { background:#818cf8; }
-
-    .wp-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:#475569; text-align:center; padding:20px; }
-    .wp-empty i { font-size:100px; margin-bottom:20px; opacity:.15; }
-    .wp-empty h2 { font-size:28px; font-weight:300; margin-bottom:8px; }
-
-    ::-webkit-scrollbar { width:6px; }
-    ::-webkit-scrollbar-thumb { background:#334155; border-radius:10px; }
+    ::-webkit-scrollbar{width:6px}
+    ::-webkit-scrollbar-thumb{background:#334155;border-radius:10px}
 </style>
 
-<div class="wp-box">
-    <!-- LEFT: Contact List -->
-    <div class="wp-left {% if active_chat %}off{% endif %}" id="wpLeft">
-        <div class="wp-head">
-            <h3>Chats</h3>
-            <div>
-                <i class="fa-solid fa-circle-plus" title="New Chat"></i>
-                <i class="fa-solid fa-magnifying-glass" title="Search"></i>
-                <i class="fa-solid fa-ellipsis-vertical" title="More"></i>
-            </div>
-        </div>
-
-        <!-- Filter Tabs -->
-        <div class="wp-tabs">
-            <button class="wp-tab on" onclick="filterTab('all',this)">All</button>
-            <button class="wp-tab" onclick="filterTab('new',this)">New Customer</button>
-            <button class="wp-tab" onclick="filterTab('order',this)">New Order</button>
-            <button class="wp-tab" onclick="filterTab('pending',this)">Pending</button>
-            <button class="wp-tab" onclick="filterTab('important',this)">Important</button>
-            <button class="wp-tab" onclick="filterTab('follow',this)">Follow Up</button>
-        </div>
-
-        <div class="wp-search">
-            <div>
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" placeholder="Search customers..." onkeyup="filterContacts(this.value)">
-            </div>
-        </div>
-
-        <div class="wp-list" id="wpList">
-            {% set customer_orders = {} %}
-            {% for o in orders %}
-                {% if o.phone not in customer_orders %}
-                    {% set _ = customer_orders.update({o.phone: o}) %}
-                {% endif %}
-            {% endfor %}
-
+<div class="wp">
+    <!-- LEFT: Contacts -->
+    <div class="wp-l {% if active_chat %}off{% endif %}" id="wpLeft">
+        <div class="wp-hd"><h3>Chats</h3><div><i class="fa-solid fa-camera"></i><i class="fa-solid fa-magnifying-glass"></i><i class="fa-solid fa-ellipsis-vertical"></i></div></div>
+        <div class="wp-src"><div><i class="fa-solid fa-magnifying-glass"></i><input type="text" placeholder="Search customers..." onkeyup="filterList(this.value)"></div></div>
+        <div class="wp-lst">
             {% for u in users %}
-            {% set has_order = u.phone in customer_orders %}
-            {% set order_status = customer_orders[u.phone].status if has_order else '' %}
-            {% set is_new = (now|string)[:10] in (u.last_active or '') %}
-
-            <a href="/admin?tab=chat&chat_with={{ u.phone }}"
-               class="wp-contact {% if active_chat == u.phone %}on{% endif %}"
-               data-phone="{{ u.phone }}"
-               data-tag="{% if is_new %}new{% elif has_order and order_status == 'pending' %}pending{% elif has_order %}order{% else %}follow{% endif %}">
-
-                <!-- Avatar with customer photo -->
-                <div class="wp-av">
-                    {% if u.name and u.name != 'Customer' %}
-                        {{ u.name[:2]|upper }}
-                    {% else %}
-                        {{ u.phone[-2:] }}
-                    {% endif %}
-                    <span class="wp-status-dot"></span>
-                </div>
-
+            <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="wp-it {% if active_chat == u.phone %}on{% endif %}" data-phone="{{ u.phone }}">
+                <div class="wp-av">{% if u.name and u.name != 'Customer' %}{{ u.name[:2]|upper }}{% else %}{{ u.phone[-2:] }}{% endif %}</div>
                 <div class="wp-info">
-                    <div class="wp-line1">
-                        <span class="wp-name">{{ u.name or '+880' + u.phone[-10:] }}</span>
-                        <span class="wp-time">{{ u.last_active[11:16] if u.last_active else '' }}</span>
-                    </div>
-                    <div class="wp-line2">
-                        <span class="wp-preview">
-                            {% if has_order %}
-                                Order #{{ customer_orders[u.phone].id }} — {{ customer_orders[u.phone].status|title }}
-                            {% else %}
-                                New customer — Tap to chat
-                            {% endif %}
-                        </span>
-                    </div>
-                    <!-- Tags -->
-                    <div class="wp-tags">
-                        {% if is_new %}<span class="wp-tag wp-tag-new">New</span>{% endif %}
-                        {% if has_order and order_status == 'pending' %}<span class="wp-tag wp-tag-pending">Pending</span>{% endif %}
-                        {% if has_order and order_status != 'pending' %}<span class="wp-tag wp-tag-order">Ordered</span>{% endif %}
-                        {% if not has_order %}<span class="wp-tag wp-tag-follow">Follow Up</span>{% endif %}
-                    </div>
+                    <div class="wp-r1"><span class="wp-nm">{{ u.name or '+880' + u.phone[-10:] }}</span><span class="wp-tm">{{ u.last_active[11:16] if u.last_active else '' }}</span></div>
+                    <div class="wp-r2">{{ u.phone }}</div>
                 </div>
             </a>
             {% endfor %}
@@ -185,139 +110,217 @@
     </div>
 
     <!-- RIGHT: Chat -->
-    <div class="wp-right {% if active_chat %}on{% endif %}" id="wpRight">
+    <div class="wp-r {% if active_chat %}on{% endif %}" id="wpRight">
         {% if active_chat %}
         <div class="wp-bg"></div>
-
         <div class="wp-top">
             <div class="wp-back" onclick="showContacts()"><i class="fa-solid fa-arrow-left"></i></div>
-
-            <!-- Active chat avatar -->
-            {% set active_user = None %}
-            {% for u in users %}
-                {% if u.phone == active_chat %}{% set active_user = u %}{% endif %}
-            {% endfor %}
-
-            <div class="wp-av" style="width:42px;height:42px;font-size:16px;">
-                {% if active_user and active_user.name and active_user.name != 'Customer' %}
-                    {{ active_user.name[:2]|upper }}
-                {% else %}
-                    {{ active_chat[-2:] }}
-                {% endif %}
+            <div class="wp-av" style="width:42px;height:42px;font-size:14px">{{ active_chat[-2:] }}</div>
+            <div class="wp-top-nfo">
+                <div class="wp-top-nm">+{{ active_chat }}</div>
+                <div class="wp-top-st">online</div>
             </div>
-
-            <div class="wp-top-info">
-                <div class="wp-top-name">{{ active_user.name or '+880' + active_chat[-10:] }}</div>
-                <div class="wp-top-status">online</div>
-            </div>
-            <div class="wp-top-icons">
+            <div class="wp-top-ic">
                 <a href="tel:{{ active_chat }}" title="Call"><i class="fa-solid fa-phone"></i></a>
-                <a href="/admin/chat/delete/{{ active_chat }}" title="Delete Chat" onclick="return confirm('Delete this chat?')"><i class="fa-solid fa-trash"></i></a>
+                <a href="/admin/chat/delete/{{ active_chat }}" onclick="return confirm('Delete chat?')" title="Delete"><i class="fa-solid fa-trash"></i></a>
             </div>
         </div>
 
         <div class="wp-msgs" id="wpMsgs">
             {% for m in chat_history %}
-            <div class="wp-msg wp-msg-{% if m.direction == 'outbound' %}out{% else %}in{% endif %}">
-                {{ m.content }}
-                <div class="wp-msg-time">
-                    {% if m.created_at %}{{ m.created_at[11:16] }}{% endif %}
-                    {% if m.direction == 'outbound' %}<span class="wp-blue"><i class="fa-solid fa-check-double"></i></span>{% endif %}
+                {% if m.content.startswith('[IMAGE:') %}
+                <div class="wp-msg wp-msg-out wp-msg-img">
+                    <img src="{{ m.content[7:].split(']')[0] }}" alt="Image" onerror="this.style.display='none'">
+                    <div class="wp-msg-time">{{ m.created_at[11:16] if m.created_at else '' }}<span class="wp-tick"><i class="fa-solid fa-check-double"></i></span></div>
                 </div>
-            </div>
+                {% elif m.content == '[VOICE MESSAGE]' %}
+                <div class="wp-msg wp-msg-out wp-msg-voice">
+                    <button class="wp-voice-play" onclick="this.querySelector('i').classList.toggle('fa-play');this.querySelector('i').classList.toggle('fa-pause')"><i class="fa-solid fa-play"></i></button>
+                    <div class="wp-voice-bar"><div class="wp-voice-fill"></div></div>
+                    <span class="wp-voice-dur">0:05</span>
+                    <div class="wp-msg-time" style="margin:0;margin-left:8px">{{ m.created_at[11:16] if m.created_at else '' }}<span class="wp-tick"><i class="fa-solid fa-check-double"></i></span></div>
+                </div>
+                {% else %}
+                <div class="wp-msg wp-msg-{% if m.direction == 'outbound' %}out{% else %}in{% endif %}">
+                    {{ m.content }}
+                    <div class="wp-msg-time">{{ m.created_at[11:16] if m.created_at else '' }}{% if m.direction == 'outbound' %}<span class="wp-tick"><i class="fa-solid fa-check-double"></i></span>{% endif %}</div>
+                </div>
+                {% endif %}
             {% endfor %}
         </div>
 
-        <!-- Quick Actions -->
-        <div class="wp-actions">
-            <button class="wp-act-btn" onclick="quickMsg('Thank you for your order!')"><i class="fa-solid fa-reply fa-xs"></i> Thank You</button>
-            <button class="wp-act-btn" onclick="quickMsg('Your order is pending. We will update soon.')">Pending</button>
-            <button class="wp-act-btn" onclick="quickMsg('Please confirm your delivery address.')">Confirm Address</button>
-            <button class="wp-act-btn" onclick="quickMsg('Important: Please check your order details.')">Important</button>
+        <!-- Voice Recording Overlay -->
+        <div class="wp-rec-overlay" id="recOverlay">
+            <div class="wp-rec-dot"></div>
+            <span class="wp-rec-txt">Recording...</span>
+            <span class="wp-rec-timer" id="recTimer">0:00</span>
+            <button class="wp-rec-stop" onclick="stopRecording()">STOP</button>
         </div>
 
-        <div class="wp-bottom">
-            <form action="/admin/chat/send" method="POST" id="chatForm">
+        <!-- Input -->
+        <div class="wp-in">
+            <!-- TEXT FORM -->
+            <form action="/admin/chat/send" method="POST" id="textForm" style="display:flex;align-items:flex-end;gap:10px;width:100%">
                 <input type="hidden" name="phone" value="{{ active_chat }}">
-                <i class="fa-regular fa-face-smile wp-ic" style="font-size:24px;"></i>
-                <div class="wp-input">
-                    <i class="fa-solid fa-plus wp-ic" onclick="document.getElementById('wpFile').click()"></i>
-                    <input type="file" id="wpFile" name="image" accept="image/*" style="display:none;" onchange="this.form.submit()">
+                <i class="fa-regular fa-face-smile wp-ic" style="font-size:24px"></i>
+                <div class="wp-in-box">
+                    <label class="wp-ic" style="cursor:pointer" title="Send Image"><i class="fa-solid fa-image"></i>
+                        <input type="file" name="image" accept="image/*" style="display:none" onchange="uploadImage(this)">
+                    </label>
                     <input type="text" name="message" placeholder="Type a message" autocomplete="off" id="wpInput">
-                    <i class="fa-solid fa-paperclip wp-ic" onclick="document.getElementById('wpFile').click()"></i>
                 </div>
-                <button type="submit" class="wp-send"><i class="fa-solid fa-paper-plane"></i></button>
+                <button type="button" class="wp-send" id="micBtn" onclick="toggleRecording()"><i class="fa-solid fa-microphone" id="micIcon"></i></button>
+                <button type="submit" class="wp-send" id="sendBtn" style="display:none"><i class="fa-solid fa-paper-plane"></i></button>
+            </form>
+
+            <!-- VOICE FORM (hidden, submits recorded blob) -->
+            <form action="/admin/chat/send-voice" method="POST" id="voiceForm" enctype="multipart/form-data" style="display:none">
+                <input type="hidden" name="phone" value="{{ active_chat }}">
+                <input type="file" name="voice" id="voiceInput" accept="audio/webm">
+            </form>
+
+            <!-- IMAGE FORM (hidden, submits image) -->
+            <form action="/admin/chat/send-image" method="POST" id="imageForm" enctype="multipart/form-data" style="display:none">
+                <input type="hidden" name="phone" value="{{ active_chat }}">
+                <input type="file" name="image" id="imageInput" accept="image/*">
             </form>
         </div>
         {% else %}
-        <div class="wp-empty">
-            <i class="fa-brands fa-whatsapp"></i>
-            <h2>Dhaka Exclusive Chat</h2>
-            <p>Select a customer to start messaging</p>
-        </div>
+        <div class="wp-empty"><i class="fa-brands fa-whatsapp"></i><h2>Dhaka Exclusive</h2><p>Select a customer to start messaging</p></div>
         {% endif %}
     </div>
 </div>
 
 <script>
-    // Scroll to bottom
-    var box = document.getElementById('wpMsgs');
-    if(box) box.scrollTop = box.scrollHeight;
+    // ========== SCROLL TO BOTTOM ==========
+    var msgBox = document.getElementById('wpMsgs');
+    if(msgBox) msgBox.scrollTop = msgBox.scrollHeight;
 
-    // Mobile back
+    // ========== MOBILE BACK ==========
     function showContacts(){
         document.getElementById('wpLeft').classList.remove('off');
         document.getElementById('wpRight').classList.remove('on');
     }
 
-    // Search contacts
-    function filterContacts(q){
-        var items = document.querySelectorAll('.wp-contact');
+    // ========== SEARCH ==========
+    function filterList(q){
+        var items = document.querySelectorAll('.wp-it');
         var query = q.toLowerCase();
         items.forEach(function(item){
-            var text = (item.querySelector('.wp-name').textContent + ' ' + item.dataset.phone).toLowerCase();
+            var text = (item.querySelector('.wp-nm').textContent + item.dataset.phone).toLowerCase();
             item.style.display = text.includes(query) ? 'flex' : 'none';
         });
     }
 
-    // Tab filter
-    function filterTab(tag, btn){
-        document.querySelectorAll('.wp-tab').forEach(function(t){ t.classList.remove('on'); });
-        btn.classList.add('on');
-
-        var items = document.querySelectorAll('.wp-contact');
-        items.forEach(function(item){
-            if(tag === 'all'){
-                item.style.display = 'flex';
-            } else if(tag === 'important'){
-                // Show customers with pending orders as important
-                var hasPending = item.querySelector('.wp-tag-pending');
-                item.style.display = hasPending ? 'flex' : 'none';
+    // ========== TEXT INPUT: Mic vs Send toggle ==========
+    var txtInput = document.getElementById('wpInput');
+    var micBtn = document.getElementById('micBtn');
+    var sendBtn = document.getElementById('sendBtn');
+    if(txtInput){
+        txtInput.addEventListener('input', function(){
+            if(this.value.trim().length > 0){
+                micBtn.style.display = 'none';
+                sendBtn.style.display = 'flex';
             } else {
-                item.style.display = (item.dataset.tag === tag) ? 'flex' : 'none';
+                micBtn.style.display = 'flex';
+                sendBtn.style.display = 'none';
             }
         });
+        txtInput.addEventListener('keypress', function(e){
+            if(e.key === 'Enter' && this.value.trim()){
+                document.getElementById('textForm').submit();
+            }
+        });
+        txtInput.focus();
     }
 
-    // Quick message
-    function quickMsg(text){
-        var inp = document.getElementById('wpInput');
-        if(inp){
-            inp.value = text;
-            inp.focus();
+    // ========== VOICE RECORDING ==========
+    var mediaRecorder = null;
+    var audioChunks = [];
+    var recording = false;
+    var recStartTime = 0;
+    var recTimerInterval = null;
+
+    async function toggleRecording(){
+        if(!recording){
+            // START recording
+            try{
+                var stream = await navigator.mediaDevices.getUserMedia({audio:true});
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = function(e){ audioChunks.push(e.data); };
+                mediaRecorder.onstop = function(){
+                    var blob = new Blob(audioChunks, {type:'audio/webm'});
+                    var file = new File([blob], 'voice.webm', {type:'audio/webm'});
+                    var dt = new DataTransfer();
+                    dt.items.add(file);
+                    document.getElementById('voiceInput').files = dt.files;
+                    document.getElementById('voiceForm').submit();
+                    // Stop all tracks
+                    stream.getTracks().forEach(function(t){ t.stop(); });
+                };
+                mediaRecorder.start();
+                recording = true;
+                recStartTime = Date.now();
+                document.getElementById('recOverlay').classList.add('on');
+                micBtn.classList.add('recording');
+                // Timer
+                recTimerInterval = setInterval(function(){
+                    var secs = Math.floor((Date.now() - recStartTime) / 1000);
+                    var mins = Math.floor(secs / 60);
+                    var rem = secs % 60;
+                    document.getElementById('recTimer').textContent = mins + ':' + (rem < 10 ? '0' : '') + rem;
+                }, 1000);
+            } catch(err){
+                alert('Microphone access denied. Please allow microphone permission.');
+            }
+        } else {
+            stopRecording();
         }
     }
 
-    // Enter to send
-    var inp = document.getElementById('wpInput');
-    if(inp){
-        inp.addEventListener('keypress', function(e){
-            if(e.key === 'Enter' && this.value.trim()){
-                document.getElementById('chatForm').submit();
+    function stopRecording(){
+        if(recording && mediaRecorder){
+            mediaRecorder.stop();
+            recording = false;
+            clearInterval(recTimerInterval);
+            document.getElementById('recOverlay').classList.remove('on');
+            micBtn.classList.remove('recording');
+        }
+    }
+
+    // ========== IMAGE UPLOAD ==========
+    function uploadImage(input){
+        if(input.files && input.files[0]){
+            var file = input.files[0];
+            var dt = new DataTransfer();
+            dt.items.add(file);
+            document.getElementById('imageInput').files = dt.files;
+            document.getElementById('imageForm').submit();
+        }
+    }
+
+    // ========== VOICE MESSAGE PLAYBACK ==========
+    document.querySelectorAll('.wp-voice-play').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var icon = this.querySelector('i');
+            var bar = this.parentElement.querySelector('.wp-voice-fill');
+            if(icon.classList.contains('fa-play')){
+                icon.classList.remove('fa-play');
+                icon.classList.add('fa-pause');
+                bar.style.width = '100%';
+                setTimeout(function(){
+                    icon.classList.add('fa-play');
+                    icon.classList.remove('fa-pause');
+                    bar.style.width = '0%';
+                }, 5000);
+            } else {
+                icon.classList.add('fa-play');
+                icon.classList.remove('fa-pause');
+                bar.style.width = '0%';
             }
         });
-        inp.focus();
-    }
+    });
 </script>
 
 {% endblock %}
