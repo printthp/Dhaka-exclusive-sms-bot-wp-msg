@@ -1,15 +1,11 @@
-<a href="/admin/chat/delete/{{ active_chat }}" onclick="return confirm('পুরো চ্যাট ডিলিট করবেন?')" class="text-rose-400 text-[10px] uppercase font-bold hover:underline">Delete Conversation</a>
-
-
-
 {% extends "base.html" %}
 {% block title %}Inbox{% endblock %}
 {% block content %}
 <div class="flex h-[88vh] md:h-[82vh] gap-4 flex-col md:flex-row overflow-hidden">
-    <!-- কাস্টমার লিস্ট (মোবাইলে উচ্চতা কমানো হয়েছে যাতে মেইন চ্যাট দেখা যায়) -->
+    <!-- কাস্টমার লিস্ট -->
     <div class="h-44 md:h-auto w-full md:w-80 glass rounded-[2rem] overflow-hidden flex flex-col shrink-0">
         <div class="p-4 border-b border-slate-800 bg-slate-900/50">
-            <h3 class="font-black text-[10px] uppercase text-slate-500 tracking-widest">ইনবক্স (সক্রিয়)</h3>
+            <h3 class="font-black text-[10px] uppercase text-slate-500 tracking-widest text-center md:text-left">ইনবক্স (সক্রিয়)</h3>
         </div>
         <div id="user-list" class="flex-1 overflow-y-auto custom-scrollbar">
             {% for u in users %}
@@ -17,31 +13,57 @@
                 <div class="font-bold text-xs text-white">{{ u.phone }}</div>
                 <div class="text-[9px] text-slate-500 mt-0.5">Active: {{ u.last_active }}</div>
             </a>
+            {% else %}
+            <div class="p-10 text-center text-[10px] text-slate-600 uppercase font-black">Empty Chat</div>
             {% endfor %}
         </div>
     </div>
 
     <!-- মেইন চ্যাট উইন্ডো -->
     <div class="flex-1 glass rounded-[2rem] overflow-hidden flex flex-col relative min-h-0">
-        <div class="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10">
-            <h4 class="font-black text-indigo-400 text-sm"><i class="fa-solid fa-circle text-[8px] mr-2 text-emerald-500 animate-pulse"></i> {{ active_chat or 'চ্যাট সিলেক্ট করুন' }}</h4>
-            {% if active_chat %}<button class="text-[9px] bg-amber-500/20 text-amber-500 px-3 py-1 rounded-full font-bold border border-amber-500/30">BOT PAUSED</button>{% endif %}
+        <div class="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10 px-6">
+            <div class="flex items-center gap-3">
+                <h4 class="font-black text-indigo-400 text-sm tracking-tighter">
+                    <i class="fa-solid fa-circle text-[7px] mr-1.5 text-emerald-500"></i> {{ active_chat or 'চ্যাট সিলেক্ট করুন' }}
+                </h4>
+            </div>
+            {% if active_chat %}
+            <div class="flex items-center gap-4">
+                <a href="/admin/chat/delete/{{ active_chat }}" onclick="return confirm('পুরো চ্যাট ডিলিট করবেন? এই কাস্টমারের সব মেসেজ মুছে যাবে।')" class="text-rose-400 text-[10px] uppercase font-black hover:text-white transition-colors border border-rose-500/20 px-3 py-1 rounded-full">
+                    <i class="fa-solid fa-trash-can mr-1"></i> Delete Chat
+                </a>
+            </div>
+            {% endif %}
         </div>
         
-        <!-- চ্যাট মেসেজ কন্টেইনার (গ্রাফিক্স কমানো হয়েছে স্পিড বাড়ানোর জন্য) -->
-        <div id="chat-window" class="flex-1 p-4 overflow-y-auto flex flex-col gap-3 bg-slate-950/20 custom-scrollbar">
+        <!-- চ্যাট মেসেজ উইন্ডো (Socket-free Version) -->
+        <div id="chat-window" class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-slate-950/20 custom-scrollbar scroll-smooth">
             {% for m in chat_history %}
-            <div class="p-3 rounded-2xl text-[13px] max-w-[85%] md:max-w-sm shadow-lg {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-200 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none{% endif %}">
+            <div class="p-4 rounded-2xl text-[13px] max-w-[85%] md:max-w-md shadow-lg leading-relaxed {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-100 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none{% endif %}">
                 {{ m.content }}
+                <div class="text-[8px] mt-1 opacity-40 {% if m.direction == 'inbound' %}text-left{% else %}text-right{% endif %} font-black uppercase">
+                    {{ m.created_at or 'Just Now' }}
+                </div>
             </div>
+            {% else %}
+            {% if active_chat %}
+            <div class="flex-1 flex items-center justify-center text-slate-600 italic text-xs">আপনার কথোপকথন এখানে শুরু করুন...</div>
+            {% else %}
+            <div class="flex-1 flex flex-col items-center justify-center text-slate-700">
+                <i class="fa-solid fa-comments text-5xl mb-4 opacity-20"></i>
+                <p class="uppercase text-[10px] font-black tracking-widest">Inbox System Ready</p>
+            </div>
+            {% endif %}
             {% endfor %}
         </div>
 
         {% if active_chat %}
-        <form id="send-form" action="/admin/chat/send" method="POST" class="p-4 glass border-t border-slate-800 flex gap-2">
+        <form id="send-form" action="/admin/chat/send" method="POST" class="p-4 glass border-t border-slate-800 flex gap-3">
             <input type="hidden" name="phone" value="{{ active_chat }}">
-            <input id="msg-input" name="message" class="flex-1 bg-slate-900 border border-slate-800 px-5 py-3 rounded-2xl outline-none focus:border-indigo-500 transition text-sm text-white" placeholder="জবাব লিখুন..." required autocomplete="off">
-            <button type="submit" class="bg-indigo-600 px-6 rounded-2xl font-black text-white hover:bg-indigo-500 active:scale-95 transition-all"><i class="fa-solid fa-paper-plane"></i></button>
+            <input id="msg-input" name="message" class="flex-1 bg-slate-900 border border-white/5 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition text-sm text-white placeholder-slate-600" placeholder="একটি বার্তা লিখুন..." required autocomplete="off">
+            <button type="submit" class="bg-indigo-600 px-8 rounded-2xl font-black text-white hover:bg-white hover:text-indigo-600 active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
+                <i class="fa-solid fa-paper-plane"></i>
+            </button>
         </form>
         {% endif %}
     </div>
@@ -50,43 +72,31 @@
 <style>
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+    /* চ্যাট ব্যাকগ্রাউন্ড প্যাটার্ন */
+    #chat-window {
+        background-color: #0c1120;
+        background-image: url("https://www.transparenttextures.com/patterns/fake-luxury.png");
+    }
 </style>
 
-<!-- Optimized Socket.io Script -->
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
-    const socket = io();
-    const chatWindow = document.getElementById('chat-window');
-    
-    // স্মুথ স্ক্রলিং শুধু প্রথমবার এবং নতুন মেসেজে হবে
-    function scrollToBottom(isSmooth = true) {
+    // অটো নিচে স্ক্রল করার ফাংশন
+    function scrollToBottom() {
+        const chatWindow = document.getElementById('chat-window');
         if (chatWindow) {
-            chatWindow.scrollTo({
-                top: chatWindow.scrollHeight,
-                behavior: isSmooth ? 'smooth' : 'auto'
-            });
+            chatWindow.scrollTop = chatWindow.scrollHeight;
         }
     }
 
-    socket.on('new_message', function(data) {
-        if (data.phone === "{{ active_chat }}") {
-            const msgDiv = document.createElement('div');
-            const isOutbound = data.direction === 'outbound';
-            msgDiv.className = `p-3 rounded-2xl text-[13px] max-w-[85%] md:max-w-sm shadow-lg ${
-                isOutbound 
-                ? 'bg-indigo-600 self-end text-white rounded-tr-none' 
-                : 'bg-slate-800 self-start text-slate-200 rounded-tl-none'
-            }`;
-            msgDiv.innerText = data.content; // সিকিউরিটির জন্য innerText
-            chatWindow.appendChild(msgDiv);
-            scrollToBottom(true);
-        }
+    // পেজ লোড এবং সব রিসোর্স লোড হওয়ার পর স্ক্রল করবে
+    window.addEventListener('load', () => {
+        setTimeout(scrollToBottom, 100);
     });
 
-    // পেজ লোড হবার পর দ্রুত নিচে নামিয়ে দিবে
-    window.addEventListener('load', () => {
-        setTimeout(() => scrollToBottom(false), 100);
-    });
+    // ফর্ম সাবমিট হবার পর স্ক্রল ধরে রাখবে
+    if(window.history.replaceState) {
+        window.history.replaceState(null, null, window.location.href);
+    }
 </script>
 {% endblock %}
