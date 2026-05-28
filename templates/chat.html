@@ -1,74 +1,88 @@
 {% extends "base.html" %}
 {% block title %}Inbox{% endblock %}
 {% block content %}
-<div class="flex h-[80vh] gap-6 flex-col md:flex-row">
-    <!-- User List -->
-    <div class="w-full md:w-80 glass rounded-[2rem] overflow-hidden flex flex-col">
-        <div class="p-6 border-b border-slate-800"><h3 class="font-black text-xs uppercase text-slate-500">ইনবক্স</h3></div>
-        <div id="user-list" class="flex-1 overflow-y-auto">
+<div class="flex h-[88vh] md:h-[82vh] gap-4 flex-col md:flex-row overflow-hidden">
+    <!-- কাস্টমার লিস্ট (মোবাইলে উচ্চতা কমানো হয়েছে যাতে মেইন চ্যাট দেখা যায়) -->
+    <div class="h-44 md:h-auto w-full md:w-80 glass rounded-[2rem] overflow-hidden flex flex-col shrink-0">
+        <div class="p-4 border-b border-slate-800 bg-slate-900/50">
+            <h3 class="font-black text-[10px] uppercase text-slate-500 tracking-widest">ইনবক্স (সক্রিয়)</h3>
+        </div>
+        <div id="user-list" class="flex-1 overflow-y-auto custom-scrollbar">
             {% for u in users %}
-            <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="block p-5 border-b border-slate-800/30 hover:bg-indigo-500/10 transition {% if active_chat == u.phone %}bg-indigo-500/10 border-l-4 border-l-indigo-500{% endif %}">
-                <div class="font-bold text-sm">{{ u.phone }}</div>
-                <div class="text-[10px] text-slate-500 mt-1">Active: {{ u.last_active }}</div>
+            <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="block p-4 border-b border-slate-800/30 hover:bg-indigo-500/10 transition-all {% if active_chat == u.phone %}bg-indigo-500/10 border-l-4 border-l-indigo-500{% endif %}">
+                <div class="font-bold text-xs text-white">{{ u.phone }}</div>
+                <div class="text-[9px] text-slate-500 mt-0.5">Active: {{ u.last_active }}</div>
             </a>
             {% endfor %}
         </div>
     </div>
-    <!-- Chat Window -->
-    <div class="flex-1 glass rounded-[2rem] overflow-hidden flex flex-col relative">
-        <div class="p-6 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center">
-            <h4 class="font-black text-indigo-400">{{ active_chat or 'চ্যাট সিলেক্ট করুন' }}</h4>
-            {% if active_chat %}<button class="text-[10px] bg-amber-500 text-black px-3 py-1 rounded-full font-bold">BOT PAUSED</button>{% endif %}
+
+    <!-- মেইন চ্যাট উইন্ডো -->
+    <div class="flex-1 glass rounded-[2rem] overflow-hidden flex flex-col relative min-h-0">
+        <div class="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10">
+            <h4 class="font-black text-indigo-400 text-sm"><i class="fa-solid fa-circle text-[8px] mr-2 text-emerald-500 animate-pulse"></i> {{ active_chat or 'চ্যাট সিলেক্ট করুন' }}</h4>
+            {% if active_chat %}<button class="text-[9px] bg-amber-500/20 text-amber-500 px-3 py-1 rounded-full font-bold border border-amber-500/30">BOT PAUSED</button>{% endif %}
         </div>
         
-        <!-- চ্যাট মেসেজ কন্টেইনার -->
-        <div id="chat-window" class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
+        <!-- চ্যাট মেসেজ কন্টেইনার (গ্রাফিক্স কমানো হয়েছে স্পিড বাড়ানোর জন্য) -->
+        <div id="chat-window" class="flex-1 p-4 overflow-y-auto flex flex-col gap-3 bg-slate-950/20 custom-scrollbar">
             {% for m in chat_history %}
-            <div class="p-4 rounded-2xl text-xs max-w-sm shadow-xl {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-200 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none shadow-indigo-500/20{% endif %}">
+            <div class="p-3 rounded-2xl text-[13px] max-w-[85%] md:max-w-sm shadow-lg {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-200 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none{% endif %}">
                 {{ m.content }}
             </div>
             {% endfor %}
         </div>
 
         {% if active_chat %}
-        <form id="send-form" action="/admin/chat/send" method="POST" class="p-6 glass border-t border-slate-800 flex gap-4">
+        <form id="send-form" action="/admin/chat/send" method="POST" class="p-4 glass border-t border-slate-800 flex gap-2">
             <input type="hidden" name="phone" value="{{ active_chat }}">
-            <input id="msg-input" name="message" class="flex-1 bg-slate-950 border border-slate-800 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition shadow-inner text-sm" placeholder="মেসেজ লিখুন..." required autocomplete="off">
-            <button type="submit" class="bg-indigo-600 px-8 rounded-2xl font-black text-white hover:bg-indigo-500 active:scale-95 transition-all"><i class="fa-solid fa-paper-plane"></i></button>
+            <input id="msg-input" name="message" class="flex-1 bg-slate-900 border border-slate-800 px-5 py-3 rounded-2xl outline-none focus:border-indigo-500 transition text-sm text-white" placeholder="জবাব লিখুন..." required autocomplete="off">
+            <button type="submit" class="bg-indigo-600 px-6 rounded-2xl font-black text-white hover:bg-indigo-500 active:scale-95 transition-all"><i class="fa-solid fa-paper-plane"></i></button>
         </form>
         {% endif %}
     </div>
 </div>
 
-<!-- Socket.io Script for Real-time Auto Refresh -->
+<style>
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+</style>
+
+<!-- Optimized Socket.io Script -->
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
     const socket = io();
     const chatWindow = document.getElementById('chat-window');
     
-    // কেবল নতুন মেসেজ আসলে নিচে স্ক্রল করবে, পুরো পেজ নয়
-    function scrollToBottom() {
+    // স্মুথ স্ক্রলিং শুধু প্রথমবার এবং নতুন মেসেজে হবে
+    function scrollToBottom(isSmooth = true) {
         if (chatWindow) {
-            chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
+            chatWindow.scrollTo({
+                top: chatWindow.scrollHeight,
+                behavior: isSmooth ? 'smooth' : 'auto'
+            });
         }
     }
 
-    // চ্যাট বক্স মেমোরি ম্যানেজমেন্ট
     socket.on('new_message', function(data) {
         if (data.phone === "{{ active_chat }}") {
             const msgDiv = document.createElement('div');
             const isOutbound = data.direction === 'outbound';
-            msgDiv.className = `p-4 rounded-2xl text-xs max-w-[85%] shadow-md ${
+            msgDiv.className = `p-3 rounded-2xl text-[13px] max-w-[85%] md:max-w-sm shadow-lg ${
                 isOutbound 
                 ? 'bg-indigo-600 self-end text-white rounded-tr-none' 
                 : 'bg-slate-800 self-start text-slate-200 rounded-tl-none'
             }`;
-            msgDiv.innerHTML = data.content;
+            msgDiv.innerText = data.content; // সিকিউরিটির জন্য innerText
             chatWindow.appendChild(msgDiv);
-            scrollToBottom();
+            scrollToBottom(true);
         }
     });
 
-    // পেজ লোড হওয়ার ১ সেকেন্ড পর স্ক্রল করবে (মোবাইল ব্রাউজারের সুবিধার জন্য)
-    setTimeout(scrollToBottom, 500);
+    // পেজ লোড হবার পর দ্রুত নিচে নামিয়ে দিবে
+    window.addEventListener('load', () => {
+        setTimeout(() => scrollToBottom(false), 100);
+    });
 </script>
+{% endblock %}
