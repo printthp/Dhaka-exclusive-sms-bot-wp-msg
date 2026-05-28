@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Global Fraud Checker{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <div class="mb-10 flex justify-between items-end">
+        <div>
+            <h2 class="text-4xl font-black text-white tracking-tighter italic uppercase">ফ্রড ডিটেক্টর</h2>
+            <p class="text-slate-500 text-sm mt-2">সারাদেশের অনলাইন শপের ডাটাবেস থেকে কাস্টমার ভেরিফাই করুন।</p>
+        </div>
+        <div class="hidden md:block">
+            <span class="text-[10px] bg-rose-500/20 text-rose-400 px-4 py-2 rounded-2xl font-black uppercase tracking-widest border border-rose-500/30 font-mono">Global Shield v1.0</span>
+        </div>
+    </div>
+
+    <!-- মেইন সার্চ বক্স -->
+    <div class="glass p-10 rounded-[3rem] shadow-2xl border border-rose-500/10 mb-10 text-center">
+        <h3 class="text-slate-400 font-bold text-xs uppercase mb-8 tracking-[0.3em]">কাস্টমারের নম্বর চেক করুন</h3>
+        <div class="flex flex-col md:flex-row gap-4 max-w-3xl mx-auto">
+            <input type="text" id="fraudPhone" placeholder="01XXXXXXXXX" 
+                class="flex-1 bg-[#020617] border border-slate-800 px-8 py-5 rounded-3xl focus:border-rose-500 outline-none transition text-lg font-mono text-white text-center tracking-widest">
+            <button type="button" onclick="checkFraud()" 
+                class="bg-rose-600 hover:bg-rose-500 px-12 py-5 rounded-3xl font-black text-xs uppercase transition-all shadow-lg shadow-rose-500/20 active:scale-95">
+                সার্চ করুন
+            </button>
+        </div>
+    </div>
+
+    <!-- রেজাল্ট ডিসপ্লে (হিডেন থাকবে সার্চের আগে) -->
+    <div id="fraudResultContainer" class="hidden space-y-6 animate-in fade-in duration-500">
+        <div id="fraudResultCard" class="glass p-10 rounded-[3rem] shadow-2xl border border-slate-800">
+            <div class="flex flex-col md:flex-row justify-between items-center gap-6 text-center md:text-left">
+                <div>
+                    <h1 id="res_phone" class="text-4xl font-black text-white font-mono">01700000000</h1>
+                    <p id="res_status" class="text-xs uppercase font-black mt-2 tracking-widest">Checking Records...</p>
+                </div>
+                <div class="text-center group">
+                    <p class="text-[10px] text-slate-500 font-black uppercase mb-1">রিস্ক লেভেল</p>
+                    <div id="res_risk" class="text-6xl font-black text-rose-500 transition-all group-hover:scale-110">0%</div>
+                </div>
+            </div>
+
+            <!-- গ্রিড পরিসংখ্যান -->
+            <div class="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="p-6 bg-black/40 rounded-[2rem] border border-slate-800 text-center">
+                    <p class="text-[10px] text-slate-500 uppercase font-black mb-2">সাকসেস রেট</p>
+                    <p id="res_success" class="text-2xl font-black text-emerald-400">0%</p>
+                </div>
+                <div class="p-6 bg-black/40 rounded-[2rem] border border-slate-800 text-center">
+                    <p class="text-[10px] text-slate-500 uppercase font-black mb-2">রিটার্ন রেকর্ড</p>
+                    <p id="res_return" class="text-2xl font-black text-rose-400">0 বার</p>
+                </div>
+                <div class="p-6 bg-black/40 rounded-[2rem] border border-slate-800 text-center">
+                    <p class="text-[10px] text-slate-500 uppercase font-black mb-2">অর্ডার ফ্রিকোয়েন্সি</p>
+                    <p id="res_freq" class="text-2xl font-black text-indigo-400">Low</p>
+                </div>
+            </div>
+            
+            <p class="text-center text-[9px] text-slate-600 mt-8 uppercase font-bold tracking-widest italic">
+                * ডাটাগুলো বিভিন্ন ফ্রেট কুরিয়ার এবং ই-কমার্স এপিআই নেটওয়ার্ক থেকে সংগৃহীত।
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+async function checkFraud() {
+    const phone = document.getElementById('fraudPhone').value.trim();
+    if(!phone || phone.length < 11) return alert("দয়া করে সঠিক ১১ ডিজিটের ফোন নম্বর দিন!");
+    
+    const container = document.getElementById('fraudResultContainer');
+    const status = document.getElementById('res_status');
+    const card = document.getElementById('fraudResultCard');
+    
+    container.classList.remove('hidden');
+    card.classList.add('animate-pulse', 'border-rose-500/20');
+    status.innerText = "সারাদেশের কুরিয়ার নেটওয়ার্কে চেক করা হচ্ছে...";
+    status.className = "text-xs uppercase font-black mt-2 tracking-widest text-indigo-400";
+
+    try {
+        const response = await fetch(`/api/check-fraud?phone=${phone}`);
+        const data = await response.json();
+        
+        card.classList.remove('animate-pulse', 'border-rose-500/20');
+        document.getElementById('res_phone').innerText = phone;
+        
+        // রিস্ক অনুযায়ী কালার ও স্ট্যাটাস চেঞ্জ
+        if (data.risk > 60) {
+            status.innerText = "সতর্কতা: হাই-রিস্ক কাস্টমার!";
+            status.className = "text-xs uppercase font-black mt-2 tracking-widest text-rose-500";
+            document.getElementById('res_risk').className = "text-6xl font-black text-rose-500";
+        } else if (data.risk > 30) {
+            status.innerText = "মিডিয়াম রিস্ক কাস্টমার";
+            status.className = "text-xs uppercase font-black mt-2 tracking-widest text-amber-500";
+            document.getElementById('res_risk').className = "text-6xl font-black text-amber-500";
+        } else {
+            status.innerText = "নিরাপদ কাস্টমার ডিটেক্টেড";
+            status.className = "text-xs uppercase font-black mt-2 tracking-widest text-emerald-500";
+            document.getElementById('res_risk').className = "text-6xl font-black text-emerald-400";
+        }
+
+        document.getElementById('res_risk').innerText = data.risk + "%";
+        document.getElementById('res_success').innerText = data.success_rate + "%";
+        document.getElementById('res_return').innerText = data.return_count + " বার";
+        document.getElementById('res_freq').innerText = data.return_count > 2 ? "High" : "Normal";
+        
+    } catch(e) {
+        alert("কানেকশন এরর! আবার চেষ্টা করুন।");
+        container.classList.add('hidden');
+    }
+}
+</script>
+{% endblock %}
