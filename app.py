@@ -118,24 +118,56 @@ def get_pathao_token():
     except Exception as e: return f"Error: {str(e)}"
 
 def pull_orders_from_pathao():
-    token = get_pathao_token()
-    if not token or "Error" in token: return token
     s = get_all_settings()
-    store_id = s.get('pathao_store_id', '').strip()
-    if not store_id: return "Error: Store ID Missing"
+    token = s.get('pathao_bearer_token', '').strip()
+    store_id = str(s.get('pathao_store_id', '')).strip()
     
+    if not token or not store_id:
+        return "Error: Token and Store ID missing in settings."
+
+    # আমরা গত ৯০ দিনের ডাটা রিকোয়েস্ট করবো যাতে পুরনো ডাটা চলে আসে
+    start_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
     url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
+    
     try:
-        r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=20)
-        orders_list = r.json().get('data', {}).get('data', [])
+        # আমরা ট্রাই করছি সরাসরি ডাটা পুল করতে
+        r = requests.get(url, headers=headers, timeout=25)
+        res = r.json()
+        
+        if r.status_code != 200:
+            return f"API Status {r.status_code}: {res.get('message', 'Failed')}"
+
+        # পাঠাও ডাটা ফরম্যাট অনুযায়ী লুপ
+        orders_list = res.get('data', {}).get('data', [])
+        
+        if not orders_list:
+            return "0 (API connected but no orders found in this store)"
+
         pulled = 0
         for o in orders_list:
             p_id = str(o.get('consignment_id') or o.get('order_id'))
-            success = db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)", 
-                               (p_id, o['recipient_phone'], o['recipient_name'], o['recipient_address'], o['amount'], o['status']), commit=True)
+            p_phone = o.get('recipient_phone')
+            p_name = o.get('recipient_name')
+            p_address = o.get('recipient_address')
+            p_amount = o.get('amount')
+            p_status = o.get('status')
+            
+            # ডাটাবেসে সেভ
+            success = db_query("""
+                INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (p_id, p_phone, p_name, p_address, p_amount, p_status), commit=True)
+            
             if success: pulled += 1
+            
         return pulled
-    except Exception as e: return str(e)
+    except Exception as e:
+        return f"Conn Error: {str(e)}"
 
 # =====================================================================
 # GLOBAL FRAUD & ANALYTICS
