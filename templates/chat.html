@@ -5,7 +5,7 @@
     <!-- User List -->
     <div class="w-full md:w-80 glass rounded-[2rem] overflow-hidden flex flex-col">
         <div class="p-6 border-b border-slate-800"><h3 class="font-black text-xs uppercase text-slate-500">ইনবক্স</h3></div>
-        <div class="flex-1 overflow-y-auto">
+        <div id="user-list" class="flex-1 overflow-y-auto">
             {% for u in users %}
             <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="block p-5 border-b border-slate-800/30 hover:bg-indigo-500/10 transition {% if active_chat == u.phone %}bg-indigo-500/10 border-l-4 border-l-indigo-500{% endif %}">
                 <div class="font-bold text-sm">{{ u.phone }}</div>
@@ -20,20 +20,60 @@
             <h4 class="font-black text-indigo-400">{{ active_chat or 'চ্যাট সিলেক্ট করুন' }}</h4>
             {% if active_chat %}<button class="text-[10px] bg-amber-500 text-black px-3 py-1 rounded-full font-bold">BOT PAUSED</button>{% endif %}
         </div>
-        <div class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
+        
+        <!-- চ্যাট মেসেজ কন্টেইনার -->
+        <div id="chat-window" class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
             {% for m in chat_history %}
             <div class="p-4 rounded-2xl text-xs max-w-sm shadow-xl {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-200 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none shadow-indigo-500/20{% endif %}">
                 {{ m.content }}
             </div>
             {% endfor %}
         </div>
+
         {% if active_chat %}
-        <form action="/admin/chat/send" method="POST" class="p-6 glass border-t border-slate-800 flex gap-4">
+        <form id="send-form" action="/admin/chat/send" method="POST" class="p-6 glass border-t border-slate-800 flex gap-4">
             <input type="hidden" name="phone" value="{{ active_chat }}">
-            <input name="message" class="flex-1 bg-slate-950 border border-slate-800 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition shadow-inner text-sm" placeholder="মেসেজ লিখুন..." required autocomplete="off">
-            <button class="bg-indigo-600 px-8 rounded-2xl font-black text-white hover:bg-indigo-500 active:scale-95 transition-all"><i class="fa-solid fa-paper-plane"></i></button>
+            <input id="msg-input" name="message" class="flex-1 bg-slate-950 border border-slate-800 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition shadow-inner text-sm" placeholder="মেসেজ লিখুন..." required autocomplete="off">
+            <button type="submit" class="bg-indigo-600 px-8 rounded-2xl font-black text-white hover:bg-indigo-500 active:scale-95 transition-all"><i class="fa-solid fa-paper-plane"></i></button>
         </form>
         {% endif %}
     </div>
 </div>
+
+<!-- Socket.io Script for Real-time Auto Refresh -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+    const socket = io();
+    const chatWindow = document.getElementById('chat-window');
+    const activePhone = "{{ active_chat }}";
+
+    // পেজ লোড হলে স্ক্রল একদম নিচে নামিয়ে দিবে
+    function scrollToBottom() {
+        if (chatWindow) {
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+    }
+    scrollToBottom();
+
+    // নতুন মেসেজ আসলে তা রিয়েল-টাইমে আপডেট করা
+    socket.on('new_message', function(data) {
+        if (data.phone === activePhone) {
+            const msgDiv = document.createElement('div');
+            // মেসেজের দিক অনুযায়ী স্টাইল সিলেক্ট করা
+            const isOutbound = data.direction === 'outbound';
+            msgDiv.className = `p-4 rounded-2xl text-xs max-w-sm shadow-xl ${
+                isOutbound 
+                ? 'bg-indigo-600 self-end text-white rounded-tr-none shadow-indigo-500/20' 
+                : 'bg-slate-800 self-start text-slate-200 rounded-tl-none'
+            }`;
+            msgDiv.innerHTML = data.content;
+            
+            chatWindow.appendChild(msgDiv);
+            scrollToBottom();
+        } else {
+            // অন্য ইউজারের মেসেজ আসলে জাস্ট ব্রাউজার নোটিফিকেশন বা অ্যালার্ট দিবে
+            console.log("New message from: " + data.phone);
+        }
+    });
+</script>
 {% endblock %}
