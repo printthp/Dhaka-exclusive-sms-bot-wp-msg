@@ -15,11 +15,12 @@ from flask import Flask, request, jsonify, render_template, render_template_stri
 from xhtml2pdf import pisa 
 
 # =====================================================================
-# SYSTEM & STORAGE SETUP (Render Persistence Fixed)
+# SYSTEM & STORAGE SETUP (Render Disk Persistence)
 # =====================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
 
+# Render Shared Storage or Local Data Folder
 if os.path.exists("/opt/render/project/src/data"):
     DB_PATH = "/opt/render/project/src/data/bot_v7_ultimate.db"
 else:
@@ -28,7 +29,7 @@ else:
     DB_PATH = os.path.join(local_data_dir, "bot_v7_ultimate.db")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-ultimate-master-2026")
+app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-ultimate-v7-2026-final")
 application = app
 db_lock = Lock()
 
@@ -44,7 +45,7 @@ try:
     if os.path.exists("asm_engine.so"):
         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
         asm_lib.asm_process_command.restype = ctypes.c_char_p
-    logger.info("High-Performance Engines Linked.")
+    logger.info("High-Performance Engines Linked Successfully.")
 except Exception as e:
     logger.error(f"Engine Load Fail: {e}")
 
@@ -71,7 +72,7 @@ init_db()
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     with db_lock:
         try:
-            conn = sqlite3.connect(DB_PATH, timeout=30)
+            conn = sqlite3.connect(DB_PATH, timeout=20)
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute(query, params)
@@ -80,7 +81,7 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
             if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
             return None
         except Exception as e:
-            logger.error(f"SQL Error: {e}")
+            logger.error(f"DB Error: {e}")
             return None
         finally: conn.close()
 
@@ -97,7 +98,7 @@ def inject_globals():
     return dict(unread_chat_count=count)
 
 # =====================================================================
-# PATHAO SYNC & RECOVERY ENGINE
+# PATHAO SYNC ENGINE (Deep Scan & Hybrid Auth)
 # =====================================================================
 def get_pathao_token():
     s = get_all_settings()
@@ -115,27 +116,30 @@ def get_pathao_token():
     try:
         r = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=15)
         res = r.json()
-        new_t = res.get('access_token')
-        if new_t:
-            db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (new_t, new_t), commit=True)
-            return new_t
-        return f"Error: {res.get('message')}"
-    except Exception as e: return f"Error: {str(e)}"
+        token = res.get('access_token')
+        if token:
+            db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
+            return token
+        return None
+    except: return None
 
 def pull_orders_from_pathao():
     token = get_pathao_token()
-    if not token or "Error" in token: return token
     s = get_all_settings()
     store_id = str(s.get('pathao_store_id', '')).strip()
+    if not token or not store_id: return "Credentials Missing"
+    
     url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
     try:
         r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
         if r.status_code == 401:
             db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
-            return "Token Expired. Try again."
+            return "Token Expired. Please retry."
+            
         res = r.json()
         raw_data = res.get('data', [])
         orders_list = raw_data.get('data', []) if isinstance(raw_data, dict) else raw_data
+        
         pulled = 0
         for o in orders_list:
             p_id = str(o.get('consignment_id') or o.get('order_id'))
@@ -149,8 +153,110 @@ def pull_orders_from_pathao():
     except Exception as e: return str(e)
 
 # =====================================================================
-# CRM & CHAT FEATURES
+# GLOBAL FRAUD & ANALYTICS
 # =====================================================================
+@app.route("/api/check-fraud")
+def api_check_fraud():
+    phone = request.args.get("phone")
+    if not phone: return jsonify({"error": "No phone"}), 400
+    random.seed(phone)
+    success = random.randint(35, 100)
+    return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
+
+def get_chart_data():
+    labels, data = [], []
+    for i in range(6, -1, -1):
+        target = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+        res = db_query("SELECT COUNT(*) as c FROM orders WHERE created_at LIKE ?", (f"{target}%",), fetchone=True)
+        labels.append((datetime.now() - timedelta(days=i)).strftime('%a'))
+        data.append(res['c'] if res else 0)
+    return {"labels": labels, "data": data}
+
+# =====================================================================
+# ACTION ENDPOINTS (IMPORT, EXPORT, CHAT, INVOICE)
+# =====================================================================
+@app.route("/admin/export-report")
+def export_excel_report():
+    if not session.get("logged_in"): return redirect("/admin/login")
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True)
+    if not orders: return "No Data Available"
+    
+    df = pd.DataFrame(orders)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name=f"Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@app.route("/admin/import-pathao", methods=["POST"])
+def import_excel():
+    file = request.files.get('file')
+    if not file: return redirect("/admin?tab=dashboard&msg=No file")
+    try:
+        df = pd.read_csv(file) if file.filename.endswith('.csv') else pd.read_excel(file)
+        count = 0
+        for _, row in df.iterrows():
+            p_id = str(row.get('Order con', row.get('consignment_id', '')))
+            phone = str(row.get('Recipient phone', ''))
+            if phone:
+                db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)",
+                         (p_id, phone, str(row.get('Recipient name', 'Unknown')), str(row.get('Recipient address', '')), row.get('Collectable Amount', 0), row.get('Order stat', 'pending')), commit=True)
+                count += 1
+        return redirect(f"/admin?tab=dashboard&msg=Imported {count} Orders!")
+    except Exception as e: return redirect(f"/admin?msg=Import Fail: {str(e)}")
+
+@app.route("/invoice/<int:order_id>")
+def download_invoice(order_id):
+    order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
+    if not order: return "Not Found"
+    html = f"<html><body style='padding:50px;'><h1>Money Receipt</h1><hr><p>Customer: {order['name']}</p><p>Bill: {order['total']} BDT</p></body></html>"
+    pdf = BytesIO()
+    pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf)
+    pdf.seek(0)
+    return send_file(pdf, as_attachment=True, download_name=f"Invoice_{order_id}.pdf")
+
+# =====================================================================
+# ADMIN PANEL ROUTES
+# =====================================================================
+@app.route("/")
+def index(): return redirect("/admin")
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
+        auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
+        if auth:
+            session["logged_in"], session["username"] = True, auth["username"]
+            return redirect("/admin?tab=dashboard")
+    return render_template_string('<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;cursor:pointer;">ENTER</button></form></body>')
+
+@app.route("/admin")
+def admin_portal():
+    if not session.get("logged_in"): return redirect("/admin/login")
+    tab, msg, chat_with = request.args.get("tab", "dashboard"), request.args.get("msg", ""), request.args.get("chat_with", "")
+    s = get_all_settings()
+    
+    analytics = {"total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
+                 "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+                 "chart_data": get_chart_data()}
+    
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
+    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
+    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    
+    chat_history = []
+    if chat_with:
+        chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 60", (chat_with,), fetchall=True) or []
+        chat_history.reverse()
+
+    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
+
+@app.route("/admin/sync-pathao-status")
+def sync_trigger():
+    res = pull_orders_from_pathao()
+    return redirect(url_for('admin_portal', msg=f"Process Result: {res}"))
+
 @app.route("/admin/chat/send", methods=["POST"])
 def admin_send_message():
     phone, msg = request.form.get("phone"), request.form.get("message")
@@ -161,96 +267,17 @@ def admin_send_message():
 @app.route("/admin/chat/delete/<phone>")
 def delete_chat(phone):
     db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
-    return redirect("/admin?tab=chat&msg=Deleted")
-
-# =====================================================================
-# REPORTING - EXCEL EXPORT & IMPORT
-# =====================================================================
-@app.route("/admin/export-report")
-def export_excel():
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True)
-    df = pd.DataFrame(orders)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    output.seek(0)
-    return send_file(output, as_attachment=True, download_name="Dhaka_Exclusive_Reports.xlsx")
-
-@app.route("/admin/import-pathao", methods=["POST"])
-def import_excel():
-    file = request.files.get('file')
-    try:
-        df = pd.read_csv(file) if file.filename.endswith('.csv') else pd.read_excel(file)
-        count = 0
-        for _, row in df.iterrows():
-            p_id = str(row.get('Order con', ''))
-            if p_id:
-                db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)",
-                         (p_id, str(row.get('Recipient phone')), str(row.get('Recipient name')), str(row.get('Recipient address')), row.get('Collectable Amount', 0), row.get('Order stat')), commit=True)
-                count += 1
-        return redirect("/admin?tab=orders&msg=Imported Successfully!")
-    except: return redirect("/admin?msg=Import Fail")
-
-# =====================================================================
-# ADMIN PANEL ROUTES
-# =====================================================================
-@app.route("/admin")
-def admin_portal():
-    if not session.get("logged_in"): return redirect("/admin/login")
-    tab, msg, chat_with = request.args.get("tab", "dashboard"), request.args.get("msg", ""), request.args.get("chat_with", "")
-    s = get_all_settings()
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True)
-    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True)
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 40", fetchall=True)
-    chat_history = []
-    if chat_with:
-        chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 60", (chat_with,), fetchall=True) or []
-        chat_history.reverse()
-
-    analytics = {"total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-                 "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
-                 "chart_data": {"labels": ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], "data": [random.randint(5,25) for _ in range(7)]}}
-    
-    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
-
-@app.route("/admin/sync-pathao-status")
-def trigger_sync():
-    res = pull_orders_from_pathao()
-    return redirect(url_for('admin_portal', tab='orders', msg=f"Process Result: {res}"))
-
-@app.route("/invoice/<int:order_id>")
-def download_invoice(order_id):
-    order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
-    html = f"<html><body><h1>Invoice #{order_id}</h1><p>Customer: {order['name']}</p><p>Total: {order['total']}৳</p></body></html>"
-    pdf = BytesIO()
-    pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf)
-    pdf.seek(0)
-    return send_file(pdf, as_attachment=True, download_name=f"Invoice_{order_id}.pdf")
-
-@app.route("/api/check-fraud")
-def api_check_fraud():
-    phone = request.args.get("phone")
-    random.seed(phone)
-    success = random.randint(35, 100)
-    return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
-
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "POST":
-        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
-        auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
-        if auth:
-            session["logged_in"], session["username"] = True, auth["username"]
-            return redirect("/admin?tab=dashboard")
-    return render_template_string('<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User"><br><input name="password" type="password" placeholder="Pass"><br><button>ENTER</button></form></body>')
+    return redirect("/admin?tab=chat&msg=Chat Deleted")
 
 @app.route("/admin/settings/save", methods=["POST"])
 def save_settings():
-    for k, v in request.form.items(): db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
-    return redirect("/admin?tab=settings&msg=Updated")
+    for k, v in request.form.items():
+        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
+    return redirect("/admin?tab=settings&msg=Updated Successfully")
 
 @app.route("/admin/logout")
-def logout(): session.clear(); return redirect("/admin/login")
+def admin_logout():
+    session.clear(); return redirect("/admin/login")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
