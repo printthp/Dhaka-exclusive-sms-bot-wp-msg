@@ -1,102 +1,316 @@
 {% extends "base.html" %}
-{% block title %}Inbox{% endblock %}
+{% block title %}লাইভ ইনবক্স{% endblock %}
 {% block content %}
-<div class="flex h-[88vh] md:h-[82vh] gap-4 flex-col md:flex-row overflow-hidden">
-    <!-- কাস্টমার লিস্ট -->
-    <div class="h-44 md:h-auto w-full md:w-80 glass rounded-[2rem] overflow-hidden flex flex-col shrink-0">
-        <div class="p-4 border-b border-slate-800 bg-slate-900/50">
-            <h3 class="font-black text-[10px] uppercase text-slate-500 tracking-widest text-center md:text-left">ইনবক্স (সক্রিয়)</h3>
+<style>
+    .chat-container { display: flex; flex-direction: column; height: 100%; }
+    .chat-list { 
+        background: rgba(15,23,42,0.8); 
+        border-radius: 1.5rem; 
+        border: 1px solid rgba(255,255,255,0.05);
+        overflow-y: auto;
+        max-height: 200px;
+    }
+    @media (min-width: 768px) {
+        .chat-layout { display: grid; grid-template-columns: 320px 1fr; gap: 1.5rem; height: calc(100vh - 120px); }
+        .chat-list { max-height: none; height: 100%; }
+    }
+    .chat-area { 
+        display: flex; 
+        flex-direction: column; 
+        background: rgba(15,23,42,0.6); 
+        border-radius: 1.5rem; 
+        border: 1px solid rgba(255,255,255,0.05);
+        height: calc(100vh - 200px);
+    }
+    @media (min-width: 768px) {
+        .chat-area { height: calc(100vh - 120px); }
+    }
+    .messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        background-image: radial-gradient(circle at 1px 1px, rgba(99,102,241,0.08) 1px, transparent 0);
+        background-size: 20px 20px;
+    }
+    .msg-inbound {
+        align-self: flex-start;
+        background: rgba(30,41,59,0.9);
+        color: #e2e8f0;
+        padding: 1rem 1.25rem;
+        border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
+        max-width: 85%;
+        word-break: break-word;
+        border: 1px solid rgba(255,255,255,0.05);
+    }
+    .msg-outbound {
+        align-self: flex-end;
+        background: linear-gradient(135deg, #6366f1, #818cf8);
+        color: white;
+        padding: 1rem 1.25rem;
+        border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
+        max-width: 85%;
+        word-break: break-word;
+    }
+    .msg-time { font-size: 10px; opacity: 0.6; margin-top: 6px; }
+    .chat-header {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(15,23,42,0.8);
+        border-radius: 1.5rem 1.5rem 0 0;
+    }
+    .chat-input-bar {
+        padding: 0.75rem 1rem;
+        border-top: 1px solid rgba(255,255,255,0.05);
+        background: rgba(15,23,42,0.9);
+        border-radius: 0 0 1.5rem 1.5rem;
+    }
+    .input-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: rgba(30,41,59,0.8);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 1.5rem;
+        padding: 0.4rem 0.4rem 0.4rem 0.75rem;
+    }
+    .input-wrapper input[type="text"] {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: #e2e8f0;
+        font-size: 14px;
+        padding: 0.5rem 0;
+        outline: none;
+    }
+    .input-wrapper input[type="text"]::placeholder { color: #64748b; }
+    .action-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+    .btn-image { background: rgba(16,185,129,0.15); color: #10b981; }
+    .btn-image:hover { background: rgba(16,185,129,0.3); }
+    .btn-voice { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .btn-voice:hover { background: rgba(245,158,11,0.3); }
+    .btn-call { background: rgba(99,102,241,0.15); color: #818cf8; }
+    .btn-call:hover { background: rgba(99,102,241,0.3); }
+    .btn-send { background: linear-gradient(135deg, #6366f1, #818cf8); color: white; }
+    .btn-send:hover { transform: scale(1.05); }
+    .chat-contact {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid rgba(255,255,255,0.03);
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .chat-contact:hover, .chat-contact.active {
+        background: rgba(99,102,241,0.1);
+    }
+    .chat-contact.active { border-left: 3px solid #6366f1; }
+    .delete-btn {
+        font-size: 11px;
+        color: #f43f5e;
+        padding: 4px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(244,63,94,0.2);
+        background: rgba(244,63,94,0.05);
+        text-decoration: none;
+    }
+    .recording { animation: pulse-red 1s infinite; }
+    @keyframes pulse-red {
+        0%, 100% { background: rgba(244,63,94,0.15); }
+        50% { background: rgba(244,63,94,0.4); }
+    }
+    #imagePreview img {
+        max-height: 120px;
+        border-radius: 12px;
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+</style>
+
+{% if msg %}
+<div class="mb-4 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold rounded-2xl text-sm flex items-center gap-2">
+    <i class="fa-solid fa-circle-check"></i> {{ msg }}
+</div>
+{% endif %}
+
+<div class="chat-layout gap-4">
+    <!-- Contact List -->
+    <div class="chat-list mb-4 md:mb-0">
+        <div class="p-4 border-b border-white/5">
+            <h3 class="font-bold text-sm text-slate-300 flex items-center gap-2">
+                <i class="fa-solid fa-users text-indigo-400"></i> অ্যাক্টিভ কাস্টমারস
+                <span class="ml-auto text-[10px] bg-indigo-600/20 text-indigo-400 px-2 py-1 rounded-full">{{ users|length }}</span>
+            </h3>
         </div>
-        <div id="user-list" class="flex-1 overflow-y-auto custom-scrollbar">
-            {% for u in users %}
-            <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="block p-4 border-b border-slate-800/30 hover:bg-indigo-500/10 transition-all {% if active_chat == u.phone %}bg-indigo-500/10 border-l-4 border-l-indigo-500{% endif %}">
-                <div class="font-bold text-xs text-white">{{ u.phone }}</div>
-                <div class="text-[9px] text-slate-500 mt-0.5">Active: {{ u.last_active }}</div>
-            </a>
-            {% else %}
-            <div class="p-10 text-center text-[10px] text-slate-600 uppercase font-black">Empty Chat</div>
-            {% endfor %}
-        </div>
+        {% for u in users %}
+        <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="chat-contact {% if active_chat == u.phone %}active{% endif %}">
+            <div>
+                <div class="font-bold text-white text-sm">{{ u.phone }}</div>
+                <div class="text-[11px] text-slate-500">{{ u.name or 'Customer' }} &bull; {{ u.last_active }}</div>
+            </div>
+            <i class="fa-solid fa-chevron-right text-slate-600 text-xs"></i>
+        </a>
+        {% endfor %}
     </div>
 
-    <!-- মেইন চ্যাট উইন্ডো -->
-    <div class="flex-1 glass rounded-[2rem] overflow-hidden flex flex-col relative min-h-0">
-        <div class="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10 px-6">
+    <!-- Chat Area -->
+    <div class="chat-area">
+        {% if active_chat %}
+        <div class="chat-header">
             <div class="flex items-center gap-3">
-                <h4 class="font-black text-indigo-400 text-sm tracking-tighter">
-                    <i class="fa-solid fa-circle text-[7px] mr-1.5 text-emerald-500"></i> {{ active_chat or 'চ্যাট সিলেক্ট করুন' }}
-                </h4>
-            </div>
-            {% if active_chat %}
-            <div class="flex items-center gap-4">
-                <a href="/admin/chat/delete/{{ active_chat }}" onclick="return confirm('পুরো চ্যাট ডিলিট করবেন? এই কাস্টমারের সব মেসেজ মুছে যাবে।')" class="text-rose-400 text-[10px] uppercase font-black hover:text-white transition-colors border border-rose-500/20 px-3 py-1 rounded-full">
-                    <i class="fa-solid fa-trash-can mr-1"></i> Delete Chat
-                </a>
-            </div>
-            {% endif %}
-        </div>
-        
-        <!-- চ্যাট মেসেজ উইন্ডো (Socket-free Version) -->
-        <div id="chat-window" class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-slate-950/20 custom-scrollbar scroll-smooth">
-            {% for m in chat_history %}
-            <div class="p-4 rounded-2xl text-[13px] max-w-[85%] md:max-w-md shadow-lg leading-relaxed {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-100 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none{% endif %}">
-                {{ m.content }}
-                <div class="text-[8px] mt-1 opacity-40 {% if m.direction == 'inbound' %}text-left{% else %}text-right{% endif %} font-black uppercase">
-                    {{ m.created_at or 'Just Now' }}
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center font-black text-sm text-white">
+                    {{ active_chat[-4:] }}
+                </div>
+                <div>
+                    <div class="font-bold text-white text-sm">{{ active_chat }}</div>
+                    <div class="text-[10px] text-emerald-400 flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Online
+                    </div>
                 </div>
             </div>
-            {% else %}
-            {% if active_chat %}
-            <div class="flex-1 flex items-center justify-center text-slate-600 italic text-xs">আপনার কথোপকথন এখানে শুরু করুন...</div>
-            {% else %}
-            <div class="flex-1 flex flex-col items-center justify-center text-slate-700">
-                <i class="fa-solid fa-comments text-5xl mb-4 opacity-20"></i>
-                <p class="uppercase text-[10px] font-black tracking-widest">Inbox System Ready</p>
+            <div class="flex items-center gap-2">
+                <a href="tel:{{ active_chat }}" class="action-btn btn-call" title="Call"><i class="fa-solid fa-phone"></i></a>
+                <a href="/admin/chat/delete/{{ active_chat }}" class="delete-btn" onclick="return confirm('ডিলিট করতে চান?')">ডিলিট</a>
             </div>
-            {% endif %}
+        </div>
+
+        <div class="messages" id="messageBox">
+            {% for m in chat_history %}
+            <div class="{% if m.direction == 'inbound' %}msg-inbound{% else %}msg-outbound{% endif %}">
+                <div>{{ m.content }}</div>
+                <div class="msg-time">{{ m.created_at or '' }}</div>
+            </div>
             {% endfor %}
         </div>
 
-        {% if active_chat %}
-        <form id="send-form" action="/admin/chat/send" method="POST" class="p-4 glass border-t border-slate-800 flex gap-3">
-            <input type="hidden" name="phone" value="{{ active_chat }}">
-            <input id="msg-input" name="message" class="flex-1 bg-slate-900 border border-white/5 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition text-sm text-white placeholder-slate-600" placeholder="একটি বার্তা লিখুন..." required autocomplete="off">
-            <button type="submit" class="bg-indigo-600 px-8 rounded-2xl font-black text-white hover:bg-white hover:text-indigo-600 active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
-                <i class="fa-solid fa-paper-plane"></i>
-            </button>
-        </form>
+        <!-- Image Preview -->
+        <div id="imagePreview" class="px-4 hidden"></div>
+
+        <!-- Input Bar -->
+        <div class="chat-input-bar">
+            <form id="chatForm" action="/admin/chat/send" method="POST" enctype="multipart/form-data" class="flex flex-col gap-2">
+                <input type="hidden" name="phone" value="{{ active_chat }}">
+                
+                <div class="input-wrapper">
+                    <!-- Image Upload -->
+                    <label for="chatImage" class="action-btn btn-image cursor-pointer" title="ছবি পাঠান">
+                        <i class="fa-solid fa-image"></i>
+                    </label>
+                    <input type="file" id="chatImage" name="image" accept="image/*" class="hidden" onchange="previewImage(this)">
+                    
+                    <!-- Voice Button -->
+                    <button type="button" id="voiceBtn" class="action-btn btn-voice" title="ভয়েস মেসেজ" onclick="toggleVoice()">
+                        <i class="fa-solid fa-microphone"></i>
+                    </button>
+                    
+                    <!-- Call Button -->
+                    <a href="tel:{{ active_chat }}" class="action-btn btn-call" title="কল করুন">
+                        <i class="fa-solid fa-phone"></i>
+                    </a>
+                    
+                    <!-- Text Input -->
+                    <input type="text" name="message" id="messageInput" placeholder="মেসেজ লিখুন..." autocomplete="off">
+                    
+                    <!-- Send Button -->
+                    <button type="submit" class="action-btn btn-send" title="পাঠান">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% else %}
+        <div class="flex-1 flex items-center justify-center flex-col text-slate-500">
+            <i class="fa-regular fa-comments text-6xl mb-4 opacity-20"></i>
+            <p class="font-bold">কাস্টমার সিলেক্ট করুন</p>
+            <p class="text-xs mt-1">বাম পাশ থেকে একটি চ্যাট সিলেক্ট করুন</p>
+        </div>
         {% endif %}
     </div>
 </div>
 
-<style>
-    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-    /* চ্যাট ব্যাকগ্রাউন্ড প্যাটার্ন */
-    #chat-window {
-        background-color: #0c1120;
-        background-image: url("https://www.transparenttextures.com/patterns/fake-luxury.png");
-    }
-</style>
-
 <script>
-    // অটো নিচে স্ক্রল করার ফাংশন
-    function scrollToBottom() {
-        const chatWindow = document.getElementById('chat-window');
-        if (chatWindow) {
-            chatWindow.scrollTop = chatWindow.scrollHeight;
+    // Auto scroll to bottom
+    const msgBox = document.getElementById('messageBox');
+    if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
+
+    // Image Preview
+    function previewImage(input) {
+        const preview = document.getElementById('imagePreview');
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.innerHTML = '<div class="flex items-center gap-2 bg-slate-800/50 p-2 rounded-xl"><img src="' + e.target.result + '" class="h-16 rounded-lg"><button type="button" onclick="clearImage()" class="text-rose-400 text-xs"><i class="fa-solid fa-xmark"></i> Remove</button></div>';
+                preview.classList.remove('hidden');
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+    function clearImage() {
+        document.getElementById('chatImage').value = '';
+        document.getElementById('imagePreview').classList.add('hidden');
+        document.getElementById('imagePreview').innerHTML = '';
+    }
+
+    // Voice Recording Simulation
+    let recording = false;
+    let mediaRecorder;
+    let audioChunks = [];
+    
+    async function toggleVoice() {
+        const btn = document.getElementById('voiceBtn');
+        const input = document.getElementById('messageInput');
+        
+        if (!recording) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    // Here you would upload the audio file
+                    input.value = "[Voice Message]";
+                    btn.classList.remove('recording');
+                    btn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+                    recording = false;
+                };
+                mediaRecorder.start();
+                recording = true;
+                btn.classList.add('recording');
+                btn.innerHTML = '<i class="fa-solid fa-stop"></i>';
+                input.placeholder = "রেকর্ডিং... আবার চাপুন থামাতে";
+            } catch (err) {
+                alert('মাইক্রোফোন এক্সেস দিন');
+            }
+        } else {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(t => t.stop());
         }
     }
 
-    // পেজ লোড এবং সব রিসোর্স লোড হওয়ার পর স্ক্রল করবে
-    window.addEventListener('load', () => {
-        setTimeout(scrollToBottom, 100);
+    // Enter to send
+    document.getElementById('messageInput')?.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('chatForm').submit();
+        }
     });
-
-    // ফর্ম সাবমিট হবার পর স্ক্রল ধরে রাখবে
-    if(window.history.replaceState) {
-        window.history.replaceState(null, null, window.location.href);
-    }
 </script>
 {% endblock %}
