@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="mb-8">
+        <h2 class="text-3xl font-black text-white">সিস্টেম কনফিগারেশন</h2>
+        <p class="text-slate-500 text-sm">বটের মেইন সেটিংস গুলো এখান থেকে পরিবর্তন করুন।</p>
+    </div>
+    <form action="/admin/settings/save" method="POST" class="glass p-10 rounded-[2.5rem] space-y-8 shadow-2xl">
+        <div class="space-y-4">
+            <div>
+                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">দোকানের নাম</label>
+                <input name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900 border border-slate-800 px-6 py-4 rounded-2xl mt-2 focus:border-indigo-500 outline-none transition focus:ring-2 focus:ring-indigo-500/20">
+            </div>
+            <div>
+                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Gemini API Key</label>
+                <input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900 border border-slate-800 px-6 py-4 rounded-2xl mt-2 focus:border-indigo-500 outline-none transition">
+            </div>
+            <div>
+                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">AI ইনস্ট্রাকশন (System Prompt)</label>
+                <textarea name="ai_system_instruction" rows="5" class="w-full bg-slate-900 border border-slate-800 px-6 py-4 rounded-2xl mt-2 focus:border-indigo-500 outline-none transition">{{ settings.get('ai_system_instruction', '') }}</textarea>
+            </div>
+        </div>
+        <button type="submit" class="w-full bg-indigo-600 py-5 rounded-[1.5rem] font-black uppercase text-xs tracking-widest shadow-xl shadow-indigo-500/20 hover:bg-indigo-500 hover:-translate-y-1 transition-all">কনফিগারেশন সেভ করুন</button>
+    </form>
+</div>
+{% endblock %}
