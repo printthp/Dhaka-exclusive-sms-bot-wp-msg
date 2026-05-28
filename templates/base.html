@@ -7,9 +7,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; }
+        body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; margin: 0; overflow-x: hidden; }
         .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
-        .sidebar-link:hover { background: rgba(99, 102, 241, 0.1); color: #818cf8; }
+        .sidebar-link:hover { background: rgba(99, 102, 241, 0.1); color: #818cf8; transform: translateX(5px); }
+        .sidebar-link { transition: all 0.3s ease; }
         /* কাস্টম স্ক্রলবার */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -18,55 +19,73 @@
 </head>
 <body class="min-h-screen flex flex-col md:flex-row">
 
-    <!-- সাইডবার কন্ট্রোলার (মোবাইলের জন্য উপরে লোগো) -->
+    <!-- মোবাইল নেভিগেশন বার (উপরে) -->
     <div class="md:hidden glass border-b border-white/5 p-4 flex justify-between items-center sticky top-0 z-50">
         <h1 class="text-lg font-black text-indigo-400 uppercase tracking-tighter">Dhaka Pro</h1>
-        <button onclick="toggleSidebar()" class="text-indigo-400 p-2"><i class="fa-solid fa-bars-staggered"></i></button>
+        <button onclick="toggleSidebar()" class="text-indigo-400 p-2 focus:outline-none"><i class="fa-solid fa-bars-staggered text-xl"></i></button>
     </div>
 
     <!-- Sidebar -->
-    <aside id="sidebar" class="hidden md:flex fixed md:relative w-full md:w-80 h-full bg-[#020617] border-r border-slate-800 flex-col shrink-0 z-40 transition-all duration-300">
+    <aside id="sidebar" class="hidden md:flex fixed md:relative w-full md:w-80 h-[calc(100vh-60px)] md:h-screen bg-[#020617] border-r border-slate-800 flex-col shrink-0 z-40 overflow-hidden">
         
-        <!-- লোগো সেকশন (ডেস্কটপ) -->
+        <!-- লোগো সেকশন (ডেস্কটপ ভিউতে শো করবে) -->
         <div class="p-8 text-center hidden md:block">
             <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400 uppercase tracking-tighter">Dhaka Pro</h1>
-            <p class="text-[9px] text-slate-600 font-black tracking-[0.3em] mt-1">V7 ULTIMATE ENGINE</p>
+            <p class="text-[9px] text-slate-600 font-black tracking-[0.3em] mt-1 shadow-sm">V7 ULTIMATE ENGINE</p>
         </div>
 
         <!-- মেইন মেনু আইটেম -->
-        <nav class="flex-1 px-5 space-y-2 mt-4 overflow-y-auto">
-            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest ml-4 mb-2 opacity-50">মেইন মেনু</p>
-            <a href="/admin?tab=dashboard" class="sidebar-link flex items-center p-4 rounded-2xl transition-all"><i class="fa-solid fa-chart-pie w-6 text-indigo-500"></i> ড্যাশবোর্ড</a>
-            <a href="/admin?tab=orders" class="sidebar-link flex items-center p-4 rounded-2xl transition-all"><i class="fa-solid fa-shopping-cart w-6 text-emerald-500"></i> অর্ডার ম্যানেজমেন্ট</a>
-            <a href="/admin?tab=chat" class="sidebar-link flex items-center p-4 rounded-2xl transition-all justify-between">
-                <span class="flex items-center"><i class="fa-solid fa-comment-dots w-6 text-amber-500"></i> লাইভ ইনবক্স</span>
+        <nav class="flex-1 px-5 space-y-1 mt-4 overflow-y-auto">
+            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest ml-4 mb-3 opacity-50">মেইন মেনু</p>
+            
+            <a href="/admin?tab=dashboard" class="sidebar-link flex items-center p-4 rounded-2xl">
+                <i class="fa-solid fa-chart-pie w-6 text-indigo-500"></i> <span class="ml-2">ড্যাশবোর্ড</span>
+            </a>
+            
+            <a href="/admin?tab=orders" class="sidebar-link flex items-center p-4 rounded-2xl">
+                <i class="fa-solid fa-shopping-cart w-6 text-emerald-500"></i> <span class="ml-2">অর্ডার ম্যানেজমেন্ট</span>
+            </a>
+            
+            <a href="/admin?tab=chat" class="sidebar-link flex items-center p-4 rounded-2xl justify-between">
+                <span class="flex items-center"><i class="fa-solid fa-comment-dots w-6 text-amber-500"></i> <span class="ml-2">লাইভ ইনবক্স</span></span>
                 {% if unread_chat_count > 0 %}<span class="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">{{ unread_chat_count }}</span>{% endif %}
             </a>
-            <a href="/admin?tab=inventory" class="sidebar-link flex items-center p-4 rounded-2xl transition-all"><i class="fa-solid fa-boxes-stacked w-6 text-purple-500"></i> ইনভেন্টরি</a>
-            <a href="/admin?tab=agents" class="sidebar-link flex items-center p-4 rounded-2xl transition-all"><i class="fa-solid fa-users-gear w-6 text-cyan-500"></i> টিম ম্যানেজার</a>
+
+            <!-- ফ্রড চেকার মেনু (নতুন যোগ করা হয়েছে) -->
+            <a href="/admin?tab=frauds" class="sidebar-link flex items-center p-4 rounded-2xl">
+                <i class="fa-solid fa-user-shield w-6 text-rose-500"></i> <span class="ml-2">ফ্রড চেকার</span>
+            </a>
+
+            <a href="/admin?tab=inventory" class="sidebar-link flex items-center p-4 rounded-2xl">
+                <i class="fa-solid fa-boxes-stacked w-6 text-purple-500"></i> <span class="ml-2">ইনভেন্টরি</span>
+            </a>
+            
+            <a href="/admin?tab=agents" class="sidebar-link flex items-center p-4 rounded-2xl">
+                <i class="fa-solid fa-users-gear w-6 text-cyan-500"></i> <span class="ml-2">টিম ম্যানেজার</span>
+            </a>
         </nav>
 
         <!-- নিচের ফিক্সড সেকশন (সেটিংস, এডমিন ও লগআউট) -->
         <div class="p-6 border-t border-white/5 bg-[#020617] mt-auto">
-            <a href="/admin?tab=settings" class="sidebar-link flex items-center p-4 rounded-2xl mb-4 transition-all">
-                <i class="fa-solid fa-sliders w-6 text-slate-400"></i> সেটিংস
+            <a href="/admin?tab=settings" class="sidebar-link flex items-center p-4 rounded-2xl mb-4">
+                <i class="fa-solid fa-sliders w-6 text-slate-400"></i> <span class="ml-2">সিস্টেম সেটিংস</span>
             </a>
             
-            <div class="glass p-4 rounded-3xl flex items-center justify-between mb-4">
+            <div class="glass p-4 rounded-3xl flex items-center justify-between mb-4 border border-indigo-500/10 shadow-lg">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-700 flex items-center justify-center font-black text-sm text-white shadow-lg shadow-indigo-500/20">
+                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-700 flex items-center justify-center font-black text-sm text-white shadow-md">
                         {{ session.get('username', 'A')[0].upper() }}
                     </div>
                     <div>
                         <p class="text-xs font-black text-white">{{ session.get('username') }}</p>
-                        <p class="text-[9px] text-slate-500 font-bold uppercase">Administrator</p>
+                        <p class="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Authorized Admin</p>
                     </div>
                 </div>
                 <a href="/admin/logout" class="text-rose-500 hover:text-rose-400 p-2 transition-all" title="Logout">
-                    <i class="fa-solid fa-right-from-bracket"></i>
+                    <i class="fa-solid fa-right-from-bracket text-lg"></i>
                 </a>
             </div>
-            <p class="text-[8px] text-slate-700 text-center font-bold tracking-widest uppercase">System Operational & Secure</p>
+            <p class="text-[8px] text-slate-700 text-center font-bold tracking-widest uppercase mb-2">Secure Cloud Node Active</p>
         </div>
     </aside>
 
@@ -76,7 +95,7 @@
     </main>
 
     <script>
-        // মোবাইলে মেনু ওপেন/ক্লোজ করার জন্য
+        // মোবাইলে মেনু কন্ট্রোল করার ফাংশন
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             if (sidebar.classList.contains('hidden')) {
@@ -87,6 +106,15 @@
                 sidebar.classList.remove('flex');
             }
         }
+
+        // লিংকে ক্লিক করলে মোবাইলে মেনু অটো কলাপ্স হবে
+        document.querySelectorAll('.sidebar-link').forEach(link => {
+            link.addEventListener('click', () => {
+                if (window.innerWidth < 768) {
+                    toggleSidebar();
+                }
+            });
+        });
     </script>
 </body>
 </html>
