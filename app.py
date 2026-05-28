@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()  # হাই-ট্রাফিক হ্যান্ডেল করার জন্য সবার আগে এটি প্রয়োজন
+
 import os
 import sys
 import json
@@ -7,7 +10,7 @@ import ctypes
 import time
 import requests
 from datetime import datetime
-from threading import Thread, Lock
+from threading import Lock
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 from flask_socketio import SocketIO, emit
 
@@ -18,8 +21,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
 app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-pro-ultimate-2026")
+# Socket.io setup for real-time chat with eventlet
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 application = app
 
 # =====================================================================
@@ -55,8 +59,11 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, stock INTEGER, image_url TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS complaints (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, complaint_text TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
+        # ডিফল্ট অ্যাডমিন
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Dhaka Exclusive')")
         conn.commit()
@@ -95,7 +102,7 @@ def health():
         "status": "online",
         "cpp_engine": lib is not None,
         "asm_engine": asm_lib is not None,
-        "version": "7.0.0-PRO",
+        "version": "7.0.0-PRO-EVENTLET",
         "time": datetime.now().isoformat()
     })
 
@@ -111,66 +118,88 @@ def admin_login():
         flash("ভুল ইউজারনেম বা পাসওয়ার্ড!", "error")
     return render_template_string("""
         <body style="background:#0f172a; color:white; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh;">
-            <form method="POST" style="background:#1e293b; padding:40px; border-radius:30px; width:300px; text-align:center; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+            <form method="POST" style="background:#1e293b; padding:40px; border-radius:30px; width:300px; text-align:center;">
                 <h2 style="color:#6366f1; margin-bottom:20px;">ADMIN ACCESS</h2>
-                <input name="username" placeholder="User" style="width:100%; padding:15px; margin:10px 0; border-radius:12px; border:none; background:#0f172a; color:white;">
-                <input name="password" type="password" placeholder="Pass" style="width:100%; padding:15px; margin:10px 0; border-radius:12px; border:none; background:#0f172a; color:white;">
+                <input name="username" placeholder="User" required style="width:100%; padding:15px; margin:10px 0; border-radius:12px; border:none; background:#0f172a; color:white;">
+                <input name="password" type="password" placeholder="Pass" required style="width:100%; padding:15px; margin:10px 0; border-radius:12px; border:none; background:#0f172a; color:white;">
                 <button style="width:100%; padding:15px; background:#6366f1; color:white; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin-top:20px;">LOGIN</button>
             </form>
         </body>
     """)
+
 @app.route("/admin")
 def admin_portal():
     if not session.get("logged_in"): 
         return redirect("/admin/login")
     
-    # ইউজার ইন্টারফেস ট্যাব সিলেক্ট করা (URL থেকে ট্যাব ভ্যালু নিবে)
     tab = request.args.get("tab", "dashboard")
     chat_with = request.args.get("chat_with", "")
     
-    # ১. সেটিংস ডাটা
     s = get_all_settings()
-    
-    # ২. অ্যানালিটিক্স ডাটা (অর্ডারের সংখ্যা ও মোট টাকা)
     analytics = {
         "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
         "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0
     }
-    
-    # ৩. নোটিফিকেশন কাউন্ট (লাইভ চ্যাট ও কমপ্লেইন)
     unread_chat_count = db_query("SELECT COUNT(*) as c FROM messages WHERE direction='inbound'", fetchone=True)["c"] or 0
     pending_complaints_count = db_query("SELECT COUNT(*) as c FROM complaints WHERE status='pending'", fetchone=True)["c"] or 0
     
-    # ৪. ডাটাবেস থেকে সকল রেকর্ড সংগ্রহ
     orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
     products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
-    
-    # ৫. চ্যাট হিস্ট্রি (যদি কোনো ইউজার সিলেক্ট করা থাকে)
     chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id ASC", (chat_with,), fetchall=True) or [] if chat_with else []
 
-    # ৬. ফলাফল রেন্ডার (এটাই মেইন পার্ট)
     try:
         return render_template(f"{tab}.html", 
-                               settings=s, 
-                               analytics=analytics, 
-                               orders=orders, 
-                               users=users, 
-                               products=products, 
-                               agent_logs=agent_logs, 
+                               settings=s, analytics=analytics, orders=orders, 
+                               users=users, products=products, agent_logs=agent_logs, 
                                unread_chat_count=unread_chat_count,
                                pending_complaints_count=pending_complaints_count,
-                               active_chat=chat_with,
-                               chat_history=chat_history)
+                               active_chat=chat_with, chat_history=chat_history)
     except Exception as e:
-        logger.error(f"Template rendering error: {e}")
-        return f"<h1>Error: '{tab}.html' ফাইলটি 'templates' ফোল্ডারে পাওয়া যায়নি।</h1>"
+        return f"<h1>Error: Template '{tab}.html' not found.</h1>"
+
+@app.route("/admin/chat/send", methods=["POST"])
+def admin_send_message():
+    if not session.get("logged_in"): return redirect("/admin/login")
+    phone, msg = request.form.get("phone"), request.form.get("message")
+    if phone and msg:
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
+                 (phone, msg, session.get("username")), commit=True)
+        # ব্রাউজারে রিয়েল-টাইম কনফার্মেশন পাঠানো (নিজেদের রিপ্লাই দেখার জন্য)
+        socketio.emit('new_message', {'phone': phone, 'content': msg, 'direction': 'outbound'}, namespace='/')
+    return redirect(f"/admin?tab=chat&chat_with={phone}")
+
+@app.route("/admin/settings/save", methods=["POST"])
+def save_settings():
+    if not session.get("logged_in"): return redirect("/admin/login")
+    for k, v in request.form.items():
+        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
+    return redirect("/admin?tab=settings&msg=Updated")
 
 @app.route("/admin/logout")
 def admin_logout():
     session.clear()
     return redirect("/admin/login")
 
+# =====================================================================
+# WHATSAPP WEBHOOK (SOCKET.IO Integration)
+# =====================================================================
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json(silent=True) or {}
+    try:
+        # এখানে আপনার ফেসবুক মেসেজ হ্যান্ডলিং লজিক থাকবে
+        # যখনই কোনো মেসেজ রিসিভ হবে, নিচের লাইনটি অটো-রিফ্রেশ ট্রিগার করবে:
+        # socketio.emit('new_message', {'phone': sender, 'content': text, 'direction': 'inbound'}, namespace='/')
+        pass
+    except: pass
+    return "OK", 200
+
+# =====================================================================
+# START SERVER
+# =====================================================================
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 5000))
+    # ইভেন্টলেট অটোমেটিক হাই-কানেকশন হ্যান্ডেল করবে
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)
