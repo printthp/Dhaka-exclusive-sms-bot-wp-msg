@@ -45,35 +45,30 @@
 <script>
     const socket = io();
     const chatWindow = document.getElementById('chat-window');
-    const activePhone = "{{ active_chat }}";
-
-    // পেজ লোড হলে স্ক্রল একদম নিচে নামিয়ে দিবে
+    
+    // কেবল নতুন মেসেজ আসলে নিচে স্ক্রল করবে, পুরো পেজ নয়
     function scrollToBottom() {
         if (chatWindow) {
-            chatWindow.scrollTop = chatWindow.scrollHeight;
+            chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
         }
     }
-    scrollToBottom();
 
-    // নতুন মেসেজ আসলে তা রিয়েল-টাইমে আপডেট করা
+    // চ্যাট বক্স মেমোরি ম্যানেজমেন্ট
     socket.on('new_message', function(data) {
-        if (data.phone === activePhone) {
+        if (data.phone === "{{ active_chat }}") {
             const msgDiv = document.createElement('div');
-            // মেসেজের দিক অনুযায়ী স্টাইল সিলেক্ট করা
             const isOutbound = data.direction === 'outbound';
-            msgDiv.className = `p-4 rounded-2xl text-xs max-w-sm shadow-xl ${
+            msgDiv.className = `p-4 rounded-2xl text-xs max-w-[85%] shadow-md ${
                 isOutbound 
-                ? 'bg-indigo-600 self-end text-white rounded-tr-none shadow-indigo-500/20' 
+                ? 'bg-indigo-600 self-end text-white rounded-tr-none' 
                 : 'bg-slate-800 self-start text-slate-200 rounded-tl-none'
             }`;
             msgDiv.innerHTML = data.content;
-            
             chatWindow.appendChild(msgDiv);
             scrollToBottom();
-        } else {
-            // অন্য ইউজারের মেসেজ আসলে জাস্ট ব্রাউজার নোটিফিকেশন বা অ্যালার্ট দিবে
-            console.log("New message from: " + data.phone);
         }
     });
+
+    // পেজ লোড হওয়ার ১ সেকেন্ড পর স্ক্রল করবে (মোবাইল ব্রাউজারের সুবিধার জন্য)
+    setTimeout(scrollToBottom, 500);
 </script>
-{% endblock %}
