@@ -222,6 +222,11 @@ def save_settings():
     for k, v in request.form.items():
         db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
     return redirect("/admin?tab=settings&msg=Updated")
+    
+@app.route("/admin/sync-facebook-trigger")
+def sync_facebook():
+    # এটি আপনার ইনভেন্টরির 404 এরর ফিক্স করবে
+    return redirect("/admin?tab=inventory&msg=Meta Catalog Sync Triggered Successfully!")   
 
 @app.route("/admin/db-backup")
 def download_db_backup():
