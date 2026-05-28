@@ -117,26 +117,39 @@ def admin_login():
             </form>
         </body>
     """)
-
 @app.route("/admin")
 def admin_portal():
-    if not session.get("logged_in"): return redirect("/admin/login")
+    if not session.get("logged_in"): 
+        return redirect("/admin/login")
     
+    # ইউজার ইন্টারফেস ট্যাব সিলেক্ট করা (URL থেকে ট্যাব ভ্যালু নিবে)
     tab = request.args.get("tab", "dashboard")
     chat_with = request.args.get("chat_with", "")
     
+    # ১. সেটিংস ডাটা
     s = get_all_settings()
+    
+    # ২. অ্যানালিটিক্স ডাটা (অর্ডারের সংখ্যা ও মোট টাকা)
     analytics = {
         "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
         "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0
     }
+    
+    # ৩. নোটিফিকেশন কাউন্ট (লাইভ চ্যাট ও কমপ্লেইন)
     unread_chat_count = db_query("SELECT COUNT(*) as c FROM messages WHERE direction='inbound'", fetchone=True)["c"] or 0
+    pending_complaints_count = db_query("SELECT COUNT(*) as c FROM complaints WHERE status='pending'", fetchone=True)["c"] or 0
+    
+    # ৪. ডাটাবেস থেকে সকল রেকর্ড সংগ্রহ
     orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC", fetchall=True) or []
+    products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    
+    # ৫. চ্যাট হিস্ট্রি (যদি কোনো ইউজার সিলেক্ট করা থাকে)
     chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id ASC", (chat_with,), fetchall=True) or [] if chat_with else []
 
-    # টেমপ্লেট ফাইল থেকে রেন্ডার করা (আপনার templates ফোল্ডার থাকতে হবে)
-   try:
+    # ৬. ফলাফল রেন্ডার (এটাই মেইন পার্ট)
+    try:
         return render_template(f"{tab}.html", 
                                settings=s, 
                                analytics=analytics, 
@@ -151,7 +164,6 @@ def admin_portal():
     except Exception as e:
         logger.error(f"Template rendering error: {e}")
         return f"<h1>Error: '{tab}.html' ফাইলটি 'templates' ফোল্ডারে পাওয়া যায়নি।</h1>"
-
 
 @app.route("/admin/logout")
 def admin_logout():
