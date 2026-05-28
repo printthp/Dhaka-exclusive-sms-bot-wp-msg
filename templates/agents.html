@@ -1,26 +1,55 @@
 {% extends "base.html" %}
-{% block title %}Agent Tracker{% endblock %}
+{% block title %}Employee Management{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-10">
-    <h2 class="text-4xl font-black text-white italic tracking-tighter">প্রতিনিধি ট্র্যাকার</h2>
-    <div class="bg-indigo-500/10 border border-indigo-500/20 px-6 py-3 rounded-2xl text-xs font-bold text-indigo-400">অ্যাক্টিভ এজেন্ট: {{ agent_logs|length }}</div>
+<div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-center mb-10">
+        <div>
+            <h2 class="text-3xl font-black text-white italic tracking-tighter">এমপ্লয়ি ম্যানেজমেন্ট</h2>
+            <p class="text-slate-500 text-sm">নতুন প্রতিনিধি যোগ করুন এবং তাদের কার্যক্রম দেখুন।</p>
+        </div>
+        <button onclick="document.getElementById('add-agent-modal').classList.toggle('hidden')" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-2xl text-xs font-black shadow-lg shadow-indigo-500/20 transition-all">
+            <i class="fa-solid fa-user-plus mr-2"></i>প্রতিনিধি যোগ করুন
+        </button>
+    </div>
+
+    <!-- ল্যাপটপ/ডেস্কটপ ভিউ: এজেন্ট লিস্ট -->
+    <div class="glass rounded-[2.5rem] overflow-hidden shadow-2xl">
+        <table class="w-full text-left text-sm">
+            <thead class="bg-slate-900 border-b border-slate-800 text-slate-500 font-black uppercase text-[10px] tracking-widest">
+                <tr><th class="p-6">ইউজারনেম</th><th class="p-6">রোল (Role)</th><th class="p-6">অ্যাকশন</th><th class="p-6 text-right">স্ট্যাটাস</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/50">
+                {% for log in agent_logs[:15] %}
+                <tr class="hover:bg-white/5 transition">
+                    <td class="p-6 font-bold text-indigo-400">{{ log.username }}</td>
+                    <td class="p-6"><span class="px-3 py-1 bg-slate-800 rounded-xl text-[10px] font-bold">{{ log.action }}</span></td>
+                    <td class="p-6 text-xs text-slate-400">{{ log.details }}</td>
+                    <td class="p-6 text-right text-[10px] text-slate-500 font-bold uppercase">{{ log.timestamp }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 
-<div class="glass rounded-[2.5rem] overflow-hidden shadow-2xl">
-    <table class="w-full text-left text-sm">
-        <thead class="bg-indigo-500/5 text-[10px] text-slate-500 uppercase font-black tracking-widest">
-            <tr><th class="p-6">প্রতিনিধি</th><th class="p-6">অ্যাকশন</th><th class="p-6">বিস্তারিত</th><th class="p-6 text-right">সময়</th></tr>
-        </thead>
-        <tbody class="divide-y divide-slate-800/50">
-            {% for log in agent_logs %}
-            <tr class="hover:bg-white/5 transition">
-                <td class="p-6 font-black text-indigo-400">{{ log.username }}</td>
-                <td class="p-6"><span class="bg-slate-800 px-3 py-1 rounded-xl text-[10px] uppercase font-black">{{ log.action }}</span></td>
-                <td class="p-6 text-xs text-slate-400">{{ log.details }}</td>
-                <td class="p-6 text-right text-[10px] font-bold text-slate-500 uppercase">{{ log.timestamp }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- নতুন এমপ্লয়ি যোগ করার পপ-আপ মডাল -->
+<div id="add-agent-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+    <div class="bg-[#0f172a] border border-slate-800 w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-xl font-black text-white">নতুন এমপ্লয়ি</h3>
+            <button onclick="document.getElementById('add-agent-modal').classList.add('hidden')" class="text-slate-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <form action="/admin/agents/add" method="POST" class="space-y-4">
+            <div>
+                <label class="text-[10px] font-black text-slate-500 uppercase">ইউজারনেম</label>
+                <input name="username" required class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl mt-1 text-sm outline-none focus:border-indigo-500">
+            </div>
+            <div>
+                <label class="text-[10px] font-black text-slate-500 uppercase">পাসওয়ার্ড</label>
+                <input name="password" type="password" required class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl mt-1 text-sm outline-none focus:border-indigo-500">
+            </div>
+            <button type="submit" class="w-full bg-indigo-600 py-3 rounded-2xl font-black text-white mt-4 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all">সেভ করুন</button>
+        </form>
+    </div>
 </div>
 {% endblock %}
