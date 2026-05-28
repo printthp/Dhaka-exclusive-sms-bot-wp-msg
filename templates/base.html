@@ -46,6 +46,10 @@
                 <i class="fa-solid fa-shopping-cart w-6 text-emerald-500"></i> <span class="ml-2">অর্ডার ম্যানেজমেন্ট</span>
             </a>
             
+            <a href="/admin?tab=pathao_import" class="sidebar-link flex items-center p-4 rounded-2xl transition-all">
+                <i class="fa-solid fa-file-import w-6 text-orange-400"></i> ইম্পোর্ট রিপোর্ট
+            </a>
+            
             <a href="/admin?tab=chat" class="sidebar-link flex items-center p-4 rounded-2xl justify-between">
                 <span class="flex items-center"><i class="fa-solid fa-comment-dots w-6 text-amber-500"></i> <span class="ml-2">লাইভ ইনবক্স</span></span>
                 {% if unread_chat_count > 0 %}<span class="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">{{ unread_chat_count }}</span>{% endif %}
