@@ -88,6 +88,19 @@
     </div>
 </div>
 
+<!-- dashboard.html এর টেবিলের ভেতরে স্ট্যাটাস দেখানোর টিডি (td) -->
+<td class="p-5 text-right">
+    {% if o.status == 'delivered' %}
+        <span class="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-500 text-[9px] font-black uppercase border border-emerald-500/30">Delivered</span>
+    {% elif o.status == 'cancelled' %}
+        <span class="px-3 py-1 rounded-lg bg-rose-500/20 text-rose-500 text-[9px] font-black uppercase border border-rose-500/30">Cancelled</span>
+    {% elif o.status == 'in_transit' %}
+        <span class="px-3 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 text-[9px] font-black uppercase border border-indigo-500/30 animate-pulse">In Transit</span>
+    {% else %}
+        <span class="px-3 py-1 rounded-lg bg-slate-800 text-slate-500 text-[9px] font-black uppercase">{{ o.status }}</span>
+    {% endif %}
+</td>
+
 <script>
     const ctx = document.getElementById('weeklyChart').getContext('2d');
     new Chart(ctx, {
