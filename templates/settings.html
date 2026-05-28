@@ -60,6 +60,13 @@
         <i class="fa-solid fa-truck-fast text-xl"></i> কুরিয়ার ও লজিস্টিকস (Pathao)
     </h3>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <!-- settings.html এর লজিস্টিকস সেকশনে এটি আপডেট করুন -->
+        <div class="space-y-2 md:col-span-2">
+            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">App Bearer Token</label>
+            <textarea name="pathao_bearer_token" rows="2" placeholder="অফিসিয়াল টোকেনটি এখানে পেস্ট করুন" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-xs font-mono">{{ settings.get('pathao_bearer_token', '') }}</textarea>
+        </div>
+
+        
         <!-- Pathao Client ID -->
         <div class="space-y-2">
             <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client ID</label>
