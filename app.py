@@ -7,8 +7,11 @@ import ctypes
 import time
 from datetime import datetime
 from threading import Lock
-from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 
+# ফ্লাস্ক এর প্রয়োজনীয় সব টুলস এখানে দেওয়া হলো
+from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash
+
+# ... বাকী সব কোড নিচের মতো থাকবে
 # =====================================================================
 # SYSTEM LOGGING & SETUP
 # =====================================================================
