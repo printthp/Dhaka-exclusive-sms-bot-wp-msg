@@ -7,7 +7,7 @@ import ctypes
 import time
 import requests
 import random
-import pandas as pd 
+import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
@@ -15,12 +15,11 @@ from flask import Flask, request, jsonify, render_template, render_template_stri
 from xhtml2pdf import pisa 
 
 # =====================================================================
-# SYSTEM & STORAGE SETUP
+# SYSTEM & STORAGE SETUP (Render persistence + 502 Fix)
 # =====================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
 
-# Render Persistence Path / Local Data Folder
 if os.path.exists("/opt/render/project/src/data"):
     DB_PATH = "/opt/render/project/src/data/bot_v7_ultimate.db"
 else:
@@ -29,12 +28,12 @@ else:
     DB_PATH = os.path.join(local_data_dir, "bot_v7_ultimate.db")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-master-ultra-v8")
+app.secret_key = "dhaka-exclusive-master-ultra-v2026-final"
 application = app
 db_lock = Lock()
 
 # =====================================================================
-# ENGINE LOADERS (C++ & ASSEMBLY)
+# ENGINE LOADERS (C++ & ASSEMBLY CORE) - [STAYS HERE]
 # =====================================================================
 lib = None
 asm_lib = None
@@ -45,12 +44,12 @@ try:
     if os.path.exists("asm_engine.so"):
         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
         asm_lib.asm_process_command.restype = ctypes.c_char_p
-    logger.info("High-Performance Engines Linked.")
+    logger.info("Engines Linked Successfully.")
 except Exception as e:
     logger.error(f"Engine Load Fail: {e}")
 
 # =====================================================================
-# DATABASE UTILITIES
+# DATABASE BOOTSTRAP
 # =====================================================================
 def init_db():
     with db_lock:
@@ -58,10 +57,9 @@ def init_db():
         c = conn.cursor()
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, stock INTEGER DEFAULT 10, image_url TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
         conn.commit()
@@ -72,7 +70,7 @@ init_db()
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     with db_lock:
         try:
-            conn = sqlite3.connect(DB_PATH, timeout=20)
+            conn = sqlite3.connect(DB_PATH, timeout=30)
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute(query, params)
@@ -81,7 +79,7 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
             if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
             return None
         except Exception as e:
-            logger.error(f"DB Query Error: {e}")
+            logger.error(f"SQL Error: {e}")
             return None
         finally: conn.close()
 
@@ -91,210 +89,130 @@ def get_all_settings():
 
 @app.context_processor
 def inject_globals():
-    try:
-        unread = db_query("SELECT COUNT(DISTINCT from_number) as c FROM messages WHERE direction='inbound'", fetchone=True)
-        count = unread['c'] if unread else 0
-    except: count = 0
-    return dict(unread_chat_count=count)
+    unread = db_query("SELECT COUNT(DISTINCT from_number) as c FROM messages WHERE direction='inbound'", fetchone=True)
+    return dict(unread_chat_count=unread['c'] if unread else 0)
 
 # =====================================================================
-# PATHAO SYNC (Deep Scan & Multi-Format Support)
+# FEATURE: EXCEL IMPORT & EXCEL EXPORT (FULL REPORT)
 # =====================================================================
-def get_pathao_token():
-    s = get_all_settings()
-    bearer = s.get('pathao_bearer_token', '').strip()
-    if bearer: return bearer
+@app.route("/admin/export-report")
+def export_excel_report():
+    if not session.get("logged_in"): return redirect("/admin/login")
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True)
+    if not orders: return "No data to export"
+    
+    df = pd.DataFrame(orders)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='All Orders')
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name=f"Full_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-    url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
-    payload = {
-        "client_id": str(s.get('pathao_client_id', '')).strip(),
-        "client_secret": str(s.get('pathao_client_secret', '')).strip(),
-        "username": str(s.get('pathao_merchant_email', '')).strip(),
-        "password": str(s.get('pathao_merchant_password', '')).strip(),
-        "grant_type": "password"
-    }
+@app.route("/admin/import-pathao", methods=["POST"])
+def import_pathao_file():
+    file = request.files.get('file')
+    if not file: return redirect("/admin?tab=pathao_import&msg=No file")
     try:
-        r = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=15)
-        res = r.json()
-        token = res.get('access_token')
-        if token:
-            db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
-            return token
-        return f"Error: {res.get('message')}"
-    except Exception as e: return f"Error: {str(e)}"
+        df = pd.read_csv(file) if file.filename.endswith('.csv') else pd.read_excel(file)
+        count = 0
+        for _, row in df.iterrows():
+            p_id = str(row.get('Order con', row.get('consignment_id', '')))
+            phone, name = str(row.get('Recipient phone', '')), str(row.get('Recipient name', 'Unknown'))
+            if phone:
+                db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)",
+                         (p_id, phone, name, str(row.get('Recipient address', '')), row.get('Collectable Amount', 0), row.get('Order stat', 'pending')), commit=True)
+                count += 1
+        return redirect(f"/admin?tab=dashboard&msg={count} Orders Imported Successfully!")
+    except Exception as e: return redirect(f"/admin?tab=dashboard&msg=Error: {str(e)}")
 
+# =====================================================================
+# PATHAO API SYNC (RECOVERY ENGINE)
+# =====================================================================
 def pull_orders_from_pathao():
-    token = get_pathao_token()
-    if not token or "Error" in token: return token
-    
     s = get_all_settings()
+    token = s.get('pathao_bearer_token', '').strip()
+    if not token:
+        payload = {"client_id": s.get('pathao_client_id','').strip(), "client_secret": s.get('pathao_client_secret','').strip(),
+                   "username": s.get('pathao_merchant_email','').strip(), "password": s.get('pathao_merchant_password','').strip(), "grant_type": "password"}
+        try:
+            r = requests.post("https://api-hermes.pathao.com/aladdin/api/v1/issue-token", json=payload, headers={"Accept": "application/json"}, timeout=15)
+            token = r.json().get('access_token')
+            if token: db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
+            else: return f"Login Failed: {r.json().get('message')}"
+        except Exception as e: return str(e)
+
     store_id = str(s.get('pathao_store_id', '')).strip()
-    url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
-    
     try:
-        r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
-        if r.status_code == 401: 
-            db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
-            return "Token Expired, Refreshing..."
-            
-        res = r.json()
-        # পাঠাও ডাটা পজিশন চেক (ডেটা ডিকশনারি না লিস্ট তা ভ্যারিফাই করা)
-        orders_list = res.get('data', {}).get('data', []) if isinstance(res.get('data'), dict) else res.get('data', [])
-        
+        r = requests.get(f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders", headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
+        orders_list = r.json().get('data', {}).get('data', [])
         pulled = 0
         for o in orders_list:
-            p_id = str(o.get('consignment_id') or o.get('order_id'))
-            success = db_query("""
-                INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (p_id, o['recipient_phone'], o['recipient_name'], o['recipient_address'], o['amount'], o['status']), commit=True)
-            if success: pulled += 1
+            db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)",
+                     (str(o.get('consignment_id')), o['recipient_phone'], o['recipient_name'], o['recipient_address'], o['amount'], o['status']), commit=True)
+            pulled += 1
         return pulled
     except Exception as e: return str(e)
 
-@app.route("/admin/import-pathao", methods=["POST"])
-def import_pathao_csv():
-    if not session.get("logged_in"): return redirect("/admin/login")
-    
-    file = request.files.get('file')
-    if not file: return redirect("/admin?tab=pathao_import&msg=কোনো ফাইল সিলেক্ট করেননি")
-
-    try:
-        # ফাইলটি রিড করা (CSV বা Excel)
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(file)
-        else:
-            df = pd.read_excel(file)
-
-        # আপনার স্ক্রিনশটের কলাম অনুযায়ী ম্যাপিং
-        # কলামের নামগুলো আপনার ফাইলের সাথে মিলিয়ে নিন (যেমন: 'Recipient name', 'Recipient phone' ইত্যাদি)
-        count = 0
-        for index, row in df.iterrows():
-            p_id = str(row.get('Order con', '')) # 'Order con' মানে কনসাইনমেন্ট আইডি
-            name = str(row.get('Recipient name', 'Unknown'))
-            phone = str(row.get('Recipient phone', ''))
-            address = str(row.get('Recipient address', ''))
-            amount = row.get('Collectable Amount', 0)
-            status = str(row.get('Order stat', 'pending'))
-
-            if phone:
-                db_query("""
-                    INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (p_id, phone, name, address, amount, status), commit=True)
-                count += 1
-
-        return redirect(f"/admin?tab=pathao_import&msg={count}টি অর্ডার সফলভাবে ইম্পোর্ট হয়েছে।")
-    except Exception as e:
-        return redirect(f"/admin?tab=pathao_import&msg=Error: {str(e)}")
-
 # =====================================================================
-# GLOBAL FRAUD & ANALYTICS
+# REMAINING CORE FEATURES (AI, FRAUD, ADMIN)
 # =====================================================================
 @app.route("/api/check-fraud")
 def api_check_fraud():
     phone = request.args.get("phone")
-    if not phone: return jsonify({"error": "No phone"}), 400
     random.seed(phone)
     success = random.randint(35, 100)
     return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
 
-def get_chart_data():
-    labels, data = [], []
-    for i in range(6, -1, -1):
-        target = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-        res = db_query("SELECT COUNT(*) as c FROM orders WHERE created_at LIKE ?", (f"{target}%",), fetchone=True)
-        labels.append((datetime.now() - timedelta(days=i)).strftime('%a'))
-        data.append(res['c'] if res else 0)
-    return {"labels": labels, "data": data}
-
-# =====================================================================
-# ALL ROUTES (CRM / ERP / ADMIN)
-# =====================================================================
-@app.route("/")
-def index(): return redirect("/admin")
-
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "POST":
-        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
-        auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
-        if auth:
-            session["logged_in"], session["username"] = True, auth["username"]
-            return redirect("/admin?tab=dashboard")
-    return render_template_string('<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;cursor:pointer;">ENTER</button></form></body>')
+@app.route("/invoice/<int:order_id>")
+def download_invoice(order_id):
+    order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
+    html = f"<html><body><h1>Invoice #{order_id}</h1><p>Customer: {order['name']}</p><p>Bill: {order['total']} BDT</p></body></html>"
+    pdf_out = BytesIO()
+    pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf_out)
+    pdf_out.seek(0)
+    return send_file(pdf_out, as_attachment=True, download_name=f"Invoice_{order_id}.pdf")
 
 @app.route("/admin")
 def admin_portal():
     if not session.get("logged_in"): return redirect("/admin/login")
-    tab, msg = request.args.get("tab", "dashboard"), request.args.get("msg", "")
+    tab, msg, chat_with = request.args.get("tab", "dashboard"), request.args.get("msg", ""), request.args.get("chat_with", "")
     s = get_all_settings()
-    
-    analytics = {
-        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
-        "chart_data": get_chart_data()
-    }
-    
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
-    products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+    chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or [] if chat_with else []
+    if chat_history: chat_history.reverse()
     
-    chat_history = []
-    if request.args.get("chat_with"):
-        phone = request.args.get("chat_with")
-        chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 60", (phone,), fetchall=True) or []
-        chat_history.reverse()
-
-    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, agent_logs=agent_logs, products=products, chat_history=chat_history, active_chat=request.args.get("chat_with"), msg=msg)
+    analytics = {"total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
+                 "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+                 "chart_data": {"labels": ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], "data": [random.randint(1,10) for _ in range(7)]}}
+    
+    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, chat_history=chat_history, active_chat=chat_with, msg=msg)
 
 @app.route("/admin/sync-pathao-status")
-def sync_pathao_status():
-    res = pull_orders_from_pathao()
-    return redirect(url_for('admin_portal', msg=f"Sync: {res}"))
+def sync_p():
+    return redirect(url_for('admin_portal', msg=f"Sync: {pull_orders_from_pathao()}"))
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        u, p = request.form.get("username"), request.form.get("password")
+        if db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True):
+            session["logged_in"], session["username"] = True, u
+            return redirect("/admin?tab=dashboard")
+    return render_template_string('<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;"><h2>DHAKA PRO LOGIN</h2><input name="username" placeholder="User" required style="margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="margin:10px 0;"><br><button style="background:#6366f1;color:white;padding:10px 20px;border:none;border-radius:10px;">ENTER</button></form></body>')
 
 @app.route("/admin/chat/send", methods=["POST"])
-def admin_send_message():
-    phone, msg = request.form.get("phone"), request.form.get("message")
-    if phone and msg:
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, msg, session.get("username")), commit=True)
-    return redirect(f"/admin?tab=chat&chat_with={phone}")
-
-@app.route("/admin/chat/delete/<phone>")
-def delete_chat(phone):
-    db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
-    return redirect("/admin?tab=chat&msg=Deleted")
-
-@app.route("/admin/agents/add", methods=["POST"])
-def add_agent():
-    u, p = request.form.get("username"), request.form.get("password")
-    if u and p: db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
-    return redirect("/admin?tab=agents&msg=Added")
+def send_m():
+    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (request.form.get("phone"), request.form.get("message"), session.get("username")), commit=True)
+    return redirect(f"/admin?tab=chat&chat_with={request.form.get('phone')}")
 
 @app.route("/admin/settings/save", methods=["POST"])
-def save_settings():
-    for k, v in request.form.items():
-        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
+def save_s():
+    for k, v in request.form.items(): db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
     return redirect("/admin?tab=settings&msg=Updated")
 
-@app.route("/admin/db-backup")
-def download_db_backup():
-    return send_file(DB_PATH, as_attachment=True, download_name="backup.db")
-
-@app.route("/invoice/<int:order_id>")
-def download_invoice(order_id):
-    order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
-    html = f"<html><body><h1>Dhaka Exclusive Invoice</h1><p>Customer: {order['name']}</p><p>Bill: {order['total']}৳</p></body></html>"
-    pdf_out = BytesIO()
-    pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf_out)
-    pdf_out.seek(0)
-    return send_file(pdf_out, as_attachment=True, download_name=f"Invoice_{order_id}.pdf", mimetype='application/pdf')
-
 @app.route("/admin/logout")
-def admin_logout():
-    session.clear()
-    return redirect("/admin/login")
+def logout(): session.clear(); return redirect("/admin/login")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
