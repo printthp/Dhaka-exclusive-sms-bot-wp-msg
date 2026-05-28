@@ -14,35 +14,28 @@ from flask import Flask, request, jsonify, render_template, render_template_stri
 from xhtml2pdf import pisa 
 
 # =====================================================================
-# SYSTEM & LOGGING SETUP
+# SYSTEM & STORAGE SETUP (Render Persistent Disk)
 # =====================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
 
+# Render-এ ডাটাবেস ফাইলটি সুরক্ষিত রাখার জন্য পাথ সেট করা
+# যদি Render Disk ব্যবহার করেন তবে পাথ হবে: /opt/render/project/src/data/bot.db
+DB_DIR = os.path.join(os.getcwd(), "data")
+if not os.path.exists(DB_DIR): os.makedirs(DB_DIR)
+DB_PATH = os.path.join(DB_DIR, "bot_v7_ultimate.db")
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-master-2026")
 application = app
-
-DB_FILE = "bot_v7_ultimate.db"
 db_lock = Lock()
-
-# =====================================================================
-# ENGINE LOADERS
-# =====================================================================
-lib = None
-asm_lib = None
-try:
-    if os.path.exists("engine.so"):
-        lib = ctypes.CDLL(os.path.abspath("engine.so"))
-        lib.process_business_logic.restype = ctypes.c_char_p
-except: pass
 
 # =====================================================================
 # DATABASE UTILITIES
 # =====================================================================
 def init_db():
     with db_lock:
-        conn = sqlite3.connect(DB_FILE)
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
@@ -58,7 +51,7 @@ init_db()
 
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     with db_lock:
-        conn = sqlite3.connect(DB_FILE)
+        conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         try:
@@ -74,57 +67,51 @@ def get_all_settings():
     return {r["key"]: r["value"] for r in rows}
 
 # =====================================================================
-# FEATURE: FIXED PATHAO SYNC (With Better Debugging)
+# CONTEXT PROCESSOR (FIXES UndefinedError IN ALL TABS)
 # =====================================================================
-def get_pathao_token():
+@app.context_processor
+def inject_global_vars():
+    # এটি নিশ্চিত করবে যে unread_chat_count সব ট্যাবে অটোমেটিক পৌঁছে যাবে
+    unread = db_query("SELECT COUNT(DISTINCT from_number) as c FROM messages WHERE direction='inbound'", fetchone=True)
+    return dict(
+        unread_chat_count=unread['c'] if unread else 0,
+        current_time=datetime.now()
+    )
+
+# =====================================================================
+# PATHAO SYNC LOGIC (With Strict Credential Cleaning)
+# =====================================================================
+def pull_orders_from_pathao():
     s = get_all_settings()
-    url = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
+    url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
     
-    # ইনপুট ডাটা ক্লিন করা (অতিরিক্ত স্পেস থাকলে রিমুভ করবে)
     payload = {
-        "client_id": s.get('pathao_client_id', '').strip(),
-        "client_secret": s.get('pathao_client_secret', '').strip(),
-        "username": s.get('pathao_merchant_email', '').strip(),
-        "password": s.get('pathao_merchant_password', '').strip(),
+        "client_id": str(s.get('pathao_client_id', '')).strip(),
+        "client_secret": str(s.get('pathao_client_secret', '')).strip(),
+        "username": str(s.get('pathao_merchant_email', '')).strip(),
+        "password": str(s.get('pathao_merchant_password', '')).strip(),
         "grant_type": "password"
     }
     
     try:
-        r = requests.post(url, json=payload, headers={"Accept": "application/json"}, timeout=15)
-        res = r.json()
-        if 'access_token' in res:
-            return res['access_token']
-        else:
-            # যদি ভুল হয়, তবে ফ্লাস্ক এর সাহায্যে আমরা আপনাকে মেসেজ দিব
-            logger.error(f"AUTH FAILED: {res.get('message')}")
-            return f"Error: {res.get('message')}"
-    except Exception as e:
-        return f"Error: {str(e)}"
+        r_auth = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=10)
+        res_auth = r_auth.json()
+        token = res_auth.get('access_token')
+        store_id = str(s.get('pathao_store_id', '')).strip()
 
-def pull_orders_from_pathao():
-    token_status = get_pathao_token()
-    if isinstance(token_status, str) and token_status.startswith("Error"):
-        return token_status # এরর মেসেজ রিটার্ন করবে
-
-    token = token_status
-    s = get_all_settings()
-    store_id = s.get('pathao_store_id', '').strip()
-    
-    if not store_id: return "Error: Store ID missing"
-
-    url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    
-    try:
-        r = requests.get(url, headers=headers, timeout=20)
-        orders_list = r.json().get('data', {}).get('data', [])
-        pulled = 0
-        for o in orders_list:
-            p_id = str(o.get('consignment_id') or o.get('order_id'))
-            success = db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)", 
-                               (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount'), o.get('status')), commit=True)
-            if success: pulled += 1
-        return pulled
+        if token and store_id:
+            url_orders = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
+            r_orders = requests.get(url_orders, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=15)
+            orders_list = r_orders.json().get('data', {}).get('data', [])
+            
+            pulled = 0
+            for o in orders_list:
+                p_id = str(o.get('consignment_id'))
+                success = db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)", 
+                                   (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount'), o.get('status')), commit=True)
+                if success: pulled += 1
+            return pulled
+        return f"Error: {res_auth.get('message', 'Auth Failed')}"
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -141,8 +128,8 @@ def admin_login():
         auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
         if auth:
             session["logged_in"], session["username"] = True, auth["username"]
-            return redirect("/admin")
-    return render_template_string('<body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;">LOGIN</button></form></body>')
+            return redirect("/admin?tab=dashboard")
+    return render_template_string('<body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;"><h2>ADMIN PANEL</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;cursor:pointer;">LOGIN</button></form></body>')
 
 @app.route("/admin")
 def admin_portal():
@@ -150,9 +137,12 @@ def admin_portal():
     tab, msg = request.args.get("tab", "dashboard"), request.args.get("msg", "")
     s = get_all_settings()
     
-    analytics = {"total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-                 "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
-                 "chart_data": {"labels": ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], "data": [0,0,0,0,0,0,0]}}
+    # Analytics Data
+    analytics = {
+        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
+        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+        "chart_data": {"labels": ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], "data": [0,0,0,0,0,0,0]}
+    }
     
     orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
@@ -161,21 +151,19 @@ def admin_portal():
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
-    result = pull_orders_from_pathao()
-    if isinstance(result, str) and result.startswith("Error"):
-        return redirect(url_for('admin_portal', tab='dashboard', msg=f"ব্যর্থ: {result}"))
-    return redirect(url_for('admin_portal', tab='dashboard', msg=f"সফল: {result}টি নতুন অর্ডার সিঙ্ক হয়েছে।"))
+    res = pull_orders_from_pathao()
+    return redirect(url_for('admin_portal', tab='dashboard', msg=f"Process Result: {res}"))
 
-@app.route("/admin/sync-facebook-trigger")
-def sync_fb():
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'FB_SYNC', 'Manual Trigger')", (session.get("username"),), commit=True)
-    return redirect(url_for('admin_portal', tab='inventory', msg="Facebook Sync Started!"))
+@app.route("/admin/db-backup")
+def download_db_backup():
+    if not session.get("logged_in"): return "Denied"
+    return send_file(DB_PATH, as_attachment=True, download_name=f"Backup_{datetime.now().strftime('%Y-%m-%d')}.db")
 
 @app.route("/admin/settings/save", methods=["POST"])
 def save_settings():
     for k, v in request.form.items():
         db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
-    return redirect("/admin?tab=settings&msg=Updated Successfully")
+    return redirect("/admin?tab=settings&msg=Settings Updated")
 
 @app.route("/admin/logout")
 def admin_logout():
@@ -183,4 +171,4 @@ def admin_logout():
     return redirect("/admin/login")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
