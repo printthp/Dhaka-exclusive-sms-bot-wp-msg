@@ -54,29 +54,43 @@
         </div>
 
         <!-- ৩. কুরিয়ার অটোমেশন (Pathao) -->
-        <div class="glass p-10 rounded-[3rem] shadow-2xl border border-orange-500/10">
-            <h3 class="text-orange-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
-                <i class="fa-solid fa-truck-fast text-xl"></i> কুরিয়ার ও লজিস্টিকস (Pathao)
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div class="space-y-2">
-                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client ID</label>
-                    <input name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client Secret</label>
-                    <input type="password" name="pathao_client_secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Store ID</label>
-                    <input name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Merchant Password</label>
-                    <input type="password" name="pathao_merchant_password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
-                </div>
-            </div>
+        <!-- ৩. কুরিয়ার অটোমেশন (Pathao) - সংশোধিত ভার্সন -->
+<div class="glass p-10 rounded-[3rem] shadow-2xl border border-orange-500/10">
+    <h3 class="text-orange-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
+        <i class="fa-solid fa-truck-fast text-xl"></i> কুরিয়ার ও লজিস্টিকস (Pathao)
+    </h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <!-- Pathao Client ID -->
+        <div class="space-y-2">
+            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client ID</label>
+            <input name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
         </div>
+        
+        <!-- Pathao Client Secret -->
+        <div class="space-y-2">
+            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client Secret</label>
+            <input type="password" name="pathao_client_secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+        </div>
+
+        <!-- Pathao Merchant Email (এটি খুব জরুরি) -->
+        <div class="space-y-2">
+            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Merchant Email Address</label>
+            <input name="pathao_merchant_email" type="email" value="{{ settings.get('pathao_merchant_email', '') }}" placeholder="example@gmail.com" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+        </div>
+
+        <!-- Pathao Merchant Password -->
+        <div class="space-y-2">
+            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Merchant Password</label>
+            <input type="password" name="pathao_merchant_password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+        </div>
+
+        <!-- Pathao Store ID -->
+        <div class="space-y-2 md:col-span-2">
+            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Store ID</label>
+            <input name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+        </div>
+    </div>
+</div>
 
         <!-- ৪. চার্জ ও এলার্ট সেটিংস -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
