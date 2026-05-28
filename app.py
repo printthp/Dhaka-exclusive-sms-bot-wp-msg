@@ -14,11 +14,19 @@ from threading import Lock
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
 from xhtml2pdf import pisa
 
+# =====================================================================
+# SYSTEM & STORAGE SETUP (Render Persistence)
+# =====================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_PATH = "/opt/render/project/src/data/bot_v7_ultimate.db" if os.path.exists("/opt/render/project/src/data") else os.path.join(os.getcwd(), "data/bot_v7_ultimate.db")
-if not os.path.exists(os.path.dirname(DB_PATH)): os.makedirs(os.path.dirname(DB_PATH))
+if os.path.exists("/opt/render/project/src/data"):
+    DB_PATH = "/opt/render/project/src/data/bot_v7_ultimate.db"
+else:
+    local_data_dir = os.path.join(os.getcwd(), "data")
+    if not os.path.exists(local_data_dir):
+        os.makedirs(local_data_dir)
+    DB_PATH = os.path.join(local_data_dir, "bot_v7_ultimate.db")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-master-ultra-v2026-final")
@@ -26,7 +34,7 @@ application = app
 db_lock = Lock()
 
 # =====================================================================
-# C++ & ASSEMBLY ENGINE LOADERS
+# ENGINE LOADERS (C++ & ASSEMBLY CORE) - NEVER REMOVED
 # =====================================================================
 lib = None
 asm_lib = None
@@ -37,9 +45,35 @@ try:
     if os.path.exists("asm_engine.so"):
         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
         asm_lib.asm_process_command.restype = ctypes.c_char_p
-    logger.info("Engines Linked Successfully.")
+    logger.info("High-Performance Engines Linked Successfully.")
 except Exception as e:
     logger.error(f"Engine Load Fail: {e}")
+
+# =====================================================================
+# DATABASE UTILITIES
+# =====================================================================
+def init_db():
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, stock INTEGER DEFAULT 10, image_url TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
+        c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'Customer'")
+            logger.info("Migrated users table: added name column")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                logger.error(f"Migration error: {e}")
+        conn.commit()
+        conn.close()
+
+init_db()
 
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     with db_lock:
@@ -48,165 +82,45 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute(query, params)
-            if commit: conn.commit(); return True
-            if fetchone: row = c.fetchone(); return dict(row) if row else None
-            if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
+            if commit:
+                conn.commit()
+                return True
+            if fetchone:
+                row = c.fetchone()
+                return dict(row) if row else None
+            if fetchall:
+                rows = c.fetchall()
+                return [dict(r) for r in rows]
             return None
         except Exception as e:
             logger.error(f"SQL Error: {e}")
             return None
-        finally: conn.close()
-
-def init_db():
-    tables = [
-        "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, msg_id TEXT UNIQUE, from_number TEXT, content TEXT, msg_type TEXT DEFAULT 'text', direction TEXT DEFAULT 'inbound', agent_id TEXT DEFAULT 'system', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS sessions (phone TEXT PRIMARY KEY, state TEXT DEFAULT 'idle', context TEXT DEFAULT '{}', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, recovered INTEGER DEFAULT 0, bot_paused INTEGER DEFAULT 0)",
-        "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, city_id INTEGER DEFAULT 1, zone_id INTEGER DEFAULT 1, area_id INTEGER DEFAULT 1, product_id INTEGER, quantity INTEGER DEFAULT 1, total INTEGER, delivery_fee INTEGER, pathao_consignment_id TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, description TEXT, stock INTEGER DEFAULT 10, active INTEGER DEFAULT 1, image_url TEXT DEFAULT '')",
-        "CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)"
-    ]
-    for t in tables: db_query(t, commit=True)
-    db_query("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')", commit=True)
-    defaults = [
-        ("business_name", "Dhaka Exclusive"), ("verify_token", os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")),
-        ("permanent_token", os.environ.get("WHATSAPP_ACCESS_TOKEN", "")), ("phone_number_id", os.environ.get("PHONE_NUMBER_ID", "")),
-        ("gemini_key", os.environ.get("GEMINI_KEY", "")), ("ai_system_instruction", "আপনি একজন প্রফেশনাল কাস্টমার অ্যাসিস্ট্যান্ট। কাস্টমারের সাথে বাংলায় কথা বলুন।"),
-        ("delivery_inside_dhaka", "60"), ("pathao_base_url", "https://api-hermes.pathao.com")
-    ]
-    for k, v in defaults: db_query("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v), commit=True)
-
-init_db()
+        finally:
+            conn.close()
 
 def get_all_settings():
     rows = db_query("SELECT key, value FROM settings", fetchall=True) or []
     return {r["key"]: r["value"] for r in rows}
 
-def send_whatsapp(to, payload_type, content, extra=None, agent="system"):
-    s = get_all_settings()
-    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
-    if not token or not phone_id: return False
-    url = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    body = {"messaging_product": "whatsapp", "to": to, "type": payload_type}
-    if payload_type == "text": body["text"] = {"body": content}
-    elif payload_type == "image": body["image"] = {"link": content, "caption": extra or ""}
-    elif payload_type == "interactive": body["interactive"] = content
+@app.context_processor
+def inject_globals():
     try:
-        r = requests.post(url, json=body, headers=headers, timeout=10)
-        if r.status_code in [200, 201]:
-            gen_id = r.json().get("messages", [{}])[0].get("id", f"out_{int(time.time())}")
-            db_query("INSERT INTO messages (msg_id, from_number, content, msg_type, direction, agent_id) VALUES (?, ?, ?, ?, 'outbound', ?)", (gen_id, to, str(content), payload_type, agent), commit=True)
-            return True
-        return False
-    except: return False
-
-def get_ai_answer(user_query):
-    s = get_all_settings()
-    key = s.get("gemini_key") or os.environ.get("GEMINI_KEY", "")
-    if not key: return "আমাদের কাস্টমার রিপ্রেজেন্টেটিভ খুব দ্রুত আপনার সাথে যোগাযোগ করবেন।"
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
-        p_rows = db_query("SELECT * FROM products WHERE active = 1 AND stock > 0", fetchall=True) or []
-        catalog = "\n".join([f"- {p['name']}: {p['price']}৳" for p in p_rows])
-        si = f"{s.get('ai_system_instruction', '')}\n\nচলতি প্রোডাক্ট ক্যাটালগ:\n{catalog}"
-        payload = {"contents": [{"parts": [{"text": f"{si}\n\nCustomer: {user_query}"}]}]}
-        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=15)
-        res = r.json()
-        candidates = res.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts: return parts[0].get("text", "").strip()
-        return "আপনার মেসেজটি আমাদের প্যানেলে জমা হয়েছে।"
-    except: return "আপনার মেসেজটি আমাদের প্যানেলে জমা হয়েছে। লাইভ এজেন্ট কিছুক্ষণের মধ্যে উত্তর দেবে।"
-
-def process_webhook_async(msg, from_number):
-    msg_id = msg.get("id")
-    if db_query("SELECT 1 FROM messages WHERE msg_id = ?", (msg_id,), fetchone=True): return
-    msg_type = msg.get("type", "text")
-    body_text = msg.get("text", {}).get("body", "").strip() if msg_type == "text" else ""
-    if msg_type == "interactive":
-        int_type = msg.get("interactive", {}).get("type")
-        if int_type == "list_reply": body_text = msg["interactive"]["list_reply"]["id"]
-        elif int_type == "button_reply": body_text = msg["interactive"]["button_reply"]["id"]
-
-    db_query("INSERT INTO messages (msg_id, from_number, content, msg_type, direction) VALUES (?, ?, ?, ?, 'inbound')", (msg_id, from_number, body_text if body_text else f"[{msg_type}]", msg_type), commit=True)
-    db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, 'Customer')", (from_number,), commit=True)
-    db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (from_number,), commit=True)
-
-    sess = db_query("SELECT * FROM sessions WHERE phone = ?", (from_number,), fetchone=True)
-    if sess and sess.get("bot_paused") == 1: return
-    state = sess["state"] if sess else "idle"
-    ctx = json.loads(sess["context"]) if sess and sess.get("context") else {}
-
-    if state == "idle" and any(k in body_text.lower() for k in ["কিনব", "অর্ডার", "buy", "order", "প্রোডাক্ট"]):
-        products = db_query("SELECT * FROM products WHERE active = 1 AND stock > 0 LIMIT 10", fetchall=True) or []
-        if not products:
-            send_whatsapp(from_number, "text", "দুঃখিত ভাই, আমাদের স্টক এখন খালি। খুব দ্রুত নতুন স্টক আসবে।")
-            return
-        rows = [{"id": f"p_{p['id']}", "title": p['name'][:24], "description": f"{p['price']}৳"} for p in products]
-        menu = {"type": "list", "body": {"text": "আমাদের হট সেলিং ক্যাটালগ থেকে প্রোডাক্ট সিলেক্ট করুন:"}, "action": {"button": "প্রোডাক্টস লিস্ট", "sections": [{"title": "চলতি স্টক", "rows": rows}]}}
-        db_query("INSERT INTO sessions (phone, state, context, bot_paused) VALUES (?, 'selecting_product', '{}', 0) ON CONFLICT(phone) DO UPDATE SET state='selecting_product', context='{}'", (from_number,), commit=True)
-        send_whatsapp(from_number, "interactive", menu)
-        return
-
-    if state == "selecting_product" and body_text.startswith("p_"):
-        pid = int(body_text.split("_")[1])
-        p = db_query("SELECT * FROM products WHERE id = ?", (pid,), fetchone=True)
-        if p:
-            ctx = {"product_id": pid, "name": p["name"], "price": p["price"]}
-            btns = {"type": "button", "body": {"text": f"🔹 {p['name']}\n💰 মূল্য: {p['price']}৳\n\nকত পিস নিতে চান?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": "q_1", "title": "১ পিস"}}, {"type": "reply", "reply": {"id": "q_2", "title": "২ পিস"}}]}}
-            db_query("UPDATE sessions SET state='selecting_qty', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
-            if p.get("image_url"): send_whatsapp(from_number, "image", p["image_url"], p["name"])
-            send_whatsapp(from_number, "interactive", btns)
-        return
-
-    if state == "selecting_qty" and body_text.startswith("q_"):
-        ctx["quantity"] = int(body_text.split("_")[1])
-        ctx["subtotal"] = ctx["price"] * ctx["quantity"]
-        db_query("UPDATE sessions SET state='awaiting_name', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
-        send_whatsapp(from_number, "text", "📝 আপনার নাম কি?")
-        return
-
-    if state == "awaiting_name":
-        ctx["cust_name"] = body_text
-        db_query("UPDATE sessions SET state='awaiting_address', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
-        send_whatsapp(from_number, "text", "📍 ডেলিভারির সম্পূর্ণ ঠিকানা ও জেলা লিখুন:")
-        return
-
-    if state == "awaiting_address":
-        ctx["address"] = body_text
-        s = get_all_settings()
-        ctx["delivery_fee"] = int(s.get("delivery_inside_dhaka", 60))
-        total = ctx["subtotal"] + ctx["delivery_fee"]
-        summary = f"🛒 আপনার অর্ডারের সামারি:\n\n🛍️ প্রোডাক্ট: {ctx['name']}\n🔢 পরিমাণ: {ctx['quantity']} টি\n💵 সর্বমোট বিল (ডেলিভারি ফি সহ): {total}৳\n\nসব তথ্য ঠিক থাকলে নিচের বাটনে চাপুন:"
-        btns = {"type": "button", "body": {"text": summary}, "action": {"buttons": [{"type": "reply", "reply": {"id": "conf_yes", "title": "অর্ডার কনফার্ম করুন 👍"}}, {"type": "reply", "reply": {"id": "conf_no", "title": "বাতিল করুন ❌"}}]}}
-        db_query("UPDATE sessions SET state='awaiting_confirmation', context=? WHERE phone=?", (json.dumps(ctx), from_number), commit=True)
-        send_whatsapp(from_number, "interactive", btns)
-        return
-
-    if state == "awaiting_confirmation":
-        if body_text == "conf_yes":
-            total_cod = ctx["subtotal"] + ctx["delivery_fee"]
-            db_query("INSERT INTO orders (phone, name, address, product_id, quantity, total, delivery_fee, pathao_consignment_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_BOOKING', 'pending')", (from_number, ctx["cust_name"], ctx["address"], ctx["product_id"], ctx["quantity"], total_cod, ctx["delivery_fee"]), commit=True)
-            send_whatsapp(from_number, "text", "🎉 অভিনন্দন! আপনার অর্ডারটি সিস্টেমে নেওয়া হয়েছে। আমাদের প্রতিনিধি দ্রুত কল করে কনফার্ম করবেন।")
-        db_query("UPDATE sessions SET state='idle', context='{}' WHERE phone=?", (from_number,), commit=True)
-        return
-
-    ai_msg = get_ai_answer(body_text)
-    send_whatsapp(from_number, "text", ai_msg)
+        unread = db_query("SELECT COUNT(DISTINCT from_number) as c FROM messages WHERE direction='inbound'", fetchone=True)
+        count = unread['c'] if unread else 0
+    except:
+        count = 0
+    return dict(unread_chat_count=count)
 
 # =====================================================================
-# PATHAO SYNC + EXCEL IMPORT/EXPORT (নতুন যোগ করা)
+# PATHAO SYNC (Bearer & Auto-Login Hybrid)
 # =====================================================================
 def get_pathao_token():
     s = get_all_settings()
     bearer = s.get('pathao_bearer_token', '').strip()
-    if bearer and len(bearer) > 20: return bearer
-    url_auth = f"{s.get('pathao_base_url', 'https://api-hermes.pathao.com')}/aladdin/api/v1/issue-token"
+    if bearer and len(bearer) > 20:
+        return bearer
+
+    url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
     payload = {
         "client_id": str(s.get('pathao_client_id', '')).strip(),
         "client_secret": str(s.get('pathao_client_secret', '')).strip(),
@@ -215,33 +129,37 @@ def get_pathao_token():
         "grant_type": "password"
     }
     try:
-        r = requests.post(url_auth, data=payload, headers={"Accept": "application/json"}, timeout=15)
+        r = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=15)
         res = r.json()
         token = res.get('access_token')
         if token:
             db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
             return token
-        logger.error(f"Pathao token error: {res}")
-        return None
+        return f"Error: {res.get('message')}"
     except Exception as e:
-        logger.error(f"Pathao token exception: {e}")
-        return None
+        return f"Error: {str(e)}"
 
 def pull_orders_from_pathao():
     token = get_pathao_token()
-    if not token: return "TOKEN_FAIL"
+    if isinstance(token, str) and "Error" in token:
+        return token
+
     s = get_all_settings()
     store_id = str(s.get('pathao_store_id', '')).strip()
-    if not store_id: return "NO_STORE"
-    url = f"{s.get('pathao_base_url', 'https://api-hermes.pathao.com')}/aladdin/api/v1/stores/{store_id}/orders"
+    if not store_id:
+        return "Error: Store ID Missing"
+
+    url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
     try:
         r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
         if r.status_code == 401:
             db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
-            return "TOKEN_EXPIRED"
+            return "Token Expired. Please refresh again."
+
         res = r.json()
         data_block = res.get('data', [])
         orders_list = data_block.get('data', []) if isinstance(data_block, dict) else data_block
+
         pulled = 0
         for o in orders_list:
             p_id = str(o.get('consignment_id') or o.get('order_id'))
@@ -250,16 +168,22 @@ def pull_orders_from_pathao():
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(pathao_order_id) DO UPDATE SET status=excluded.status
             """, (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount'), o.get('status')), commit=True)
-            if success: pulled += 1
+            if success:
+                pulled += 1
         return pulled
     except Exception as e:
-        logger.error(f"Pathao sync error: {e}")
         return f"Error: {str(e)}"
 
+# =====================================================================
+# EXCEL & REPORTING
+# =====================================================================
 @app.route("/admin/export-report")
 def export_excel_report():
-    if not session.get("logged_in"): return redirect("/admin/login")
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True) or []
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True)
+    if not orders:
+        return redirect("/admin?tab=orders&msg=No Data")
     df = pd.DataFrame(orders)
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -269,9 +193,11 @@ def export_excel_report():
 
 @app.route("/admin/import-pathao", methods=["POST"])
 def import_excel():
-    if not session.get("logged_in"): return redirect("/admin/login")
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
     file = request.files.get('file')
-    if not file: return redirect("/admin?tab=orders&msg=Please select a file")
+    if not file:
+        return redirect("/admin?tab=orders&msg=No file selected")
     try:
         df = pd.read_csv(file) if file.filename.endswith('.csv') else pd.read_excel(file)
         count = 0
@@ -282,53 +208,28 @@ def import_excel():
                 db_query("""
                     INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (p_id, phone, str(row.get('Recipient name', 'Unknown')), str(row.get('Recipient address', '')), row.get('Collectable Amount', 0), str(row.get('Order stat', 'pending'))), commit=True)
+                """, (p_id, phone, str(row.get('Recipient name', 'Unknown')), str(row.get('Recipient address', '')), row.get('Collectable Amount', 0), row.get('Order stat', 'pending')), commit=True)
                 count += 1
-        return redirect(f"/admin?tab=orders&msg=Successfully imported {count} orders!")
+        return redirect(f"/admin?tab=orders&msg=Successfully Imported {count} orders!")
     except Exception as e:
         return redirect(f"/admin?tab=orders&msg=Import Error: {str(e)}")
 
-@app.route("/webhook/pathao", methods=["POST"])
-def receive_pathao_webhook():
-    data = request.json or request.form.to_dict()
-    if not data: return jsonify({"status": "error", "message": "No data"}), 400
-    try:
-        p_id = str(data.get('consignment_id', data.get('order_id', '')))
-        phone = data.get('recipient_phone', data.get('phone', ''))
-        if p_id or phone:
-            db_query("""
-                INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(pathao_order_id) DO UPDATE SET status=excluded.status
-            """, (p_id, phone, data.get('recipient_name', 'Unknown'), data.get('recipient_address', ''), data.get('amount', 0), data.get('status', 'pending')), commit=True)
-            logger.info(f"Webhook received: Order {p_id} - {data.get('status')}")
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
 # =====================================================================
-# FRAUD CHECKER API
+# GLOBAL FRAUD & ANALYTICS
 # =====================================================================
 @app.route("/api/check-fraud")
 def api_check_fraud():
     phone = request.args.get("phone")
-    if not phone: return jsonify({"error": "No phone"}), 400
+    if not phone:
+        return jsonify({"error": "No phone"}), 400
     random.seed(phone)
     success = random.randint(35, 100)
-    return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
-
-# =====================================================================
-# ADMIN PANEL ROUTES
-# =====================================================================
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "POST":
-        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
-        if db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True):
-            session["logged_in"] = True
-            return redirect("/admin")
-    return render_template_string('''<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;max-width:400px;width:90%;"><h2 style="color:#6366f1;margin-bottom:20px;">DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;border:none;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;border:none;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;border-radius:10px;cursor:pointer;margin-top:10px;">ENTER</button></form></body>''')
+    return jsonify({
+        "phone": phone,
+        "return_count": random.randint(0, 10),
+        "success_rate": success,
+        "risk": 100 - success
+    })
 
 def get_chart_data():
     labels, data = [], []
@@ -339,42 +240,69 @@ def get_chart_data():
         data.append(res['c'] if res else 0)
     return {"labels": labels, "data": data}
 
+# =====================================================================
+# ADMIN PANEL ROUTES (ALL IN ONE)
+# =====================================================================
+@app.route("/")
+def index():
+    return redirect("/admin")
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
+        auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
+        if auth:
+            session["logged_in"], session["username"] = True, auth["username"]
+            return redirect("/admin?tab=dashboard")
+    return render_template_string('''
+    <body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
+        <form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;max-width:400px;width:90%;">
+            <h2 style="color:#6366f1;margin-bottom:20px;">DHAKA PRO ACCESS</h2>
+            <input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;border:none;"><br>
+            <input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;border:none;"><br>
+            <button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;border-radius:10px;cursor:pointer;margin-top:10px;">ENTER</button>
+        </form>
+    </body>''')
+
 @app.route("/admin")
 def admin_portal():
-    if not session.get("logged_in"): return redirect("/admin/login")
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
     tab = request.args.get("tab", "dashboard")
-    chat_with = request.args.get("chat_with", "")
     msg = request.args.get("msg", "")
+    chat_with = request.args.get("chat_with", "")
     s = get_all_settings()
-    analytics = {"total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0, "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0, "chart_data": get_chart_data()}
+
+    analytics = {
+        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
+        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+        "chart_data": get_chart_data()
+    }
+
     orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
     products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
-    chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id ASC LIMIT 50", (chat_with,), fetchall=True) or [] if chat_with else []
-    
-    # Flask render_template ব্যবহার করে সঠিকভাবে টেমপ্লেট ফাইল লোড
-    try:
-        return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
-    except Exception as e:
-        logger.error(f"Template render error: {e}")
-        return render_template_string('''<body style="background:#020617;color:white;padding:20px;"><h1>DHAKA PRO ADMIN</h1><p style="color:red">Template Error: {{ error }}</p><p>Tab: {{ tab }}</p><p>Orders: {{ total_orders }}</p><p>Revenue: {{ total_revenue }}</p><p><a href="/admin/logout">Logout</a></p></body>''', error=str(e), tab=tab, total_orders=analytics['total_orders'], total_revenue=analytics['total_revenue'])
+
+    chat_history = []
+    if chat_with:
+        chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
+        chat_history.reverse()
+
+    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
 
 @app.route("/admin/sync-pathao-status")
-def sync_trigger():
+def sync_pathao_status():
     res = pull_orders_from_pathao()
-    if res == "TOKEN_FAIL": msg = "API Login Failed. Use Excel Upload below - 100% works!"
-    elif res == "NO_STORE": msg = "Store ID Missing"
-    elif res == "TOKEN_EXPIRED": msg = "Token Expired. Try again."
-    else: msg = f"Sync Result: {res}"
-    return redirect(url_for('admin_portal', tab='orders', msg=msg))
+    return redirect(url_for('admin_portal', tab='orders', msg=f"Sync Result: {res}"))
 
 @app.route("/admin/chat/send", methods=["POST"])
 def admin_send_message():
     phone, msg = request.form.get("phone"), request.form.get("message")
     if phone and msg:
-        db_query("INSERT INTO sessions (phone, state, bot_paused) VALUES (?, 'idle', 1) ON CONFLICT(phone) DO UPDATE SET bot_paused=1", (phone,), commit=True)
-        send_whatsapp(phone, "text", msg, agent="human_admin")
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, msg, session.get("username")), commit=True)
+        send_whatsapp_message(phone, msg)
     return redirect(f"/admin?tab=chat&chat_with={phone}")
 
 @app.route("/admin/chat/delete/<phone>")
@@ -382,66 +310,41 @@ def delete_chat(phone):
     db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
     return redirect("/admin?tab=chat&msg=Chat Deleted")
 
-@app.route("/admin/chat/toggle-bot/<phone>")
-def toggle_bot_pause(phone):
-    s = db_query("SELECT bot_paused FROM sessions WHERE phone=?", (phone,), fetchone=True)
-    nxt = 0 if s and s["bot_paused"] == 1 else 1
-    db_query("UPDATE sessions SET bot_paused = ? WHERE phone = ?", (nxt, phone), commit=True)
-    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Bot+{'ENABLED' if nxt==0 else 'PAUSED'}")
-
-@app.route("/admin/settings/save", methods=["POST"])
-def save_settings():
-    if not session.get("logged_in"): return redirect("/admin/login")
-    for k, v in request.form.items(): db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v.strip(), v.strip()), commit=True)
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'UPDATE_SETTINGS', 'Config saved')", (session.get("username"),), commit=True)
-    return redirect("/admin?tab=settings&msg=Updated")
-
 @app.route("/admin/agents/add", methods=["POST"])
 def add_agent():
     u, p = request.form.get("username"), request.form.get("password")
-    if u and p: db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
-    return redirect("/admin?tab=agents&msg=Agent+Added")
+    if u and p:
+        db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
+    return redirect("/admin?tab=agents&msg=Agent Added")
 
-@app.route("/admin/sync-facebook-trigger")
-def manual_fb_sync():
-    s = get_all_settings()
-    cat_id = s.get("fb_catalogue_id")
-    token = s.get("fb_access_token")
-    if not cat_id or not token: return redirect("/admin?tab=inventory&msg=Facebook config missing")
-    try:
-        r = requests.get(f"https://graph.facebook.com/v21.0/{cat_id}/products", params={"fields": "id,name,price,description,image_url", "access_token": token, "limit": 100}, timeout=15)
-        res = r.json()
-        if "data" not in res: return redirect(f"/admin?tab=inventory&msg={res.get('error', {}).get('message', 'Meta Error')}")
-        for item in res["data"]:
-            try: price = int(float("".join([c for c in str(item.get("price", "0")) if c.isdigit() or c == '.']))) if any(c.isdigit() for c in str(item.get("price", ""))) else 0
-            except: price = 0
-            db_query("INSERT INTO products (fb_product_id, name, price, description, image_url, stock, active) VALUES (?, ?, ?, ?, ?, 10, 1) ON CONFLICT(fb_product_id) DO UPDATE SET name=excluded.name, price=excluded.price, description=excluded.description, image_url=excluded.image_url", (item.get("id"), item.get("name"), price, item.get("description", ""), item.get("image_url", "https://placehold.co/400")), commit=True)
-        return redirect(f"/admin?tab=inventory&msg=Synced {len(res['data'])} products!")
-    except Exception as e: return redirect(f"/admin?tab=inventory&msg=Sync Error: {e}")
+@app.route("/admin/settings/save", methods=["POST"])
+def save_settings():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    for k, v in request.form.items():
+        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
+    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'UPDATE_SETTINGS', 'Config saved')", (session.get("username"),), commit=True)
+    return redirect("/admin?tab=settings&msg=Updated Successfully")
 
 @app.route("/admin/db-backup")
 def download_db_backup():
-    if not session.get("logged_in"): return "Access Denied"
+    if not session.get("logged_in"):
+        return "Access Denied"
     return send_file(DB_PATH, as_attachment=True, download_name=f"Backup_{datetime.now().strftime('%Y-%m-%d')}.db")
 
 @app.route("/invoice/<int:order_id>")
 def download_invoice(order_id):
     order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
-    if not order: return "Not Found"
-    s = get_all_settings()
-    prod = db_query("SELECT name, price FROM products WHERE id=?", (order.get("product_id"),), fetchone=True)
+    if not order:
+        return "Not Found"
     html = f"""
     <html><body style='padding:50px;font-family:sans-serif;'>
-    <h1 style='color:#6366f1;'>{s.get('business_name', 'Dhaka Exclusive')}</h1>
+    <h1 style='color:#6366f1;'>Dhaka Exclusive Invoice</h1>
     <hr>
-    <p><strong>Order ID:</strong> #{order_id}</p>
     <p><strong>Customer:</strong> {order['name']}</p>
     <p><strong>Phone:</strong> {order['phone']}</p>
     <p><strong>Address:</strong> {order['address']}</p>
-    <p><strong>Product:</strong> {prod['name'] if prod else 'N/A'}</p>
-    <p><strong>Quantity:</strong> {order.get('quantity', 1)}</p>
-    <p><strong>Delivery:</strong> {order.get('delivery_fee', 0)} BDT</p>
-    <p><strong>Total:</strong> {order['total']} BDT</p>
+    <p><strong>Amount:</strong> {order['total']} BDT</p>
     <p><strong>Status:</strong> {order['status']}</p>
     </body></html>
     """
@@ -455,27 +358,139 @@ def admin_logout():
     session.clear()
     return redirect("/admin/login")
 
-@app.route("/webhook", methods=["GET"])
-def verify():
-    s = get_all_settings()
-    if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == s.get("verify_token", "dhaka-exclusive-verify-2026"):
-        return request.args.get("hub.challenge"), 200
-    return "Invalid token", 403
+# =====================================================================
+# GEMINI AI & WHATSAPP CLOUD API INTEGRATION
+# =====================================================================
+GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
+WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(silent=True) or {}
+def get_gemini_reply(user_message: str) -> str:
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY missing")
+        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
     try:
-        value = data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
-        if "messages" in value:
-            msg = value["messages"][0]
-            Thread(target=process_webhook_async, args=(msg, msg.get("from"))).start()
-    except: pass
-    return "EVENT_RECEIVED", 200
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        system_prompt = (
+            "তুমি Dhaka Exclusive নামক একটি ই-কমার্স স্টোরের AI সহায়ক। "
+            "তুমি বাংলা এবং ইংরেজি উভয় ভাষায় কথা বলতে পারো। "
+            "গ্রাহকদের অর্ডার, পণ্য এবং ডেলিভারি সম্পর্কিত তথ্য দাও। "
+            "সংক্ষিপ্ত এবং সুন্দরভাবে উত্তর দাও।"
+        )
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": f"{system_prompt}\n\nCustomer: {user_message}"}]
+            }]
+        }
+        headers = {"Content-Type": "application/json"}
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        res = r.json()
+        candidates = res.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                return parts[0].get("text", "").strip()
+        logger.error(f"Gemini unexpected response: {res}")
+        return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
+    except Exception as e:
+        logger.error(f"Gemini API error: {e}")
+        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
 
-@app.route("/")
-def index():
-    return redirect("/admin")
+def send_whatsapp_message(to_phone: str, message: str) -> bool:
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning("WhatsApp credentials missing")
+        return False
+    try:
+        url = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to_phone,
+            "type": "text",
+            "text": {"body": message}
+        }
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        if r.status_code in (200, 201):
+            logger.info(f"WhatsApp message sent to {to_phone}")
+            return True
+        logger.error(f"WhatsApp send failed: {r.status_code} {r.text}")
+        return False
+    except Exception as e:
+        logger.error(f"WhatsApp send error: {e}")
+        return False
+
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            logger.info("Webhook verified successfully.")
+            return challenge, 200
+        logger.warning(f"Webhook verification failed. mode={mode}, token={token}")
+        return "Verification failed", 403
+
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        logger.info(f"Webhook received: {json.dumps(data, ensure_ascii=False)}")
+        try:
+            entry_list = data.get("entry", [])
+            for entry in entry_list:
+                changes = entry.get("changes", [])
+                for change in changes:
+                    value = change.get("value", {})
+                    if value.get("messaging_product") != "whatsapp":
+                        continue
+                    messages = value.get("messages", [])
+                    contacts = value.get("contacts", [])
+                    sender_name = contacts[0].get("profile", {}).get("name", "Customer") if contacts else "Customer"
+                    for msg in messages:
+                        phone = msg.get("from", "")
+                        m_type = msg.get("type", "text")
+                        if m_type == "text":
+                            content = msg.get("text", {}).get("body", "")
+                        elif m_type == "image":
+                            content = "📷 [Photo Received]"
+                        elif m_type in ["voice", "audio"]:
+                            content = "🎤 [Voice Received]"
+                        else:
+                            content = f"[{m_type.upper()} Received]"
+                        if not phone or not content:
+                            continue
+                        db_query(
+                            "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', ?)",
+                            (phone, content, "whatsapp"),
+                            commit=True
+                        )
+                        db_query(
+                            "INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)",
+                            (phone, sender_name),
+                            commit=True
+                        )
+                        db_query(
+                            "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?",
+                            (phone,),
+                            commit=True
+                        )
+                        logger.info(f"Received from {phone}: {content}")
+                        reply = get_gemini_reply(content)
+                        sent = send_whatsapp_message(phone, reply)
+                        if sent:
+                            db_query(
+                                "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
+                                (phone, reply, "gemini_ai"),
+                                commit=True
+                            )
+        except Exception as e:
+            logger.error(f"Webhook processing error: {e}")
+        return "EVENT_RECEIVED", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
