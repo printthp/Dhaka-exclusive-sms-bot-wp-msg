@@ -6,3 +6,5 @@ Flask
 gunicorn
 requests
 xhtml2pdf
+pandas
+openpyxl
