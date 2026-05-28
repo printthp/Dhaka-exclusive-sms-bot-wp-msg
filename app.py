@@ -1,8 +1,17 @@
-import os, sys, json, sqlite3, logging, ctypes, time, requests, random, pandas as pd
+import os
+import sys
+import json
+import sqlite3
+import logging
+import ctypes
+import time
+import requests
+import random
+import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta
-from threading import Thread, Lock
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, send_file
+from threading import Lock
+from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
 from xhtml2pdf import pisa
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
@@ -17,7 +26,7 @@ application = app
 db_lock = Lock()
 
 # =====================================================================
-# C++ & ASSEMBLY ENGINE LOADERS (আগের কোড থেকে অক্ষুণ্ণ)
+# C++ & ASSEMBLY ENGINE LOADERS
 # =====================================================================
 lib = None
 asm_lib = None
@@ -25,11 +34,10 @@ try:
     if os.path.exists("engine.so"):
         lib = ctypes.CDLL(os.path.abspath("engine.so"))
         lib.process_business_logic.restype = ctypes.c_char_p
-        logger.info("C++ Engine Linked.")
     if os.path.exists("asm_engine.so"):
         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
         asm_lib.asm_process_command.restype = ctypes.c_char_p
-        logger.info("ASM Engine Linked.")
+    logger.info("Engines Linked Successfully.")
 except Exception as e:
     logger.error(f"Engine Load Fail: {e}")
 
@@ -45,7 +53,7 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
             if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
             return None
         except Exception as e:
-            logger.error(f"DB Error: {e}")
+            logger.error(f"SQL Error: {e}")
             return None
         finally: conn.close()
 
@@ -228,14 +236,12 @@ def pull_orders_from_pathao():
     url = f"{s.get('pathao_base_url', 'https://api-hermes.pathao.com')}/aladdin/api/v1/stores/{store_id}/orders"
     try:
         r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
-        logger.info(f"Pathao orders status: {r.status_code}")
         if r.status_code == 401:
             db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
             return "TOKEN_EXPIRED"
         res = r.json()
         data_block = res.get('data', [])
         orders_list = data_block.get('data', []) if isinstance(data_block, dict) else data_block
-        logger.info(f"Found {len(orders_list)} orders from Pathao")
         pulled = 0
         for o in orders_list:
             p_id = str(o.get('consignment_id') or o.get('order_id'))
@@ -245,7 +251,6 @@ def pull_orders_from_pathao():
                 ON CONFLICT(pathao_order_id) DO UPDATE SET status=excluded.status
             """, (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount'), o.get('status')), commit=True)
             if success: pulled += 1
-        logger.info(f"Synced {pulled} orders")
         return pulled
     except Exception as e:
         logger.error(f"Pathao sync error: {e}")
@@ -303,7 +308,7 @@ def receive_pathao_webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # =====================================================================
-# FRAUD CHECKER API (আগের কোড থেকে অক্ষুণ্ণ)
+# FRAUD CHECKER API
 # =====================================================================
 @app.route("/api/check-fraud")
 def api_check_fraud():
@@ -314,7 +319,7 @@ def api_check_fraud():
     return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
 
 # =====================================================================
-# ADMIN PANEL ROUTES (সব আগের ফিচার + নতুন)
+# ADMIN PANEL ROUTES
 # =====================================================================
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
@@ -347,10 +352,13 @@ def admin_portal():
     products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
     chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id ASC LIMIT 50", (chat_with,), fetchall=True) or [] if chat_with else []
+    
+    # Flask render_template ব্যবহার করে সঠিকভাবে টেমপ্লেট ফাইল লোড
     try:
-        return render_template_string(open(f"templates/{tab}.html").read(), settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
-    except:
-        return f"<h1>DHAKA PRO ADMIN</h1><p>Tab: {tab}</p><p>Orders: {analytics['total_orders']}</p><p>Revenue: {analytics['total_revenue']}</p><p><a href='/admin/logout'>Logout</a></p>"
+        return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
+    except Exception as e:
+        logger.error(f"Template render error: {e}")
+        return render_template_string('''<body style="background:#020617;color:white;padding:20px;"><h1>DHAKA PRO ADMIN</h1><p style="color:red">Template Error: {{ error }}</p><p>Tab: {{ tab }}</p><p>Orders: {{ total_orders }}</p><p>Revenue: {{ total_revenue }}</p><p><a href="/admin/logout">Logout</a></p></body>''', error=str(e), tab=tab, total_orders=analytics['total_orders'], total_revenue=analytics['total_revenue'])
 
 @app.route("/admin/sync-pathao-status")
 def sync_trigger():
@@ -369,9 +377,6 @@ def admin_send_message():
         send_whatsapp(phone, "text", msg, agent="human_admin")
     return redirect(f"/admin?tab=chat&chat_with={phone}")
 
-# =====================================================================
-# CHAT DELETE (আগের কোড থেকে অক্ষুণ্ণ)
-# =====================================================================
 @app.route("/admin/chat/delete/<phone>")
 def delete_chat(phone):
     db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
@@ -419,9 +424,6 @@ def download_db_backup():
     if not session.get("logged_in"): return "Access Denied"
     return send_file(DB_PATH, as_attachment=True, download_name=f"Backup_{datetime.now().strftime('%Y-%m-%d')}.db")
 
-# =====================================================================
-# PDF INVOICE (আগের কোড থেকে অক্ষুণ্ণ)
-# =====================================================================
 @app.route("/invoice/<int:order_id>")
 def download_invoice(order_id):
     order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
