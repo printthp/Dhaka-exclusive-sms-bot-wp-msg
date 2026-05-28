@@ -128,6 +128,66 @@
             </div>
         </div>
 
+        <!-- ৬. গ্লোবাল ফ্রড ডিটেকশন (সারাদেশের ডেটাবেস থেকে) -->
+        <div class="glass p-10 rounded-[3rem] shadow-2xl border border-rose-500/10">
+            <h3 class="text-rose-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
+                <i class="fa-solid fa-globe text-xl"></i> গ্লোবাল ফ্রড চেকার (Steadfast & Global DB)
+            </h3>
+            
+            <div class="flex flex-col md:flex-row gap-4 mb-8">
+                <input type="text" id="fraudPhone" placeholder="কাস্টমারের ফোন নম্বর (017...)" class="flex-1 bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-rose-500 outline-none transition text-sm">
+                <button type="button" onclick="checkFraud()" class="bg-rose-600 hover:bg-rose-500 px-8 py-4 rounded-2xl font-black text-xs uppercase transition-all shadow-lg shadow-rose-500/20">
+                    সারাদেশে সার্চ করুন
+                </button>
+            </div>
+
+            <!-- রেজাল্ট কার্ড (অটোমেটিক আপডেট হবে) -->
+            <div id="fraudResult" class="hidden p-6 bg-slate-900 border border-slate-800 rounded-3xl animate-pulse">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p id="res_phone" class="text-white font-black text-lg">017XXXXXXXX</p>
+                        <p id="res_status" class="text-[10px] uppercase font-bold mt-1">Checking Records...</p>
+                    </div>
+                    <div id="res_risk" class="text-3xl font-black text-rose-500">0%</div>
+                </div>
+                <div class="mt-6 grid grid-cols-2 gap-4">
+                    <div class="p-4 bg-black/40 rounded-2xl border border-slate-800">
+                        <p class="text-[9px] text-slate-500 uppercase font-black">সাকসেস রেট</p>
+                        <p id="res_success" class="text-sm font-black text-emerald-400">0%</p>
+                    </div>
+                    <div class="p-4 bg-black/40 rounded-2xl border border-slate-800">
+                        <p class="text-[9px] text-slate-500 uppercase font-black">রিটার্ন পার্সেল</p>
+                        <p id="res_return" class="text-sm font-black text-rose-400">0 বার</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+<script>
+async function checkFraud() {
+    const phone = document.getElementById('fraudPhone').value;
+    if(!phone || phone.length < 11) return alert("সঠিক ফোন নম্বর দিন");
+    
+    document.getElementById('fraudResult').classList.remove('hidden');
+    document.getElementById('res_status').innerText = "সারাদেশের কুরিয়ার ডেটাবেসে চেক করা হচ্ছে...";
+    
+    try {
+        const response = await fetch(`/api/check-fraud?phone=${phone}`);
+        const data = await response.json();
+        
+        document.getElementById('fraudResult').classList.remove('animate-pulse');
+        document.getElementById('res_phone').innerText = phone;
+        document.getElementById('res_status').innerText = data.risk > 50 ? "হাই-রিস্ক কাস্টমার!" : "নিরাপদ কাস্টমার";
+        document.getElementById('res_status').className = data.risk > 50 ? "text-[10px] uppercase font-bold mt-1 text-rose-500" : "text-[10px] uppercase font-bold mt-1 text-emerald-500";
+        document.getElementById('res_risk').innerText = data.risk + "%";
+        document.getElementById('res_success').innerText = data.success_rate + "%";
+        document.getElementById('res_return').innerText = data.return_count + " বার";
+    } catch(e) {
+        alert("সার্ভার এরর! আবার চেষ্টা করুন।");
+    }
+}
+</script>
+        
         <!-- আল্টিমেট সেভ বাটন -->
         <div class="sticky bottom-6 z-30">
             <button type="submit" class="w-full bg-gradient-to-r from-indigo-600 to-blue-700 hover:from-white hover:to-white hover:text-indigo-600 py-7 rounded-[2.5rem] font-black uppercase text-sm tracking-[0.4em] shadow-[0_20px_50px_rgba(79,70,229,0.4)] transition-all duration-500 transform hover:-translate-y-2 active:scale-95 border border-indigo-400/20">
