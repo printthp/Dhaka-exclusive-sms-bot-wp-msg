@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Inventory Management{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-10">
+    <h2 class="text-4xl font-black text-white italic tracking-tighter">স্টক ও ইনভেন্টরি</h2>
+    <div class="flex gap-4">
+        <a href="/admin/sync-facebook-trigger" class="bg-indigo-600 hover:bg-white hover:text-indigo-600 px-6 py-3 rounded-2xl text-xs font-black transition-all">FB CATALOG SYNC</a>
+        <button onclick="document.getElementById('add-product-modal').classList.toggle('hidden')" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-xs font-black">নতুন প্রোডাক্ট</button>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+    {% for p in products %}
+    <div class="glass rounded-[2.5rem] overflow-hidden group border border-slate-800 hover:border-indigo-500/50 transition-all duration-500 shadow-2xl">
+        <div class="relative overflow-hidden">
+            <img src="{{ p.image_url or 'https://via.placeholder.com/300' }}" class="w-full h-56 object-cover group-hover:scale-110 transition-all duration-700">
+            {% if p.stock < 5 %}
+            <div class="absolute top-4 right-4 bg-rose-500 text-white text-[10px] font-black px-3 py-1 rounded-full animate-pulse uppercase">Low Stock</div>
+            {% endif %}
+            <div class="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-4 py-1 rounded-xl text-emerald-400 font-black text-sm">{{ p.price }}৳</div>
+        </div>
+        <div class="p-6">
+            <h4 class="font-black text-white text-lg truncate">{{ p.name }}</h4>
+            <p class="text-[10px] text-slate-500 uppercase mt-1">ID: {{ p.fb_product_id or 'MANUAL' }}</p>
+            <div class="flex justify-between items-center mt-6">
+                <div class="text-xs font-bold text-slate-400 uppercase">স্টক: <span class="text-white">{{ p.stock }} পিস</span></div>
+                <button class="bg-indigo-500/10 text-indigo-400 p-2 rounded-xl border border-indigo-500/20 hover:bg-indigo-600 hover:text-white transition"><i class="fa-solid fa-pen-to-square"></i></button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
