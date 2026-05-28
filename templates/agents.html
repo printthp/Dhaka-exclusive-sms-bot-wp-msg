@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Agent Tracker{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-10">
+    <h2 class="text-4xl font-black text-white italic tracking-tighter">প্রতিনিধি ট্র্যাকার</h2>
+    <div class="bg-indigo-500/10 border border-indigo-500/20 px-6 py-3 rounded-2xl text-xs font-bold text-indigo-400">অ্যাক্টিভ এজেন্ট: {{ agent_logs|length }}</div>
+</div>
+
+<div class="glass rounded-[2.5rem] overflow-hidden shadow-2xl">
+    <table class="w-full text-left text-sm">
+        <thead class="bg-indigo-500/5 text-[10px] text-slate-500 uppercase font-black tracking-widest">
+            <tr><th class="p-6">প্রতিনিধি</th><th class="p-6">অ্যাকশন</th><th class="p-6">বিস্তারিত</th><th class="p-6 text-right">সময়</th></tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800/50">
+            {% for log in agent_logs %}
+            <tr class="hover:bg-white/5 transition">
+                <td class="p-6 font-black text-indigo-400">{{ log.username }}</td>
+                <td class="p-6"><span class="bg-slate-800 px-3 py-1 rounded-xl text-[10px] uppercase font-black">{{ log.action }}</span></td>
+                <td class="p-6 text-xs text-slate-400">{{ log.details }}</td>
+                <td class="p-6 text-right text-[10px] font-bold text-slate-500 uppercase">{{ log.timestamp }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
