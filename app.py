@@ -302,6 +302,7 @@ def admin_send_message():
     phone, msg = request.form.get("phone"), request.form.get("message")
     if phone and msg:
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, msg, session.get("username")), commit=True)
+        send_whatsapp_message(phone, msg)
     return redirect(f"/admin?tab=chat&chat_with={phone}")
 
 @app.route("/admin/chat/delete/<phone>")
@@ -395,7 +396,7 @@ def get_gemini_reply(user_message: str) -> str:
         return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
-        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
+        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
 
 def send_whatsapp_message(to_phone: str, message: str) -> bool:
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
@@ -451,10 +452,16 @@ def webhook():
                     contacts = value.get("contacts", [])
                     sender_name = contacts[0].get("profile", {}).get("name", "Customer") if contacts else "Customer"
                     for msg in messages:
-                        if msg.get("type") != "text":
-                            continue
                         phone = msg.get("from", "")
-                        content = msg.get("text", {}).get("body", "")
+                        m_type = msg.get("type", "text")
+                        if m_type == "text":
+                            content = msg.get("text", {}).get("body", "")
+                        elif m_type == "image":
+                            content = "📷 [Photo Received]"
+                        elif m_type in ["voice", "audio"]:
+                            content = "🎤 [Voice Received]"
+                        else:
+                            content = f"[{m_type.upper()} Received]"
                         if not phone or not content:
                             continue
                         db_query(
@@ -473,14 +480,16 @@ def webhook():
                             commit=True
                         )
                         logger.info(f"Received from {phone}: {content}")
-                        reply = get_gemini_reply(content)
-                        sent = send_whatsapp_message(phone, reply)
-                        if sent:
-                            db_query(
-                                "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
-                                (phone, reply, "gemini_ai"),
-                                commit=True
-                            )
+                        # Only auto-reply AI for text messages
+                        if m_type == "text":
+                            reply = get_gemini_reply(content)
+                            sent = send_whatsapp_message(phone, reply)
+                            if sent:
+                                db_query(
+                                    "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
+                                    (phone, reply, "gemini_ai"),
+                                    commit=True
+                                )
         except Exception as e:
             logger.error(f"Webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
