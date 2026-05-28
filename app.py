@@ -1,6 +1,3 @@
-import eventlet
-eventlet.monkey_patch()  # সবার আগে এটি থাকা বাধ্যতামূলক
-
 import os
 import sys
 import json
@@ -11,7 +8,6 @@ import time
 from datetime import datetime
 from threading import Lock
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
-from flask_socketio import SocketIO, emit
 
 # =====================================================================
 # SYSTEM LOGGING & SETUP
@@ -21,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-pro-ultimate-2026")
-# Socket.io with Eventlet for high traffic
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 application = app
 
 # =====================================================================
@@ -91,12 +85,7 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "online",
-        "cpp_engine": lib is not None,
-        "asm_engine": asm_lib is not None,
-        "time": datetime.now().isoformat()
-    })
+    return jsonify({"status": "online", "time": datetime.now().isoformat()})
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
@@ -114,7 +103,7 @@ def admin_login():
                 <h2 style="color:#6366f1; margin-bottom:20px;">ADMIN ACCESS</h2>
                 <input name="username" placeholder="User" required style="width:100%; padding:15px; margin:10px 0; border-radius:12px; border:none; background:#0f172a; color:white;">
                 <input name="password" type="password" placeholder="Pass" required style="width:100%; padding:15px; margin:10px 0; border-radius:12px; border:none; background:#0f172a; color:white;">
-                <button style="width:100%; padding:15px; background:#6366f1; color:white; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin-top:20px;">LOGIN</button>
+                <button style="width:100%; padding:15px; background:#6366f1; color:white; border:none; border-radius:12px; font-weight:bold; cursor:pointer;">LOGIN</button>
             </form>
         </body>
     """)
@@ -129,22 +118,19 @@ def admin_portal():
     
     s = get_all_settings()
     
-    # অপ্টিমাইজড অ্যানালিটিক্স
     analytics = {
         "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
         "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0
     }
     
     unread_chat_count = db_query("SELECT COUNT(*) as c FROM messages WHERE direction='inbound'", fetchone=True)["c"] or 0
-    pending_complaints_count = db_query("SELECT COUNT(*) as c FROM messages WHERE direction='inbound' LIMIT 1", fetchone=True) # ড্রামি
     
-    # মোবাইল অপ্টিমাইজেশনের জন্য লিমিট ব্যবহার
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    # Fast loading limits
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
     products = db_query("SELECT * FROM products ORDER BY id DESC LIMIT 30", fetchall=True) or []
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 40", fetchall=True) or []
 
-    # চ্যাট হিস্ট্রি লিমিট (মোবাইল স্পিড ফিক্স)
     chat_history = []
     if chat_with:
         chat_history = db_query("SELECT * FROM messages WHERE from_number = ? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
@@ -156,24 +142,17 @@ def admin_portal():
                                users=users, products=products, agent_logs=agent_logs, 
                                unread_chat_count=unread_chat_count,
                                active_chat=chat_with, chat_history=chat_history)
-    except Exception as e:
-        return f"<h1>Error: Template '{tab}.html' not found.</h1>"
+    except:
+        return f"<h1>Template '{tab}.html' not found.</h1>"
 
 @app.route("/admin/agents/add", methods=["POST"])
 def add_agent():
     if not session.get("logged_in") or session.get("username") != 'admin':
-        return redirect("/admin?tab=agents&msg=Access Denied!")
-    
-    u = request.form.get("username", "").strip()
-    p = request.form.get("password", "").strip()
-    
+        return redirect("/admin?tab=agents&msg=Denied")
+    u, p = request.form.get("username"), request.form.get("password")
     if u and p:
-        success = db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
-        if success:
-            db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_EMPLOYEE', ?)",
-                     (session.get("username"), f"New employee: {u}"), commit=True)
-            return redirect("/admin?tab=agents&msg=Success!")
-    return redirect("/admin?tab=agents&msg=Failed!")
+        db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
+    return redirect("/admin?tab=agents&msg=Success")
 
 @app.route("/admin/chat/send", methods=["POST"])
 def admin_send_message():
@@ -182,7 +161,6 @@ def admin_send_message():
     if phone and msg:
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
                  (phone, msg, session.get("username")), commit=True)
-        socketio.emit('new_message', {'phone': phone, 'content': msg, 'direction': 'outbound'}, namespace='/')
     return redirect(f"/admin?tab=chat&chat_with={phone}")
 
 @app.route("/admin/settings/save", methods=["POST"])
@@ -198,5 +176,4 @@ def admin_logout():
     return redirect("/admin/login")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
