@@ -1,180 +1,139 @@
 {% extends "base.html" %}
-{% block title %}Advanced Settings{% endblock %}
+{% block title %}Ultimate settings Control{% endblock %}
 {% block content %}
-<div class="max-w-4xl mx-auto pb-20">
-    <div class="mb-10 flex justify-between items-end">
+<div class="max-w-5xl mx-auto pb-24">
+    <div class="mb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4 px-4">
         <div>
-            <h2 class="text-4xl font-black text-white tracking-tighter">সিস্টেম কন্ট্রোল সেন্টার</h2>
-            <p class="text-slate-500 text-sm mt-2">আপনার ব্যবসার প্রতিটি প্যারামিটার এখান থেকে ম্যানেজ করুন।</p>
+            <h2 class="text-5xl font-black text-white tracking-tighter italic">মাস্টার কন্ট্রোল</h2>
+            <p class="text-slate-500 text-sm mt-3 font-medium uppercase tracking-widest">Dhaka Exclusive Enterprise Node v7.0</p>
         </div>
-        <div class="text-right">
-            <span class="text-[10px] bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full font-bold uppercase tracking-widest">System v7.0 PRO</span>
+        <div class="flex gap-2">
+            <span class="bg-emerald-500/20 text-emerald-400 px-4 py-2 rounded-2xl text-[10px] font-black uppercase border border-emerald-500/30">Server: Online</span>
+            <span class="bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-2xl text-[10px] font-black uppercase border border-indigo-500/30">AI: Active</span>
         </div>
     </div>
 
-    <form action="/admin/settings/save" method="POST" class="space-y-8">
+    <form action="/admin/settings/save" method="POST" class="space-y-8 px-2 md:px-0">
         
-        <!-- ১. জেনারেল ও ব্র্যান্ডিং -->
-        <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
-            <h3 class="text-indigo-400 font-black text-xs uppercase mb-6 tracking-widest flex items-center gap-2">
-                <i class="fa-solid fa- shop"></i> জেনারেল ও ব্র্যান্ডিং
+        <!-- ১. মেটা ক্যাটালগ ও সোশ্যাল শপ -->
+        <div class="glass p-10 rounded-[3rem] shadow-2xl border border-indigo-500/10">
+            <h3 class="text-indigo-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
+                <i class="fa-brands fa-meta text-xl"></i> মেটা ও ফেসবুক ক্যাটালগ সিঙ্ক
             </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">দোকানের নাম (Business Name)</label>
-                    <input name="business_name" value="{{ settings.get('business_name', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Catalog ID</label>
+                    <input name="fb_catalogue_id" value="{{ settings.get('fb_catalogue_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-indigo-500 outline-none transition text-sm">
                 </div>
                 <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">ভেরিফিকেশন টোকেন (Webhook)</label>
-                    <input name="verify_token" value="{{ settings.get('verify_token', 'dhakaex0020') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">XML Feed Link</label>
+                    <input name="fb_xml_link" value="{{ settings.get('fb_xml_link', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-indigo-500 outline-none transition text-sm font-mono">
+                </div>
+                <div class="md:col-span-2 space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">System User Access Token</label>
+                    <textarea name="fb_access_token" rows="3" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-indigo-500 outline-none transition text-xs font-mono">{{ settings.get('fb_access_token', '') }}</textarea>
                 </div>
             </div>
         </div>
 
-        <!-- ২. হোয়াটসঅ্যাপ এপিআই কনফিগ -->
-        <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
-            <h3 class="text-indigo-400 font-black text-xs uppercase mb-6 tracking-widest flex items-center gap-2">
-                <i class="fa-brands fa-whatsapp"></i> হোয়াটসঅ্যাপ এপিআই সেটিংস
+        <!-- ২. হোয়াটসঅ্যাপ এপিআই কানেকশন -->
+        <div class="glass p-10 rounded-[3rem] shadow-2xl">
+            <h3 class="text-emerald-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
+                <i class="fa-brands fa-whatsapp text-xl"></i> হোয়াটসঅ্যাপ বিজনেস এপিআই
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Phone Number ID</label>
+                    <input name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-indigo-500 outline-none transition text-sm">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Permanent Token</label>
+                    <input type="password" name="permanent_token" value="{{ settings.get('permanent_token', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-indigo-500 outline-none transition text-sm">
+                </div>
+            </div>
+        </div>
+
+        <!-- ৩. কুরিয়ার অটোমেশন (Pathao) -->
+        <div class="glass p-10 rounded-[3rem] shadow-2xl border border-orange-500/10">
+            <h3 class="text-orange-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
+                <i class="fa-solid fa-truck-fast text-xl"></i> কুরিয়ার ও লজিস্টিকস (Pathao)
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client ID</label>
+                    <input name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Client Secret</label>
+                    <input type="password" name="pathao_client_secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Store ID</label>
+                    <input name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Merchant Password</label>
+                    <input type="password" name="pathao_merchant_password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-orange-500 outline-none transition text-sm">
+                </div>
+            </div>
+        </div>
+
+        <!-- ৪. চার্জ ও এলার্ট সেটিংস -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="glass p-10 rounded-[3rem]">
+                <h3 class="text-cyan-400 font-black text-xs uppercase mb-8 tracking-widest text-center">ডেলিভারি চার্জ (BDT)</h3>
+                <div class="flex gap-4">
+                    <div class="flex-1 space-y-2 text-center">
+                        <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">ঢাকার ভেতরে</p>
+                        <input name="delivery_inside_dhaka" value="{{ settings.get('delivery_inside_dhaka', '60') }}" class="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl text-center font-black text-xl text-white">
+                    </div>
+                    <div class="flex-1 space-y-2 text-center">
+                        <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">ঢাকার বাইরে</p>
+                        <input name="delivery_outside_dhaka" value="{{ settings.get('delivery_outside_dhaka', '120') }}" class="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl text-center font-black text-xl text-white">
+                    </div>
+                </div>
+            </div>
+            <div class="glass p-10 rounded-[3rem]">
+                <h3 class="text-rose-400 font-black text-xs uppercase mb-8 tracking-widest text-center">স্মার্ট এলার্ট ও মোড</h3>
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center p-4 bg-slate-900 rounded-2xl border border-slate-800">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase">লো-স্টক এলার্ট</span>
+                        <input name="low_stock_limit" value="{{ settings.get('low_stock_limit', '5') }}" class="w-12 bg-transparent text-right font-black text-indigo-400 outline-none">
+                    </div>
+                    <div class="flex justify-between items-center p-4 bg-slate-900 rounded-2xl border border-slate-800">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase">মেইনটেন্যান্স মোড</span>
+                        <select name="maintenance_mode" class="bg-transparent text-rose-500 font-black text-xs outline-none">
+                            <option value="off" {% if settings.get('maintenance_mode') == 'off' %}selected{% endif %}>OFF</option>
+                            <option value="on" {% if settings.get('maintenance_mode') == 'on' %}selected{% endif %}>ON (Vacation)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ৫. এআই ব্রেইন কন্ট্রোল -->
+        <div class="glass p-10 rounded-[3rem] shadow-2xl border border-purple-500/10">
+            <h3 class="text-purple-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
+                <i class="fa-solid fa-brain text-xl"></i> এআই ব্রেইন ও পারসোনালিটি
             </h3>
             <div class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="space-y-2">
-                        <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Phone Number ID</label>
-                        <input name="phone_number_id" value="{{ settings.get('phone_number_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                    </div>
-                    <div class="space-y-2">
-                        <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">WhatsApp Business ID</label>
-                        <input name="waba_id" value="{{ settings.get('waba_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                    </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Gemini Pro 2.0 Key</label>
+                    <input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-purple-500 outline-none transition text-sm">
                 </div>
                 <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Permanent Access Token</label>
-                    <textarea name="permanent_token" rows="2" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition font-mono text-xs">{{ settings.get('permanent_token', '') }}</textarea>
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">System Instruction (The Bot DNA)</label>
+                    <textarea name="ai_system_instruction" rows="6" class="w-full bg-[#020617] border border-slate-800 px-6 py-6 rounded-[2rem] focus:border-purple-500 outline-none transition text-sm leading-relaxed">{{ settings.get('ai_system_instruction', '') }}</textarea>
                 </div>
             </div>
         </div>
 
-        <!-- ৩. পাঠাও কুরিয়ার ইন্টিগ্রেশন -->
-        <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
-            <h3 class="text-orange-400 font-black text-xs uppercase mb-6 tracking-widest flex items-center gap-2">
-                <i class="fa-solid fa-truck-fast"></i> পাঠাও কুরিয়ার সেটিংস
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Pathao Client ID</label>
-                    <input name="pathao_client_id" value="{{ settings.get('pathao_client_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Pathao Client Secret</label>
-                    <input type="password" name="pathao_client_secret" value="{{ settings.get('pathao_client_secret', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Store ID</label>
-                    <input name="pathao_store_id" value="{{ settings.get('pathao_store_id', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase ml-2">Merchant Password</label>
-                    <input type="password" name="pathao_merchant_password" value="{{ settings.get('pathao_merchant_password', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                </div>
-            </div>
+        <!-- আল্টিমেট সেভ বাটন -->
+        <div class="sticky bottom-6 z-30">
+            <button type="submit" class="w-full bg-gradient-to-r from-indigo-600 to-blue-700 hover:from-white hover:to-white hover:text-indigo-600 py-7 rounded-[2.5rem] font-black uppercase text-sm tracking-[0.4em] shadow-[0_20px_50px_rgba(79,70,229,0.4)] transition-all duration-500 transform hover:-translate-y-2 active:scale-95 border border-indigo-400/20">
+                সেভ মাস্টার কনফিগারেশন
+            </button>
         </div>
-
-        <!-- ৪. ডেলিভারি চার্জ ও এআই ইনস্ট্রাকশন -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div class="glass p-8 rounded-[2.5rem]">
-                <h3 class="text-emerald-400 font-black text-xs uppercase mb-6 tracking-widest">ডেলিভারি চার্জ (৳)</h3>
-                <div class="space-y-4">
-                    <div class="flex justify-between items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                        <span class="text-xs font-bold text-slate-400 uppercase">ঢাকার ভেতরে</span>
-                        <input name="delivery_inside_dhaka" value="{{ settings.get('delivery_inside_dhaka', '60') }}" class="w-20 bg-transparent text-right font-black text-white outline-none">
-                    </div>
-                    <div class="flex justify-between items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                        <span class="text-xs font-bold text-slate-400 uppercase">ঢাকার বাইরে</span>
-                        <input name="delivery_outside_dhaka" value="{{ settings.get('delivery_outside_dhaka', '120') }}" class="w-20 bg-transparent text-right font-black text-white outline-none">
-                    </div>
-                </div>
-            </div>
-
-            <div class="glass p-8 rounded-[2.5rem]">
-                <h3 class="text-purple-400 font-black text-xs uppercase mb-6 tracking-widest">এআই কন্ট্রোল (Gemini)</h3>
-                <div class="space-y-4">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase">Gemini API Key</label>
-                    <input type="password" name="gemini_key" value="{{ settings.get('gemini_key', '') }}" class="w-full bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none transition">
-                </div>
-            </div>
-        </div>
-
-        <!-- ৫. ফুল এআই প্রম্পট -->
-        <div class="glass p-8 rounded-[2.5rem]">
-            <h3 class="text-indigo-400 font-black text-xs uppercase mb-6 tracking-widest">বট ইনস্ট্রাকশন (System Prompt)</h3>
-            <textarea name="ai_system_instruction" rows="6" class="w-full bg-slate-900/50 border border-slate-800 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition text-sm leading-relaxed">{{ settings.get('ai_system_instruction', '') }}</textarea>
-            <p class="text-[9px] text-slate-600 mt-4 leading-relaxed uppercase font-bold tracking-widest text-center">Caution: Changing prompt may affect bot behavior and customer interaction logic.</p>
-        </div>
-        <!-- ৬. গ্লোবাল ফ্রড ডিটেকশন (সারাদেশের ডেটাবেস থেকে) -->
-        <div class="glass p-10 rounded-[3rem] shadow-2xl border border-rose-500/10">
-            <h3 class="text-rose-400 font-black text-xs uppercase mb-8 tracking-[0.3em] flex items-center gap-3">
-                <i class="fa-solid fa-globe text-xl"></i> গ্লোবাল ফ্রড চেকার (Steadfast & Global DB)
-            </h3>
-            
-            <div class="flex flex-col md:flex-row gap-4 mb-8">
-                <input type="text" id="fraudPhone" placeholder="কাস্টমারের ফোন নম্বর (017...)" class="flex-1 bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-rose-500 outline-none transition text-sm">
-                <button type="button" onclick="checkFraud()" class="bg-rose-600 hover:bg-rose-500 px-8 py-4 rounded-2xl font-black text-xs uppercase transition-all shadow-lg shadow-rose-500/20">
-                    সারাদেশে সার্চ করুন
-                </button>
-            </div>
-
-            <!-- রেজাল্ট কার্ড (অটোমেটিক আপডেট হবে) -->
-            <div id="fraudResult" class="hidden p-6 bg-slate-900 border border-slate-800 rounded-3xl animate-pulse">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p id="res_phone" class="text-white font-black text-lg">017XXXXXXXX</p>
-                        <p id="res_status" class="text-[10px] uppercase font-bold mt-1">Checking Records...</p>
-                    </div>
-                    <div id="res_risk" class="text-3xl font-black text-rose-500">0%</div>
-                </div>
-                <div class="mt-6 grid grid-cols-2 gap-4">
-                    <div class="p-4 bg-black/40 rounded-2xl border border-slate-800">
-                        <p class="text-[9px] text-slate-500 uppercase font-black">সাকসেস রেট</p>
-                        <p id="res_success" class="text-sm font-black text-emerald-400">0%</p>
-                    </div>
-                    <div class="p-4 bg-black/40 rounded-2xl border border-slate-800">
-                        <p class="text-[9px] text-slate-500 uppercase font-black">রিটার্ন পার্সেল</p>
-                        <p id="res_return" class="text-sm font-black text-rose-400">0 বার</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-<script>
-async function checkFraud() {
-    const phone = document.getElementById('fraudPhone').value;
-    if(!phone || phone.length < 11) return alert("সঠিক ফোন নম্বর দিন");
-    
-    document.getElementById('fraudResult').classList.remove('hidden');
-    document.getElementById('res_status').innerText = "সারাদেশের কুরিয়ার ডেটাবেসে চেক করা হচ্ছে...";
-    
-    try {
-        const response = await fetch(`/api/check-fraud?phone=${phone}`);
-        const data = await response.json();
-        
-        document.getElementById('fraudResult').classList.remove('animate-pulse');
-        document.getElementById('res_phone').innerText = phone;
-        document.getElementById('res_status').innerText = data.risk > 50 ? "হাই-রিস্ক কাস্টমার!" : "নিরাপদ কাস্টমার";
-        document.getElementById('res_status').className = data.risk > 50 ? "text-[10px] uppercase font-bold mt-1 text-rose-500" : "text-[10px] uppercase font-bold mt-1 text-emerald-500";
-        document.getElementById('res_risk').innerText = data.risk + "%";
-        document.getElementById('res_success').innerText = data.success_rate + "%";
-        document.getElementById('res_return').innerText = data.return_count + " বার";
-    } catch(e) {
-        alert("সার্ভার এরর! আবার চেষ্টা করুন।");
-    }
-}
-</script>
-        
-
-        <!-- সেভ বাটন -->
-        <button type="submit" class="w-full bg-indigo-600 hover:bg-white hover:text-indigo-600 py-6 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl shadow-indigo-500/30 transition-all duration-500 transform hover:-translate-y-2 active:scale-95">
-            কনফিগারেশন আপডেট করুন
-        </button>
 
     </form>
 </div>
