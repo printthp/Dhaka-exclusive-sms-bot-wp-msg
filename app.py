@@ -9,6 +9,7 @@ import requests
 from datetime import datetime
 from threading import Thread, Lock
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
+from flask_socketio import SocketIO, emit
 
 # =====================================================================
 # SYSTEM LOGGING & SETUP
@@ -17,6 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-pro-ultimate-2026")
 application = app
 
@@ -171,5 +173,4 @@ def admin_logout():
     return redirect("/admin/login")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
