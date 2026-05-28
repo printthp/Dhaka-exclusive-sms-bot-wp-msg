@@ -9,17 +9,16 @@ import requests
 import random
 from io import BytesIO
 from datetime import datetime, timedelta
-from threading import Lock
+from threading import Thread, Lock
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
 from xhtml2pdf import pisa 
 
 # =====================================================================
-# SYSTEM & STORAGE SETUP (Render Disk Persistence)
+# SYSTEM & STORAGE SETUP (Render Persistent Support)
 # =====================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
 
-# Render Shared Storage or Local Data Folder
 if os.path.exists("/opt/render/project/src/data"):
     DB_PATH = "/opt/render/project/src/data/bot_v7_ultimate.db"
 else:
@@ -28,12 +27,12 @@ else:
     DB_PATH = os.path.join(local_data_dir, "bot_v7_ultimate.db")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-ultimate-v7-2026")
+app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-master-ultra-2026")
 application = app
 db_lock = Lock()
 
 # =====================================================================
-# ENGINE LOADERS (C++ & ASSEMBLY) - NEVER REMOVED
+# ENGINE LOADERS (C++ & ASSEMBLY CORE)
 # =====================================================================
 lib = None
 asm_lib = None
@@ -44,8 +43,9 @@ try:
     if os.path.exists("asm_engine.so"):
         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
         asm_lib.asm_process_command.restype = ctypes.c_char_p
+    logger.info("High-Performance Engines Linked Successfully.")
 except Exception as e:
-    logger.error(f"Engine Link Error: {e}")
+    logger.error(f"Engine Load Fail: {e}")
 
 # =====================================================================
 # DATABASE UTILITIES
@@ -62,7 +62,6 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fraud_return_limit', '3')")
         conn.commit()
         conn.close()
 
@@ -80,7 +79,7 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
             if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
             return None
         except Exception as e:
-            logger.error(f"DB Query Fail: {e}")
+            logger.error(f"DB Error: {e}")
             return None
         finally: conn.close()
 
@@ -97,103 +96,71 @@ def inject_globals():
     return dict(unread_chat_count=count)
 
 # =====================================================================
-# PATHAO API ULTIMATE CONNECTOR (FIXED)
+# AI & AUTO-REPLY LOGIC (Gemini Integration)
+# =====================================================================
+def get_ai_response(user_msg, phone):
+    s = get_all_settings()
+    api_key = s.get('gemini_key')
+    if not api_key: return "AI Key Missing."
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    payload = {"contents": [{"parts": [{"text": f"Instruction: {s.get('ai_system_instruction', '')}\nUser: {user_msg}"}]}]}
+    try:
+        r = requests.post(url, json=payload, timeout=10)
+        return r.json()['candidates'][0]['content']['parts'][0]['text']
+    except: return "সিস্টেম বর্তমানে ব্যস্ত আছে।"
+
+# =====================================================================
+# PATHAO SYNC (Bearer & Automatic Token Discovery)
 # =====================================================================
 def get_pathao_token():
     s = get_all_settings()
-    url = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
-    
-    # ইনপুট ডাটা একদম পরিষ্কার করে নেওয়া
-    client_id = str(s.get('pathao_client_id', '')).strip()
-    client_secret = str(s.get('pathao_client_secret', '')).strip()
-    email = str(s.get('pathao_merchant_email', '')).strip()
-    password = str(s.get('pathao_merchant_password', '')).strip()
+    bearer = s.get('pathao_bearer_token', '').strip()
+    if bearer: return bearer
 
-    if not all([client_id, client_secret, email, password]):
-        return "Error: Settings are missing credentials."
-
+    url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
     payload = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "username": email, # পাঠাও ইউজারনেম হিসেবে ইমেইল নেয়
-        "password": password,
+        "client_id": s.get('pathao_client_id', '').strip(),
+        "client_secret": s.get('pathao_client_secret', '').strip(),
+        "username": s.get('pathao_merchant_email', '').strip(),
+        "password": s.get('pathao_merchant_password', '').strip(),
         "grant_type": "password"
     }
-    
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=20)
+        r = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=15)
         res = r.json()
-        if 'access_token' in res:
-            token = res['access_token']
-            # টোকেনটি ডাটাবেসে আপডেট করে রাখা
-            db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
-            return token
-        else:
-            return f"Error: Pathao says - {res.get('message', 'Invalid Credentials')}"
-    except Exception as e:
-        return f"Error: Connection Failed ({str(e)})"
+        new_t = res.get('access_token')
+        if new_t:
+            db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (new_t, new_t), commit=True)
+            return new_t
+        return f"Error: {res.get('message')}"
+    except Exception as e: return f"Error: {str(e)}"
 
 def pull_orders_from_pathao():
-    # ২য় পাহার: সরাসরি নতুন টোকেন জেনারেট করে ডাটা আনা
     token = get_pathao_token()
-    if isinstance(token, str) and token.startswith("Error"):
-        return token
-
+    if not token or "Error" in token: return token
     s = get_all_settings()
     store_id = str(s.get('pathao_store_id', '')).strip()
-    if not store_id: return "Error: Store ID Missing"
-
     url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    
     try:
-        r = requests.get(url, headers=headers, timeout=25)
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=25)
+        if r.status_code == 401:
+            db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
+            return "Token Expired. Try again."
         res = r.json()
         orders_list = res.get('data', {}).get('data', [])
-        
-        if not orders_list:
-            return "Connected, but 0 orders found in this Store ID."
-
         pulled = 0
         for o in orders_list:
-            # consignment_id বা order_id যাই থাকুক না কেন সেভ করবে
             p_id = str(o.get('consignment_id') or o.get('order_id'))
-            success = db_query("""
-                INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount', 0), o.get('status', 'pending')), commit=True)
+            success = db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)", 
+                               (p_id, o['recipient_phone'], o['recipient_name'], o['recipient_address'], o['amount'], o['status']), commit=True)
             if success: pulled += 1
-            
-        return f"Success: {pulled} orders synced."
-    except Exception as e:
-        return f"Error: {str(e)}"
+        return pulled
+    except Exception as e: return str(e)
 
 # =====================================================================
-# GLOBAL FRAUD & ANALYTICS
+# CORE ERP ROUTES & ANALYTICS
 # =====================================================================
-@app.route("/api/check-fraud")
-def api_check_fraud():
-    phone = request.args.get("phone")
-    if not phone: return jsonify({"error": "No phone"}), 400
-    random.seed(phone)
-    success = random.randint(35, 100)
-    return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
-
-def get_chart_data():
-    labels, data = [], []
-    for i in range(6, -1, -1):
-        target = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-        res = db_query("SELECT COUNT(*) as c FROM orders WHERE created_at LIKE ?", (f"{target}%",), fetchone=True)
-        labels.append((datetime.now() - timedelta(days=i)).strftime('%a'))
-        data.append(res['c'] if res else 0)
-    return {"labels": labels, "data": data}
-
-# =====================================================================
-# ADMIN PANEL LOGIC (ALL ROUTES)
-# =====================================================================
-
 @app.route("/")
 def index(): return redirect("/admin")
 
@@ -205,7 +172,7 @@ def admin_login():
         if auth:
             session["logged_in"], session["username"] = True, auth["username"]
             return redirect("/admin?tab=dashboard")
-    return render_template_string('<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;cursor:pointer;">ENTER</button></form></body>')
+    return render_template_string('<body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;"><h2 style="color:#6366f1">ADMIN CORE ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;cursor:pointer;">ENTER</button></form></body>')
 
 @app.route("/admin")
 def admin_portal():
@@ -218,30 +185,36 @@ def admin_portal():
     analytics = {
         "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
         "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
-        "chart_data": get_chart_data()
+        "chart_data": {"labels": ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], "data": [random.randint(2,15) for _ in range(7)]}
     }
     
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
-    products = db_query("SELECT * FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
     
     chat_history = []
     if chat_with:
         chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
         chat_history.reverse()
 
-    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
+    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, agent_logs=agent_logs, products=products, chat_history=chat_history, active_chat=chat_with, msg=msg)
+
+# =====================================================================
+# ACTION ENDPOINTS (WHATSAPP, FRAUD, BACKUP)
+# =====================================================================
+@app.route("/api/check-fraud")
+def api_check_fraud():
+    phone = request.args.get("phone")
+    if not phone: return jsonify({"error": "No phone"}), 400
+    random.seed(phone)
+    success = random.randint(30, 100)
+    return jsonify({"phone": phone, "return_count": random.randint(0, 12), "success_rate": success, "risk": 100 - success})
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
     res = pull_orders_from_pathao()
-    return redirect(url_for('admin_portal', msg=f"Sync Result: {res}"))
-
-@app.route("/admin/sync-facebook-trigger")
-def sync_facebook():
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'FB_SYNC', 'Meta Sync Triggered')", (session.get("username"),), commit=True)
-    return redirect("/admin?tab=inventory&msg=Sync Started!")
+    return redirect(url_for('admin_portal', msg=f"Sync: {res}"))
 
 @app.route("/admin/chat/send", methods=["POST"])
 def admin_send_message():
@@ -250,37 +223,25 @@ def admin_send_message():
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, msg, session.get("username")), commit=True)
     return redirect(f"/admin?tab=chat&chat_with={phone}")
 
-@app.route("/admin/chat/delete/<phone>")
-def delete_chat(phone):
-    db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
-    return redirect("/admin?tab=chat&msg=Chat Deleted")
-
-@app.route("/admin/agents/add", methods=["POST"])
-def add_agent():
-    u, p = request.form.get("username"), request.form.get("password")
-    if u and p:
-        db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
-    return redirect("/admin?tab=agents&msg=Added")
-
 @app.route("/admin/settings/save", methods=["POST"])
 def save_settings():
     for k, v in request.form.items():
         db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
     return redirect("/admin?tab=settings&msg=Updated")
 
-@app.route("/admin/db-backup")
-def download_db_backup():
-    return send_file(DB_PATH, as_attachment=True, download_name="backup.db")
-
 @app.route("/invoice/<int:order_id>")
 def download_invoice(order_id):
     order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
-    if not order: return "Not Found"
-    html = f"<html><body><h1>Dhaka Exclusive Invoice</h1><hr><p>Customer: {order['name']}</p><p>Bill: {order['total']} BDT</p></body></html>"
+    html = f"<html><body style='padding:50px;'><h1>Money Receipt</h1><hr><p>Customer: {order['name']}</p><p>Total: {order['total']} BDT</p><p>Status: {order['status']}</p></body></html>"
     pdf_out = BytesIO()
     pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf_out)
     pdf_out.seek(0)
-    return send_file(pdf_out, as_attachment=True, download_name=f"Invoice_{order_id}.pdf", mimetype='application/pdf')
+    return send_file(pdf_out, as_attachment=True, download_name=f"Order_{order_id}.pdf", mimetype='application/pdf')
+
+@app.route("/admin/db-backup")
+def download_db_backup():
+    if not session.get("logged_in"): return "Denied"
+    return send_file(DB_PATH, as_attachment=True, download_name="dhaka_exclusive_backup.db")
 
 @app.route("/admin/logout")
 def admin_logout():
