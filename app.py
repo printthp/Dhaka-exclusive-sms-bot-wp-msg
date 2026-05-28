@@ -1,18 +1,10 @@
-import os
-import sys
-import json
-import sqlite3
-import logging
-import ctypes
-import time
-import requests
-import random
-import pandas as pd
+import os, sys, json, sqlite3, logging, ctypes, time, requests, random, pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
 from xhtml2pdf import pisa
+from werkzeug.utils import secure_filename
 
 # =====================================================================
 # SYSTEM & STORAGE SETUP (Render Persistence)
@@ -112,6 +104,61 @@ def inject_globals():
     return dict(unread_chat_count=count)
 
 # =====================================================================
+# WHATSAPP MEDIA UPLOAD & SEND (NEW - Voice + Image)
+# =====================================================================
+MEDIA_FOLDER = os.path.join(os.path.dirname(DB_PATH), "media")
+if not os.path.exists(MEDIA_FOLDER):
+    os.makedirs(MEDIA_FOLDER)
+
+def upload_media_to_whatsapp(file_path, media_type="image"):
+    s = get_all_settings()
+    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
+    if not token or not phone_id:
+        logger.error("WhatsApp credentials missing for media upload")
+        return None
+    url = f"https://graph.facebook.com/v22.0/{phone_id}/media"
+    try:
+        with open(file_path, "rb") as f:
+            files = {"file": (os.path.basename(file_path), f, f"{media_type}/*")}
+            data = {"type": media_type, "messaging_product": "whatsapp"}
+            headers = {"Authorization": f"Bearer {token}"}
+            r = requests.post(url, headers=headers, files=files, data=data, timeout=60)
+            res = r.json()
+            if r.status_code in (200, 201) and "id" in res:
+                logger.info(f"Media uploaded: {res['id']}")
+                return res["id"]
+            logger.error(f"Media upload failed: {res}")
+            return None
+    except Exception as e:
+        logger.error(f"Media upload exception: {e}")
+        return None
+
+def send_whatsapp_media(to_phone, media_id, media_type="image", caption=""):
+    s = get_all_settings()
+    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
+    if not token or not phone_id:
+        return False
+    url = f"https://graph.facebook.com/v22.0/{phone_id}/messages"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": to_phone, "type": media_type}
+    if media_type == "image":
+        body["image"] = {"id": media_id, "caption": caption}
+    elif media_type == "audio":
+        body["audio"] = {"id": media_id}
+    try:
+        r = requests.post(url, json=body, headers=headers, timeout=30)
+        if r.status_code in (200, 201):
+            logger.info(f"WhatsApp {media_type} sent to {to_phone}")
+            return True
+        logger.error(f"WhatsApp {media_type} failed: {r.status_code} {r.text}")
+        return False
+    except Exception as e:
+        logger.error(f"WhatsApp {media_type} error: {e}")
+        return False
+
+# =====================================================================
 # PATHAO SYNC (Bearer & Auto-Login Hybrid)
 # =====================================================================
 def get_pathao_token():
@@ -119,7 +166,6 @@ def get_pathao_token():
     bearer = s.get('pathao_bearer_token', '').strip()
     if bearer and len(bearer) > 20:
         return bearer
-
     url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
     payload = {
         "client_id": str(s.get('pathao_client_id', '')).strip(),
@@ -143,23 +189,19 @@ def pull_orders_from_pathao():
     token = get_pathao_token()
     if isinstance(token, str) and "Error" in token:
         return token
-
     s = get_all_settings()
     store_id = str(s.get('pathao_store_id', '')).strip()
     if not store_id:
         return "Error: Store ID Missing"
-
     url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
     try:
         r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
         if r.status_code == 401:
             db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
             return "Token Expired. Please refresh again."
-
         res = r.json()
         data_block = res.get('data', [])
         orders_list = data_block.get('data', []) if isinstance(data_block, dict) else data_block
-
         pulled = 0
         for o in orders_list:
             p_id = str(o.get('consignment_id') or o.get('order_id'))
@@ -224,12 +266,7 @@ def api_check_fraud():
         return jsonify({"error": "No phone"}), 400
     random.seed(phone)
     success = random.randint(35, 100)
-    return jsonify({
-        "phone": phone,
-        "return_count": random.randint(0, 10),
-        "success_rate": success,
-        "risk": 100 - success
-    })
+    return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
 
 def get_chart_data():
     labels, data = [], []
@@ -304,6 +341,41 @@ def admin_send_message():
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, msg, session.get("username")), commit=True)
         send_whatsapp_message(phone, msg)
     return redirect(f"/admin?tab=chat&chat_with={phone}")
+
+@app.route("/admin/chat/send-image", methods=["POST"])
+def admin_send_image():
+    phone = request.form.get("phone")
+    file = request.files.get("image")
+    caption = request.form.get("caption", "")
+    if not phone or not file:
+        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=No image selected")
+    filename = secure_filename(f"img_{int(time.time())}_{file.filename}")
+    file_path = os.path.join(MEDIA_FOLDER, filename)
+    file.save(file_path)
+    media_id = upload_media_to_whatsapp(file_path, media_type="image")
+    if media_id and send_whatsapp_media(phone, media_id, media_type="image", caption=caption):
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, f"[IMAGE:{file_path}]", session.get("username")), commit=True)
+        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Image sent!")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Image upload failed")
+
+@app.route("/admin/chat/send-voice", methods=["POST"])
+def admin_send_voice():
+    phone = request.form.get("phone")
+    voice_file = request.files.get("voice")
+    if not phone or not voice_file:
+        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=No voice message")
+    filename = secure_filename(f"voice_{int(time.time())}.webm")
+    file_path = os.path.join(MEDIA_FOLDER, filename)
+    voice_file.save(file_path)
+    media_id = upload_media_to_whatsapp(file_path, media_type="audio")
+    if media_id and send_whatsapp_media(phone, media_id, media_type="audio"):
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, "[VOICE MESSAGE]", session.get("username")), commit=True)
+        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Voice sent!")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Voice upload failed")
 
 @app.route("/admin/chat/delete/<phone>")
 def delete_chat(phone):
