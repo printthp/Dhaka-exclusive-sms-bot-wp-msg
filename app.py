@@ -361,10 +361,10 @@ def admin_logout():
 # =====================================================================
 # GEMINI AI & WHATSAPP CLOUD API INTEGRATION
 # =====================================================================
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
-VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
 
 def get_gemini_reply(user_message: str) -> str:
     if not GEMINI_API_KEY:
@@ -396,7 +396,7 @@ def get_gemini_reply(user_message: str) -> str:
         return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
-        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
+        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
 
 def send_whatsapp_message(to_phone: str, message: str) -> bool:
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
@@ -480,16 +480,14 @@ def webhook():
                             commit=True
                         )
                         logger.info(f"Received from {phone}: {content}")
-                        # Only auto-reply AI for text messages
-                        if m_type == "text":
-                            reply = get_gemini_reply(content)
-                            sent = send_whatsapp_message(phone, reply)
-                            if sent:
-                                db_query(
-                                    "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
-                                    (phone, reply, "gemini_ai"),
-                                    commit=True
-                                )
+                        reply = get_gemini_reply(content)
+                        sent = send_whatsapp_message(phone, reply)
+                        if sent:
+                            db_query(
+                                "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
+                                (phone, reply, "gemini_ai"),
+                                commit=True
+                            )
         except Exception as e:
             logger.error(f"Webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
