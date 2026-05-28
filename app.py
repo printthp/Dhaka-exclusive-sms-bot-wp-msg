@@ -7,6 +7,7 @@ import ctypes
 import time
 import requests
 import random
+import pandas as pd 
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
@@ -150,6 +151,42 @@ def pull_orders_from_pathao():
             if success: pulled += 1
         return pulled
     except Exception as e: return str(e)
+
+@app.route("/admin/import-pathao", methods=["POST"])
+def import_pathao_csv():
+    if not session.get("logged_in"): return redirect("/admin/login")
+    
+    file = request.files.get('file')
+    if not file: return redirect("/admin?tab=pathao_import&msg=কোনো ফাইল সিলেক্ট করেননি")
+
+    try:
+        # ফাইলটি রিড করা (CSV বা Excel)
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file)
+
+        # আপনার স্ক্রিনশটের কলাম অনুযায়ী ম্যাপিং
+        # কলামের নামগুলো আপনার ফাইলের সাথে মিলিয়ে নিন (যেমন: 'Recipient name', 'Recipient phone' ইত্যাদি)
+        count = 0
+        for index, row in df.iterrows():
+            p_id = str(row.get('Order con', '')) # 'Order con' মানে কনসাইনমেন্ট আইডি
+            name = str(row.get('Recipient name', 'Unknown'))
+            phone = str(row.get('Recipient phone', ''))
+            address = str(row.get('Recipient address', ''))
+            amount = row.get('Collectable Amount', 0)
+            status = str(row.get('Order stat', 'pending'))
+
+            if phone:
+                db_query("""
+                    INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (p_id, phone, name, address, amount, status), commit=True)
+                count += 1
+
+        return redirect(f"/admin?tab=pathao_import&msg={count}টি অর্ডার সফলভাবে ইম্পোর্ট হয়েছে।")
+    except Exception as e:
+        return redirect(f"/admin?tab=pathao_import&msg=Error: {str(e)}")
 
 # =====================================================================
 # GLOBAL FRAUD & ANALYTICS
