@@ -37,10 +37,8 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Dhaka Exclusive')")
         conn.commit()
         conn.close()
 
@@ -64,72 +62,76 @@ def get_all_settings():
     return {r["key"]: r["value"] for r in rows}
 
 # =====================================================================
-# PATHAO API INTEGRATION (STRICT KEYS)
+# REAL PATHAO API LOGIC (RE-ENGINEERED)
 # =====================================================================
 def get_pathao_token():
     s = get_all_settings()
-    # আমরা নিশ্চিত করছি যে সেটিংস পেজের ইনপুট ফিল্ডের নামের সাথে এগুলো মিলছে
+    url = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
+    
+    # সেটিংস থেকে কি-গুলো সংগ্রহ
     payload = {
-        "client_id": s.get('pathao_client_id'),
-        "client_secret": s.get('pathao_client_secret'),
-        "username": s.get('pathao_merchant_email') or s.get('pathao_merchant_email_address'), # বিকল্প নাম চেক
-        "password": s.get('pathao_merchant_password'),
+        "client_id": s.get('pathao_client_id', '').strip(),
+        "client_secret": s.get('pathao_client_secret', '').strip(),
+        "username": s.get('pathao_merchant_email', '').strip(),
+        "password": s.get('pathao_merchant_password', '').strip(),
         "grant_type": "password"
     }
     
-    url = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        res = r.json()
-        if 'access_token' in res:
-            return res['access_token']
+        r = requests.post(url, json=payload, headers={"Accept": "application/json"}, timeout=15)
+        res_data = r.json()
+        if 'access_token' in res_data:
+            return res_data['access_token']
         else:
-            logger.error(f"Pathao Auth Failed: {res}")
+            logger.error(f"Token Error: {res_data}")
             return None
     except Exception as e:
-        logger.error(f"Pathao Connection Error: {e}")
+        logger.error(f"Pathao Auth Connection Error: {e}")
         return None
 
 def pull_orders_from_pathao():
     token = get_pathao_token()
     s = get_all_settings()
-    store_id = s.get('pathao_store_id')
+    store_id = s.get('pathao_store_id', '').strip()
     
     if not token or not store_id:
         return 0
 
+    # পাঠাও অর্ডার লিস্ট এপিআই (Hermes API V1)
     url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
     
     try:
-        r = requests.get(url, headers=headers, timeout=15)
-        response_data = r.json()
-        # পাঠাও এপিআই ডাটা অনেক সময় 'data' এর ভিতর 'data' তে থাকে
-        pathao_orders = response_data.get('data', {}).get('data', [])
+        r = requests.get(url, headers=headers, timeout=20)
+        res = r.json()
         
-        pulled = 0
-        for o in pathao_orders:
-            # consignment_id এবং অন্যান্য ডাটা সংগ্রহ
-            p_id = str(o.get('consignment_id'))
-            p_phone = o.get('recipient_phone')
-            p_name = o.get('recipient_name')
-            p_address = o.get('recipient_address')
-            p_amount = o.get('amount', 0)
-            p_status = o.get('status', 'pending')
-
-            res = db_query("""
+        # পাঠাও রেসপন্স স্ট্রাকচার অনেক সময় আলাদা হয়, তাই সাবধানে হ্যান্ডেল করা
+        orders_list = res.get('data', {}).get('data', [])
+        
+        pulled_count = 0
+        for o in orders_list:
+            # ইউনিক পাঠাও আইডি
+            p_id = str(o.get('consignment_id') or o.get('order_id'))
+            
+            # ডাটাবেসে সেভ
+            success = db_query("""
                 INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (p_id, p_phone, p_name, p_address, p_amount, p_status), commit=True)
-            if res: pulled += 1
+            """, (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount'), o.get('status')), commit=True)
             
-        return pulled
+            if success: pulled_count += 1
+            
+        return pulled_count
     except Exception as e:
-        logger.error(f"Pulling Error: {e}")
+        logger.error(f"Pathao Data Sync Error: {e}")
         return 0
 
 # =====================================================================
-# ANALYTICS & DASHBOARD DATA
+# DASHBOARD LOGIC
 # =====================================================================
 def get_chart_data():
     labels, data = [], []
@@ -141,7 +143,7 @@ def get_chart_data():
     return {"labels": labels, "data": data}
 
 # =====================================================================
-# WEB ROUTES
+# ROUTES
 # =====================================================================
 @app.route("/")
 def index(): return redirect("/admin")
@@ -153,8 +155,8 @@ def admin_login():
         auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
         if auth:
             session["logged_in"], session["username"] = True, auth["username"]
-            return redirect("/admin?tab=dashboard")
-    return render_template_string('<body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;cursor:pointer;">LOGIN</button></form></body>')
+            return redirect("/admin")
+    return render_template_string('<body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;"><h2>DHAKA PRO ACCESS</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;">LOGIN</button></form></body>')
 
 @app.route("/admin")
 def admin_portal():
@@ -163,8 +165,12 @@ def admin_portal():
     tab = request.args.get("tab", "dashboard")
     chat_with = request.args.get("chat_with", "")
     msg = request.args.get("msg", "")
-    s = get_all_settings()
     
+    # ড্যাশবোর্ড লোড হলে অটোমেটিক একবার ট্রাই করবে
+    if tab == "dashboard" and not msg:
+        pull_orders_from_pathao()
+
+    s = get_all_settings()
     analytics = {
         "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
         "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
@@ -172,22 +178,21 @@ def admin_portal():
     }
     
     unread_chat_count = db_query("SELECT COUNT(DISTINCT from_number) as c FROM messages WHERE direction='inbound'", fetchone=True)["c"] or 0
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 40", fetchall=True) or []
     
     chat_history = []
     if chat_with:
         chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
         chat_history.reverse()
 
-    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, agent_logs=agent_logs, unread_chat_count=unread_chat_count, active_chat=chat_with, chat_history=chat_history, msg=msg)
+    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, unread_chat_count=unread_chat_count, active_chat=chat_with, chat_history=chat_history, msg=msg)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
     if not session.get("logged_in"): return redirect("/admin/login")
-    pulled = pull_orders_from_pathao()
-    return redirect(url_for('admin_portal', tab='dashboard', msg=f"Pathao Sync Complete! {pulled} new orders found."))
+    new_count = pull_orders_from_pathao()
+    return redirect(url_for('admin_portal', tab='dashboard', msg=f"Pathao Sync Complete! {new_count} new orders synced."))
 
 @app.route("/admin/settings/save", methods=["POST"])
 def save_settings():
@@ -202,5 +207,4 @@ def admin_logout():
     return redirect("/admin/login")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
