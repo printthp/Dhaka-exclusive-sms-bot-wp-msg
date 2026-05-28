@@ -111,6 +111,8 @@ def inject_globals():
 def get_pathao_token():
     s = get_all_settings()
     url = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
+    
+    # এটি নিশ্চিত করবে যে কোনো বাড়তি স্পেস যেন ডাটাবেসে না যায়
     payload = {
         "client_id": str(s.get('pathao_client_id', '')).strip(),
         "client_secret": str(s.get('pathao_client_secret', '')).strip(),
@@ -118,31 +120,27 @@ def get_pathao_token():
         "password": str(s.get('pathao_merchant_password', '')).strip(),
         "grant_type": "password"
     }
-    try:
-        r = requests.post(url, json=payload, headers={"Accept": "application/json"}, timeout=15)
-        res = r.json()
-        return res.get('access_token') if 'access_token' in res else f"Error: {res.get('message')}"
-    except Exception as e: return f"Error: {str(e)}"
-
-def pull_orders_from_pathao():
-    token = get_pathao_token()
-    if isinstance(token, str) and "Error" in token: return token
-    s = get_all_settings()
-    store_id = s.get('pathao_store_id', '').strip()
-    if not token or not store_id: return "Credentials Missing"
     
-    url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    
     try:
-        r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=20)
-        orders_list = r.json().get('data', {}).get('data', [])
-        pulled = 0
-        for o in orders_list:
-            p_id = str(o.get('consignment_id') or o.get('order_id'))
-            success = db_query("INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?,?,?,?,?,?)", 
-                               (p_id, o['recipient_phone'], o['recipient_name'], o['recipient_address'], o['amount'], o['status']), commit=True)
-            if success: pulled += 1
-        return pulled
-    except Exception as e: return str(e)
+        # রিকোয়েস্ট পাঠানোর সময় সরাসরি json ই পাঠানো হচ্ছে
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
+        res = r.json()
+        
+        if 'access_token' in res:
+            logger.info("Successfully got Pathao Token")
+            return res['access_token']
+        else:
+            # যদি পাঠাও মেম্বার না হয়ে থাকে বা ভুল দেখায়, তবে ডিটেইল এরর প্রিন্ট হবে
+            error_msg = res.get('message', res.get('error', 'Authentication Failed'))
+            logger.error(f"PATHAO API ERROR: {error_msg}")
+            return f"Error: {error_msg}"
+    except Exception as e:
+        return f"Error: Connection Failed ({str(e)})"
 
 # =====================================================================
 # FEATURE: FRAUD CHECKER API
