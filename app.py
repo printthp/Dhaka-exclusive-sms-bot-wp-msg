@@ -97,57 +97,78 @@ def inject_globals():
     return dict(unread_chat_count=count)
 
 # =====================================================================
-# PATHAO INTEGRATION (Bearer & Auto-Login Hybrid)
+# PATHAO API ULTIMATE CONNECTOR (FIXED)
 # =====================================================================
 def get_pathao_token():
     s = get_all_settings()
-    bearer = s.get('pathao_bearer_token', '').strip()
-    if bearer: return bearer
+    url = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
+    
+    # ইনপুট ডাটা একদম পরিষ্কার করে নেওয়া
+    client_id = str(s.get('pathao_client_id', '')).strip()
+    client_secret = str(s.get('pathao_client_secret', '')).strip()
+    email = str(s.get('pathao_merchant_email', '')).strip()
+    password = str(s.get('pathao_merchant_password', '')).strip()
 
-    logger.info("Generating New Pathao Access Token...")
-    url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
+    if not all([client_id, client_secret, email, password]):
+        return "Error: Settings are missing credentials."
+
     payload = {
-        "client_id": str(s.get('pathao_client_id', '')).strip(),
-        "client_secret": str(s.get('pathao_client_secret', '')).strip(),
-        "username": str(s.get('pathao_merchant_email', '')).strip(),
-        "password": str(s.get('pathao_merchant_password', '')).strip(),
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "username": email, # পাঠাও ইউজারনেম হিসেবে ইমেইল নেয়
+        "password": password,
         "grant_type": "password"
     }
+    
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    
     try:
-        r = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=15)
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
         res = r.json()
-        token = res.get('access_token')
-        if token:
+        if 'access_token' in res:
+            token = res['access_token']
+            # টোকেনটি ডাটাবেসে আপডেট করে রাখা
             db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
             return token
-        return f"Error: {res.get('message')}"
-    except Exception as e: return f"Error: {str(e)}"
+        else:
+            return f"Error: Pathao says - {res.get('message', 'Invalid Credentials')}"
+    except Exception as e:
+        return f"Error: Connection Failed ({str(e)})"
 
 def pull_orders_from_pathao():
+    # ২য় পাহার: সরাসরি নতুন টোকেন জেনারেট করে ডাটা আনা
     token = get_pathao_token()
-    if not token or "Error" in token: return token
-    
+    if isinstance(token, str) and token.startswith("Error"):
+        return token
+
     s = get_all_settings()
     store_id = str(s.get('pathao_store_id', '')).strip()
-    url_orders = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
+    if not store_id: return "Error: Store ID Missing"
+
+    url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     
     try:
-        r = requests.get(url_orders, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=25)
-        if r.status_code == 401: 
-            db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
-            return "Token Expired, Retry."
-            
-        orders_list = r.json().get('data', {}).get('data', [])
+        r = requests.get(url, headers=headers, timeout=25)
+        res = r.json()
+        orders_list = res.get('data', {}).get('data', [])
+        
+        if not orders_list:
+            return "Connected, but 0 orders found in this Store ID."
+
         pulled = 0
         for o in orders_list:
+            # consignment_id বা order_id যাই থাকুক না কেন সেভ করবে
             p_id = str(o.get('consignment_id') or o.get('order_id'))
             success = db_query("""
                 INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status) 
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (p_id, o['recipient_phone'], o['recipient_name'], o['recipient_address'], o['amount'], o['status']), commit=True)
+            """, (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount', 0), o.get('status', 'pending')), commit=True)
             if success: pulled += 1
-        return pulled
-    except Exception as e: return str(e)
+            
+        return f"Success: {pulled} orders synced."
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 # =====================================================================
 # GLOBAL FRAUD & ANALYTICS
