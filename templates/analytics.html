@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Advanced Analytics{% endblock %}
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<div class="mb-10">
+    <h2 class="text-4xl font-black text-white tracking-tighter">বিজনেস ডাটা ইন্টেলিজেন্স</h2>
+    <p class="text-slate-500 text-sm mt-2">আপনার বিক্রির রিয়েল-টাইম গ্রাফ এবং ট্রেন্ড অ্যানালাইসিস।</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8 h-[400px]">
+    <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
+        <h3 class="text-xs font-black text-slate-400 uppercase mb-6 tracking-widest">বিক্রির গ্রাফ (Sales Trends)</h3>
+        <canvas id="salesChart"></canvas>
+    </div>
+    <div class="glass p-8 rounded-[2.5rem] shadow-2xl">
+        <h3 class="text-xs font-black text-slate-400 uppercase mb-6 tracking-widest">অর্ডার স্ট্যাটাস (Order Distribution)</h3>
+        <canvas id="statusChart"></canvas>
+    </div>
+</div>
+
+<script>
+    // Sales Chart (Line)
+    const salesCtx = document.getElementById('salesChart').getContext('2d');
+    new Chart(salesCtx, {
+        type: 'line',
+        data: {
+            labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+            datasets: [{
+                label: 'Revenue ৳',
+                data: [12000, 19000, 15000, 25000, 22000, 30000],
+                borderColor: '#6366f1',
+                tension: 0.4,
+                fill: true,
+                backgroundColor: 'rgba(99, 102, 241, 0.1)'
+            }]
+        },
+        options: { plugins: { legend: { display: false } }, scales: { y: { display: false }, x: { grid: { display: false } } } }
+    });
+
+    // Status Chart (Doughnut)
+    const statusCtx = document.getElementById('statusChart').getContext('2d');
+    new Chart(statusCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Delivered', 'Pending', 'Cancelled'],
+            datasets: [{
+                data: [65, 25, 10],
+                backgroundColor: ['#10b981', '#f59e0b', '#f43f5e'],
+                borderWidth: 0
+            }]
+        },
+        options: { plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 } } } } }
+    });
+</script>
+{% endblock %}
