@@ -176,6 +176,25 @@ def save_settings():
     for k, v in request.form.items():
         db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
     return redirect("/admin?tab=settings&msg=Updated")
+@app.route("/admin/agents/add", methods=["POST"])
+def add_agent():
+    if not session.get("logged_in") or session.get("username") != 'admin':
+        return redirect("/admin?tab=agents&msg=শুধুমাত্র মেইন অ্যাডমিন এমপ্লয়ি যোগ করতে পারবে!")
+    
+    u = request.form.get("username", "").strip()
+    p = request.form.get("password", "").strip()
+    
+    if u and p:
+        # ডেটাবেসে এজেন্ট যোগ করা
+        success = db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
+        if success:
+            # অ্যাকশন লগ রাখা
+            db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_EMPLOYEE', ?)",
+                     (session.get("username"), f"New employee added: {u}"), commit=True)
+            return redirect("/admin?tab=agents&msg=এমপ্লয়ি সফলভাবে যোগ করা হয়েছে!")
+        
+    return redirect("/admin?tab=agents&msg=ভুল তথ্য দেওয়া হয়েছে!")    
+
 
 @app.route("/admin/logout")
 def admin_logout():
