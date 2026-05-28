@@ -10,6 +10,8 @@ import random
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
+
+# ফ্লাস্ক এর প্রয়োজনীয় টুলস
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
 from xhtml2pdf import pisa 
 
@@ -27,7 +29,7 @@ DB_FILE = "bot_v7_ultimate.db"
 db_lock = Lock()
 
 # =====================================================================
-# ENGINE LOADERS (C++ & ASM)
+# ENGINE LOADERS (C++ & ASSEMBLY)
 # =====================================================================
 lib = None
 asm_lib = None
@@ -54,7 +56,7 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, stock INTEGER DEFAULT 10, image_url TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
-        # Initial Seeds
+        # Seeds
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Dhaka Exclusive')")
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fraud_return_limit', '3')")
@@ -74,18 +76,12 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
             if fetchone: row = c.fetchone(); return dict(row) if row else None
             if fetchall: rows = c.fetchall(); return [dict(r) for r in rows]
             return None
-        except Exception as e:
-            logger.error(f"DB Error: {e}")
-            return None
         finally: conn.close()
 
 def get_all_settings():
     rows = db_query("SELECT key, value FROM settings", fetchall=True) or []
     return {r["key"]: r["value"] for r in rows}
 
-# =====================================================================
-# ANALYTICS & GRAPH LOGIC
-# =====================================================================
 def get_chart_data():
     labels, data = [], []
     for i in range(6, -1, -1):
@@ -96,27 +92,19 @@ def get_chart_data():
     return {"labels": labels, "data": data}
 
 # =====================================================================
-# PATHAO INTEGRATION LOGIC
+# PATHAO SYNC (Force All Update)
 # =====================================================================
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
     if not session.get("logged_in"): return redirect("/admin/login")
-    
-    booked_orders = db_query("SELECT id, status FROM orders WHERE status NOT IN ('delivered', 'cancelled')", fetchall=True)
+    booked_orders = db_query("SELECT id FROM orders", fetchall=True) or []
     updated_count = 0
-    
-    # পাঠাও এপিআই সিমুলেশন - এখানে আপনি আসল এপিআই লজিক বসাতে পারবেন
-    possible_status = ['picked_up', 'in_transit', 'delivered', 'pending', 'cancelled']
+    possible_status = ['picked_up', 'in_transit', 'delivered', 'pending', 'returned', 'cancelled']
     for order in booked_orders:
-        new_status = random.choice(possible_status)
-        if new_status != order['status']:
-            db_query("UPDATE orders SET status=? WHERE id=?", (new_status, order['id']), commit=True)
-            updated_count += 1
-            
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'PATHAO_SYNC', ?)", 
-             (session.get("username"), f"Synced {len(booked_orders)} orders. {updated_count} updated."), commit=True)
-             
-    return redirect(url_for('admin_portal', tab='dashboard', msg=f"{updated_count} Orders Updated from Pathao!"))
+        db_query("UPDATE orders SET status=? WHERE id=?", (random.choice(possible_status), order['id']), commit=True)
+        updated_count += 1
+    session['last_sync'] = datetime.now().strftime("%I:%M %p")
+    return redirect(url_for('admin_portal', tab='dashboard', msg=f"{updated_count} Orders Updated!"))
 
 # =====================================================================
 # GLOBAL FRAUD CHECKER API
@@ -126,14 +114,12 @@ def api_check_fraud():
     phone = request.args.get("phone")
     if not phone: return jsonify({"error": "No phone"}), 400
     random.seed(phone)
-    return_count = random.randint(0, 15)
-    success_rate = random.randint(35, 100)
-    risk = 100 - success_rate
-    if return_count > 4: risk += 20
-    return jsonify({"phone": phone, "return_count": return_count, "success_rate": success_rate, "risk": min(risk, 100)})
+    success_rate = random.randint(40, 100)
+    return_count = random.randint(0, 10)
+    return jsonify({"phone": phone, "return_count": return_count, "success_rate": success_rate, "risk": 100 - success_rate})
 
 # =====================================================================
-# WEB ROUTES
+# MAIN ROUTES
 # =====================================================================
 
 @app.route("/")
@@ -142,12 +128,13 @@ def index(): return redirect("/admin")
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        u, p = request.form.get("username"), request.form.get("password")
-        agent = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
-        if agent:
-            session["logged_in"], session["username"] = True, agent["username"]
+        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
+        auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
+        if auth:
+            session["logged_in"], session["username"] = True, auth["username"]
             return redirect("/admin")
-    return render_template_string("""<body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:40px;border-radius:20px;text-align:center;"><h2>ADMIN PRO LOGIN</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;border-radius:10px;margin-top:20px;cursor:pointer;">ENTER</button></form></body>""")
+        flash("ভুল ইউজারনেম!", "error")
+    return render_template_string("""<body style="background:#0f172a;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;"><form method="POST" style="background:#1e293b;padding:40px;border-radius:30px;text-align:center;"><h2>ADMIN LOGIN</h2><input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;"><br><input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;"><br><button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;margin-top:20px;">LOGIN</button></form></body>""")
 
 @app.route("/admin")
 def admin_portal():
@@ -167,7 +154,7 @@ def admin_portal():
     orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 50", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
     products = db_query("SELECT * FROM products ORDER BY id DESC LIMIT 30", fetchall=True) or []
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 40", fetchall=True) or []
     chat_history = []
     if chat_with:
         chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
@@ -200,12 +187,11 @@ def save_settings():
 @app.route("/invoice/<int:order_id>")
 def download_invoice(order_id):
     order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
-    if not order: return "Not Found", 404
-    html = f"<html><body><h1>Invoice #{order_id}</h1><p>Customer: {order['name']}</p><p>Bill: {order['total']} BDT</p></body></html>"
+    html = f"<html><body><h1>Invoice #{order_id}</h1><p>Customer: {order['name']}</p><p>Total: {order['total']} BDT</p></body></html>"
     pdf_out = BytesIO()
     pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf_out)
     pdf_out.seek(0)
-    return send_file(pdf_out, as_attachment=True, download_name=f"Invoice_{order_id}.pdf", mimetype='application/pdf')
+    return send_file(pdf_out, as_attachment=True, download_name=f"Order_{order_id}.pdf", mimetype='application/pdf')
 
 @app.route("/admin/logout")
 def admin_logout():
@@ -213,5 +199,4 @@ def admin_logout():
     return redirect("/admin/login")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
