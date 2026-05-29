@@ -1,5 +1,6 @@
 import os, sys, json, sqlite3, logging, ctypes, time, requests, random, pandas as pd
 from io import BytesIO
+from gemini_engine import get_gemini_reply
 from datetime import datetime, timedelta
 from threading import Lock
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
