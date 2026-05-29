@@ -537,8 +537,8 @@ WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
 
-_PRIMARY_MODEL = "gemini-1.5-flash-latest"
-_FALLBACK_MODEL = "gemini-1.5-pro-latest"
+_PRIMARY_MODEL = "gemini-2.5-flash"
+_FALLBACK_MODEL = "gemini-2.5-pro"
 _AI_CACHE = {"products": None, "last_fetch": 0}
 
 def _get_products_text():
