@@ -849,13 +849,22 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
         ext = os.path.splitext(image_path)[1].lower()
         mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png" if ext == ".png" else "image/webp"
         
+        # Find product by matching customer image to catalog
+        product_match = None
+        try:
+            from PIL import Image
+            # This is a placeholder - in production you'd use vision embeddings
+            # For now, just analyze the image with Gemini and respond
+            pass
+        except:
+            pass
+        
         prompt = (
-            f"তুমি Dhaka Exclusive-এর AI সেলস সহায়ক। "
-            f"এই ছবিতে কী প্রোডাক্ট দেখতে পাচ্ছো? "
-            f"আমাদের ক্যাটালগে আছে: {product_list}. "
-            f"যদি এই প্রোডাক্ট বা অনুরূপ কিছু ক্যাটালগে থাকে, বলো। "
-            f"দাম, স্টক, এবং অর্ডার করার উপায় জানাও। "
-            f"বাংলায় উত্তর দাও এবং 'প্রিয় গ্রাহক' বলে সম্বোধন করো।"
+            f"You are Dhaka Exclusive sales assistant. Analyze this image. "
+            f"If it contains a product, identify what it is. "
+            f"If the customer is asking about a product from our catalog: {product_list}, "
+            f"provide details. If they sent a product photo, acknowledge it and help them order. "
+            f"Respond in Bengali/Bangla. Be concise and friendly."
         )
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -899,6 +908,7 @@ def _detect_intent(msg):
         "catalog_request": ["লিস্ট", "list", "ক্যাটালগ", "catalog", "সব", "all", "কী আছে", "ki ace", "কি আছে", "প্রোডাক্ট লিস্ট"],
         "track_order": ["আমার অর্ডার", "my order", "অর্ডার ট্র্যাক", "track", "কোথায় আমার", "অর্ডারের স্ট্যাটাস"],
         "payment": ["পেমেন্ট", "payment", "বিকাশ", "bkash", "নগদ", "nagad", "টাকা পাঠাব", "send money"],
+        "photo_request": ["ছবি", "photo", "pic", "image", "ফটো", "দেখাও", "look", "দেখতে চাই", "picture"],
     }
     for intent, keywords in intents.items():
         if any(k in msg_lower for k in keywords):
@@ -991,14 +1001,17 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
             voice_bytes = f.read()
         voice_b64 = base64.b64encode(voice_bytes).decode("utf-8")
         
+        products = db_query("SELECT name, price, description FROM products LIMIT 15", fetchall=True) or []
+        product_list = "\\n".join([f"- {p['name']}: {p['price']}৳" for p in products]) if products else "No products"
+        
         prompt = (
-            "তুমি Dhaka Exclusive-এর AI সেলস সহায়ক। "
-            "এই অডিওটি শুনো। কাস্টমার কী বলেছেন বাংলায় বা ইংরেজিতে, "
-            "তা বুঝে সঠিক এবং সুন্দরভাবে বাংলায় রিপ্লাই দাও। "
-            "'প্রিয় গ্রাহক' বলে সম্বোধন করো। "
-            "যদি অর্ডার সংক্রান্ত কিছু বলেন, অর্ডার নিতে উৎসাহিত করো। "
-            "যদি প্রোডাক্ট জানতে চান, প্রোডাক্ট লিস্ট দাও। "
-            "প্রতিটি উত্তর সম্পূর্ণ এবং সুন্দরভাবে শেষ করো।"
+            "You are Dhaka Exclusive sales assistant. Listen to this audio. "
+            "The customer is speaking in Bengali or English. "
+            "Reply in Bengali/Bangla ONLY. Be concise. "
+            "Don't say 'প্রিয় গ্রাহক' in every message. "
+            f"Available products:\\n{product_list}\\n\\n"
+            "If they want to order, encourage them. "
+            "If they ask about products, give details from the list above."
         )
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -1099,12 +1112,22 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         "catalog_request": "Customer wants to see the FULL PRODUCT CATALOG. List ALL available products with prices clearly. Mention COD and fast delivery.",
         "track_order": "Customer wants to TRACK their order. Check order status and reassure them.",
         "payment": "Customer is asking about PAYMENT METHODS. Explain COD, bKash, Nagad clearly.",
+        "photo_request": "Customer wants to SEE PRODUCT PHOTOS. Say 'ছবি পাঠাচ্ছি' and mention the product name.",
     }
 
-    system_instruction = f"""আপনি Dhaka Exclusive-এর প্রধান AI সেলস অ্যাসিস্ট্যান্ট। আপনার নাম "Dhaka Exclusive Bot"।
+    # Only include greeting for first 3 messages of conversation
+    greeting_rule = ""
+    if not chat_history or len(chat_history) <= 3:
+        greeting_rule = 'শুরুতে সংক্ষিপ্তভাবে "প্রিয় গ্রাহক" বলে সম্বোধন করুন।'
+    else:
+        greeting_rule = 'প্রতিটি উত্তর সরাসরি শুরু করুন — "প্রিয় গ্রাহক" বলার প্রয়োজন নেই।'
+
+    # Simple greeting only for first message
+    is_first = not chat_history or len(chat_history) <= 1
+    
+    system_instruction = f"""আপনি Dhaka Exclusive-এর সেলস সহায়ক।
 
 বিজনেস তথ্য:
-- নাম: Dhaka Exclusive (Premium E-Commerce)
 - ডেলিভারি: Dhaka ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা
 - পেমেন্ট: COD + বিকাশ/নগদ
 - রিটার্ন: ৭ দিন (ড্যামেজ হলে)
@@ -1117,20 +1140,18 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
 
 {customer_ctx}
 
-{chat_ctx}
-
 ইনটেন্ট: {intent}
 {intent_prompts.get(intent, intent_prompts['general'])}
 
 নিয়ম:
-1. শুধু বাংলায় উত্তর দিন
-2. "প্রিয় গ্রাহক" বলে সম্বোধন করুন
-3. কখনো "আরে ভাই/আপু" বা "ভাই/আপু" বলবেন না
-4. অর্ডার করতে উৎসাহিত করুন
-5. দাম বলার সময় "মাত্র" "শুধু" ব্যবহার করুন
-6. স্টক কম থাকলে "শেষ হওয়ার আগেই অর্ডার করুন"
-7. কখনো কঠোরভাবে না বলবেন না
-8. প্রতিটি উত্তর সম্পূর্ণ এবং সুন্দরভাবে শেষ করুন
+1. সরাসরি উত্তর দিন — "প্রিয় গ্রাহক" শুধু প্রথম মেসেজে
+2. কখনো "আরে ভাই/আপু" বা "ভাই/আপু" বলবেন না
+3. অর্ডার করতে উৎসাহিত করুন
+4. দাম বলার সময় "মাত্র" "শুধু" ব্যবহার করুন
+5. স্টক কম থাকলে "শেষ হওয়ার আগেই অর্ডার করুন"
+6. কখনো কঠোরভাবে না বলবেন না
+7. ছবি চাইলে "ছবি পাঠাচ্ছি" বলুন
+8. একই কথা বারবার বলবেন না
 """
 
     payload = {
@@ -1197,6 +1218,76 @@ def send_whatsapp_message(to_phone, message):
     except Exception as e:
         logger.error(f"WhatsApp send error: {e}")
         return False
+
+def _try_send_product_image(phone, customer_msg, chat_history):
+    """Try to find product from message and send its image"""
+    try:
+        # Extract potential product name from customer message
+        import re
+        # Remove common words
+        clean_msg = re.sub(r"(ছবি|photo|pic|image|দেখাও|দেখতে|চাই|পাঠাও|দাও|লাগবে|কি|কী|এর|টি|the|a|an)", "", customer_msg, flags=re.IGNORECASE).strip()
+        
+        # Search products by name match
+        products = db_query("SELECT id, name, image_url FROM products WHERE image_url IS NOT NULL AND image_url != ''", fetchall=True) or []
+        
+        best_match = None
+        best_score = 0
+        for p in products:
+            pname = p["name"].lower()
+            # Simple word matching
+            score = 0
+            for word in clean_msg.lower().split():
+                if len(word) > 2 and word in pname:
+                    score += 1
+            if score > best_score:
+                best_score = score
+                best_match = p
+        
+        # Also check recent chat history for product mentions
+        if best_score == 0 and chat_history:
+            for msg in reversed(chat_history[-6:]):
+                msg_text = msg.get("content", "").lower()
+                for p in products:
+                    pname = p["name"].lower()
+                    score = 0
+                    for word in msg_text.split():
+                        if len(word) > 2 and word in pname:
+                            score += 1
+                    if score > best_score:
+                        best_score = score
+                        best_match = p
+        
+        if best_match and best_match.get("image_url"):
+            img_url = best_match["image_url"]
+            logger.info(f"Sending product image: {best_match['name']} to {phone}")
+            
+            # If image_url is a direct URL, download and upload to WhatsApp
+            if img_url.startswith("http"):
+                try:
+                    r = requests.get(img_url, timeout=15)
+                    if r.status_code == 200:
+                        ext = os.path.splitext(img_url.split("?")[0])[1] or ".jpg"
+                        tmp_path = os.path.join(MEDIA_FOLDER, f"prod_send_{int(time.time())}{ext}")
+                        with open(tmp_path, "wb") as f:
+                            f.write(r.content)
+                        media_id = upload_media_to_whatsapp(tmp_path, "image")
+                        if media_id:
+                            send_whatsapp_media(phone, media_id, "image", caption=best_match["name"])
+                            logger.info(f"Product image sent: {best_match['name']}")
+                        # Clean up temp file
+                        try:
+                            os.remove(tmp_path)
+                        except:
+                            pass
+                except Exception as e:
+                    logger.error(f"Failed to send product image: {e}")
+            elif img_url.startswith("[MEDIA:"):
+                # Already a WhatsApp media ID
+                media_id = img_url.replace("[MEDIA:", "").replace("]", "")
+                send_whatsapp_media(phone, media_id, "image", caption=best_match["name"])
+    except Exception as e:
+        logger.error(f"Product image send error: {e}")
+
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -1275,6 +1366,10 @@ def webhook():
                             sent = send_whatsapp_message(phone, reply)
                             if sent:
                                 db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
+                            
+                            # If customer asked for product photo, send actual image
+                            if "ছবি পাঠাচ্ছি" in reply or "ছবি দেখাচ্ছি" in reply or "photo" in content.lower() or "ছবি" in content:
+                                _try_send_product_image(phone, content, recent_msgs)
         except Exception as e:
             logger.error(f"Webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
