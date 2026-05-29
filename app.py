@@ -1494,6 +1494,52 @@ def auto_describe_all_products():
 # =====================================================================
 # PRODUCT MANAGEMENT ROUTES
 # =====================================================================
+@app.route("/admin/products/search")
+def search_products():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    q = request.args.get("q", "").strip()
+    if not q:
+        return redirect("/admin?tab=inventory")
+    
+    # Search by name, category, description, or price
+    search_pattern = f"%{q}%"
+    products = db_query(
+        """SELECT * FROM products 
+           WHERE name LIKE ? OR category LIKE ? OR description LIKE ? OR price LIKE ?
+           ORDER BY id DESC""",
+        (search_pattern, search_pattern, search_pattern, search_pattern),
+        fetchall=True
+    ) or []
+    
+    s = get_all_settings()
+    analytics = {
+        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
+        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+        "chart_data": get_chart_data()
+    }
+    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
+    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
+    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
+    
+    msg = f"Found {len(products)} products matching '{q}'"
+    return render_template(
+        "inventory.html",
+        settings=s,
+        analytics=analytics,
+        orders=orders,
+        users=users,
+        products=products,
+        agent_logs=agent_logs,
+        payment_methods=payment_methods,
+        chat_history=[],
+        active_chat="",
+        msg=msg,
+        search_query=q,
+        tab="inventory"
+    )
+
 @app.route("/admin/product/add", methods=["POST"])
 def add_product():
     if not session.get("logged_in"):
