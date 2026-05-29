@@ -1483,6 +1483,21 @@ def sync_facebook_trigger():
         if not catalog_id or not token:
             return redirect("/admin?tab=inventory&msg=Facebook Catalog ID or Token Missing")
         
+        # Auto-add missing columns to products table
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("PRAGMA table_info(products)")
+            existing_cols = [col[1] for col in c.fetchall()]
+            for col_name in ["description", "category", "size", "color", "material"]:
+                if col_name not in existing_cols:
+                    c.execute(f"ALTER TABLE products ADD COLUMN {col_name} TEXT")
+                    logger.info(f"Added column '{col_name}' to products table")
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Column migration error: {e}")
+        
         added = 0
         updated = 0
         total_fetched = 0
@@ -1560,40 +1575,19 @@ def sync_facebook_trigger():
                 image = item.get("image_url", "")
                 stock = 10 if availability == "in stock" else 0
                 
-                # Check if products table has new columns (description etc)
-                try:
-                    existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
-                    if existing:
-                        db_query(
-                            "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
-                            (name, price, stock, image, fb_id), commit=True
-                        )
-                        updated += 1
-                    else:
-                        db_query(
-                            "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)",
-                            (fb_id, name, price, stock, image), commit=True
-                        )
-                        added += 1
-                except Exception as e:
-                    if "no column named" in str(e).lower():
-                        # Fallback: old schema without description/category columns
-                        logger.warning(f"New columns missing, using fallback insert for {fb_id}")
-                        existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
-                        if existing:
-                            db_query(
-                                "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
-                                (name, price, stock, image, fb_id), commit=True
-                            )
-                            updated += 1
-                        else:
-                            db_query(
-                                "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
-                                (fb_id, name, price, stock, image), commit=True
-                            )
-                            added += 1
-                    else:
-                        raise
+                existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
+                if existing:
+                    db_query(
+                        "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
+                        (name, price, stock, image, fb_id), commit=True
+                    )
+                    updated += 1
+                else:
+                    db_query(
+                        "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)",
+                        (fb_id, name, price, stock, image), commit=True
+                    )
+                    added += 1
             
             total_fetched += len(items)
             logger.info(f"Fetched {len(items)} products, total: {total_fetched}")
