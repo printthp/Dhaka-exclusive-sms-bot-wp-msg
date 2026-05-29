@@ -105,6 +105,35 @@ def asm_fast_checksum(text: str) -> int:
 # =====================================================================
 # DATABASE UTILITIES
 # =====================================================================
+def migrate_db():
+    """Add missing columns to existing tables"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Check current products columns
+        c.execute("PRAGMA table_info(products)")
+        columns = [col[1] for col in c.fetchall()]
+        
+        new_cols = {
+            "description": "TEXT",
+            "category": "TEXT", 
+            "size": "TEXT",
+            "color": "TEXT",
+            "material": "TEXT"
+        }
+        
+        for col, dtype in new_cols.items():
+            if col not in columns:
+                c.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
+                logger.info(f"Migration: Added column '{col}' to products table")
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Migration error: {e}")
+
+
 def init_db():
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
