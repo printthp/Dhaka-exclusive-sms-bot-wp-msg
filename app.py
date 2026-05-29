@@ -116,6 +116,18 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, stock INTEGER DEFAULT 10, image_url TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS payment_methods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                number TEXT,
+                account_name TEXT,
+                instructions TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
         try:
             c.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'Customer'")
@@ -418,13 +430,14 @@ def admin_portal():
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
     products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
 
     chat_history = []
     if chat_with:
         chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
         chat_history.reverse()
 
-    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
+    return render_template(f"{tab}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
@@ -485,6 +498,57 @@ def add_agent():
     if u and p:
         db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
     return redirect("/admin?tab=agents&msg=Agent Added")
+
+
+@app.route("/admin/payment/add", methods=["POST"])
+def add_payment_method():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    try:
+        name = request.form.get("name", "").strip()
+        ptype = request.form.get("type", "").strip()
+        number = request.form.get("number", "").strip()
+        account_name = request.form.get("account_name", "").strip()
+        instructions = request.form.get("instructions", "").strip()
+        if name and ptype:
+            db_query(
+                "INSERT INTO payment_methods (name, type, number, account_name, instructions) VALUES (?, ?, ?, ?, ?)",
+                (name, ptype, number, account_name, instructions),
+                commit=True
+            )
+            db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_PAYMENT', ?)",
+                     (session.get("username"), f"Added {name}"), commit=True)
+            return redirect("/admin?tab=settings&msg=Payment Method Added")
+        return redirect("/admin?tab=settings&msg=Name and Type required")
+    except Exception as e:
+        return redirect(f"/admin?tab=settings&msg=Error: {str(e)}")
+
+@app.route("/admin/payment/update/<int:pid>", methods=["POST"])
+def update_payment_method(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    try:
+        name = request.form.get("name", "").strip()
+        ptype = request.form.get("type", "").strip()
+        number = request.form.get("number", "").strip()
+        account_name = request.form.get("account_name", "").strip()
+        instructions = request.form.get("instructions", "").strip()
+        is_active = 1 if request.form.get("is_active") else 0
+        db_query(
+            "UPDATE payment_methods SET name=?, type=?, number=?, account_name=?, instructions=?, is_active=? WHERE id=?",
+            (name, ptype, number, account_name, instructions, is_active, pid),
+            commit=True
+        )
+        return redirect("/admin?tab=settings&msg=Payment Method Updated")
+    except Exception as e:
+        return redirect(f"/admin?tab=settings&msg=Error: {str(e)}")
+
+@app.route("/admin/payment/delete/<int:pid>")
+def delete_payment_method(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM payment_methods WHERE id=?", (pid,), commit=True)
+    return redirect("/admin?tab=settings&msg=Payment Method Deleted")
 
 @app.route("/admin/settings/save", methods=["POST"])
 def save_settings():
@@ -641,6 +705,45 @@ def _get_customer_context(phone):
 - Total Orders: {len(orders)}
 - Total Spent: {total_spent}৳
 - Last Order Status: {last_order.get('status', 'N/A')}"""
+
+def _get_payment_methods_text():
+    """Fetch active payment methods from database for AI responses."""
+    methods = db_query(
+        "SELECT name, type, number, account_name, instructions FROM payment_methods WHERE is_active=1 ORDER BY id",
+        fetchall=True
+    ) or []
+    if not methods:
+        return (
+            "💳 *পেমেন্ট পদ্ধতি:*\n\n"
+            "1️⃣ *ক্যাশ অন ডেলিভারি (COD)* - সবচেয়ে জনপ্রিয়\n"
+            "2️⃣ *bKash:* 017XXXXXXXX (Personal)\n"
+            "   - Send Money করুন\n"
+            "   - রেফারেন্সে আপনার ফোন নম্বর লিখুন\n"
+            "3️⃣ *Nagad:* 017XXXXXXXX\n"
+            "   - Cash Out/Send Money\n\n"
+            "✅ অর্ডার কনফার্মের পর পেমেন্ট করুন।"
+        )
+    
+    lines = ["💳 *পেমেন্ট পদ্ধতি:*\n"]
+    for i, m in enumerate(methods, 1):
+        name = m.get('name', '')
+        ptype = m.get('type', '')
+        number = m.get('number', '')
+        acc_name = m.get('account_name', '')
+        instructions = m.get('instructions', '')
+        
+        lines.append(f"{i}. *{name}* ({ptype})")
+        if number:
+            lines.append(f"   📱 {number}")
+        if acc_name:
+            lines.append(f"   👤 {acc_name}")
+        if instructions:
+            lines.append(f"   📝 {instructions}")
+        lines.append("")
+    
+    lines.append("✅ অর্ডার কনফার্মের পর পেমেন্ট করুন।")
+    lines.append("📸 বিকাশ/নগদে পেমেন্ট করলে স্ক্রিনশট পাঠান।")
+    return "\n".join(lines)
 
 def _get_order_status(phone):
     if not phone:
@@ -889,17 +992,7 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         return "📦 আপনার কোনো অর্ডার পাওয়া যায়নি। অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!"
 
     if intent == "payment":
-        return (
-            "💳 *পেমেন্ট পদ্ধতি:*\n\n"
-            "1️⃣ *ক্যাশ অন ডেলিভারি (COD)* - সবচেয়ে জনপ্রিয়\n"
-            "2️⃣ *bKash:* 017XXXXXXXX (Personal)\n"
-            "   - Send Money করুন\n"
-            "   - রেফারেন্সে আপনার ফোন নম্বর লিখুন\n"
-            "3️⃣ *Nagad:* 017XXXXXXXX\n"
-            "   - Cash Out/Send Money\n\n"
-            "✅ অর্ডার কনফার্মের পর পেমেন্ট করুন। "
-            "বিকাশ/নগদে পেমেন্ট করলে স্ক্রিনশট পাঠান।"
-        )
+        return _get_payment_methods_text()
 
     if intent == "confirm_order":
         order_data = _extract_order_from_text(user_message, customer_phone)
