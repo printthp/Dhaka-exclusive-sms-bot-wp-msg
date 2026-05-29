@@ -10,74 +10,81 @@ logger = logging.getLogger(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 
 def get_optimized_gemini_reply(user_message, phone, db_query_func):
-    """উন্নত সেলস ইন্টেলিজেন্ট ইঞ্জিন যা প্রোডাক্ট না থাকলেও কাজ করবে"""
+    """
+    Sales Intelligence Engine for Dhaka Exclusive.
+    Handles responses even if the product database is empty.
+    """
     
     if not GEMINI_API_KEY:
-        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
+        logger.warning("GEMINI_KEY missing in Environment Variables")
+        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করছি।"
 
-    # ১. কাস্টমার হিস্ট্রি সংগ্রহ (যদি থাকে)
-    history_ctx = "New Customer"
+    # 1. Fetch Customer Context (Order History)
+    history_ctx = "New Customer (No previous orders logged)"
     try:
-        history = db_query_func("SELECT * FROM orders WHERE phone=? ORDER BY id DESC LIMIT 2", (phone,), fetchall=True) or []
+        # Checking for the last 2 orders to give context to AI
+        history = db_query_func("SELECT id, total, status, created_at FROM orders WHERE phone=? ORDER BY id DESC LIMIT 2", (phone,), fetchall=True) or []
         if history:
-            history_ctx = f"Customer Past Orders: {json.dumps(history)}"
+            history_ctx = f"Customer's recent order history: {json.dumps(history)}"
     except Exception as e:
-        logger.error(f"Context fetch error: {e}")
+        logger.error(f"Error fetching customer history: {e}")
 
-    # ২. প্রোডাক্ট ক্যাটালগ কালেকশন
-    # যদি ডাটাবেসে প্রোডাক্ট না থাকে, তবে একটি ডিফল্ট মেসেজ সেট হবে
-    product_list = "বর্তমানে আমাদের স্টক আপডেট করা হচ্ছে। কাস্টমারকে আমাদের হট আইটেমগুলোর কথা বলো।"
+    # 2. Fetch Product List Context
+    product_list = "Currently, our digital catalog is being updated. Ask the customer what type of products they are looking for."
     try:
-        products = db_query_func("SELECT name, price FROM products LIMIT 10", fetchall=True) or []
+        # Dynamic product fetch
+        products = db_query_func("SELECT name, price FROM products LIMIT 15", fetchall=True) or []
         if products:
             product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products])
     except Exception as e:
-        logger.error(f"Product fetch error: {e}")
+        logger.error(f"Error fetching products: {e}")
 
-    # ৩. শক্তিশালী সিস্টেম ইনস্ট্রাকশন
+    # 3. System Persona & Instruction
     system_instruction = f"""
-    তুমি 'Dhaka Exclusive'-এর প্রিমিয়াম সেলস ম্যানেজার। তোমার কথা বলার স্টাইল হবে অত্যন্ত অমায়িক এবং পেশাদার।
+    তুমি 'Dhaka Exclusive'-এর প্রিমিয়াম সেলস বিশেষজ্ঞ। তোমার কাজ হলো অত্যন্ত বিনয়ের সাথে কাস্টমারের প্রশ্নের উত্তর দেওয়া এবং অর্ডার কনফার্ম করা।
     
-    নিয়মাবলী:
-    - ভাষা: শুদ্ধ বাংলায় কথা বলো। গ্রাহককে 'ভাই/আপু' বলে সম্মান দাও।
-    - যদি প্রোডাক্ট লিস্ট না থাকে: তাহলে বলো "আমাদের কাছে অনেক কালেকশন আছে, আপনি কি ধরণের প্রোডাক্ট খুঁজছেন?"
-    - অফার: প্রতিটি মেসেজের শেষে অফার বা কোনো সাহায্য লাগবে কি না জিজ্ঞেস করো।
-    - ডেলিভারি: ঢাকা সিটিতে ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা। পেমেন্ট: ক্যাশ অন ডেলিভারি (COD)।
-    - হিউম্যান টাচ: যদি কাস্টমার এমন কিছু জিজ্ঞেস করে যা তুমি জানো না, তবে বিনয়ের সাথে বলো "ভাই/আপু, আমি চেক করে জানাচ্ছি, আমাদের একজন এক্সিকিউটিভ এক্ষুণি আপনাকে কল দিবে।"
+    নির্দেশনা:
+    - সম্বোধন: গ্রাহককে 'ভাই' বা 'আপু' বলে ডাকবে।
+    - ভাষা: শুদ্ধ এবং মার্জিত বাংলা ব্যবহার করবে।
+    - অর্ডার প্রসেস: কাস্টমার কিছু কিনতে চাইলে তার নাম, ফোন নম্বর এবং পূর্ণ ঠিকানা চাইবে।
+    - ডেলিভারি তথ্য: ঢাকা সিটি ২৪ ঘণ্টা, ঢাকার বাইরে ৪৮-৭২ ঘণ্টা। ক্যাশ অন ডেলিভারি (COD) অ্যাভেইলেবল।
+    - কাস্টমার এক্সপেরিয়েন্স: প্রতিটি মেসেজের শেষে একটি প্রশ্ন করবে (যেমন: "ভাই, আর কোনো সাহায্য করতে পারি?" বা "অর্ডারটি কি কনফার্ম করবো?")।
     
-    ব্যাকগ্রাউন্ড তথ্য:
-    প্রোডাক্ট ক্যাটালগ:
+    বিজনেসের বর্তমান তথ্য:
+    উপলব্ধ প্রোডাক্ট তালিকা:
     {product_list}
     
-    গ্রাহকের তথ্য:
+    গ্রাহকের গত অর্ডারের তথ্য:
     {history_ctx}
     """
 
     try:
-        # মডেল: gemini-1.5-flash-latest (দ্রুত এবং আধুনিক)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        # API Endpoint (Using Stable V1 version for gemini-1.5-flash)
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
         payload = {
             "contents": [{
                 "parts": [{"text": f"{system_instruction}\n\nCustomer Message: {user_message}"}]
             }],
             "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 400
+                "temperature": 0.8,
+                "maxOutputTokens": 500,
+                "topP": 0.9
             }
         }
         
         headers = {"Content-Type": "application/json"}
-        r = requests.post(url, json=payload, headers=headers, timeout=20)
-        res = r.json()
+        response = requests.post(url, json=payload, headers=headers, timeout=25)
+        res_data = response.json()
         
-        if 'candidates' in res and len(res['candidates']) > 0:
-            reply = res['candidates'][0]['content']['parts'][0]['text']
-            return reply.strip()
+        if 'candidates' in res_data and len(res_data['candidates']) > 0:
+            ai_reply = res_data['candidates'][0]['content']['parts'][0]['text']
+            return ai_reply.strip()
         
-        logger.error(f"Gemini API fail: {res}")
-        return "ধন্যবাদ! আপনার মেসেজটি আমরা পেয়েছি। একজন এজেন্ট শীঘ্রই আপনার সাথে কথা বলবে।"
+        # Log failure reason for diagnosis
+        logger.error(f"Gemini API Error Response: {res_data}")
+        return "ধন্যবাদ! আমরা আপনার মেসেজটি পেয়েছি। একজন এজেন্ট শীঘ্রই আপনার সাথে কথা বলবে।"
 
     except Exception as e:
-        logger.error(f"Engine critical error: {e}")
-        return " আমাদের সার্ভারে কাজ চলছে, কিছুক্ষণ পর আবার মেসেজ দিন অথবা সরাসরি কল করুন।"
+        logger.critical(f"Critical Error in Sales Engine: {e}")
+        return "দুঃখিত ভাই/আপু, আমাদের সার্ভারে কিছুটা টেকনিক্যাল সমস্যা হচ্ছে। আপনার মেসেজটি সেভ করা হয়েছে, আমরা দ্রুত রিপ্লাই দিচ্ছি।"
