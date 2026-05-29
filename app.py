@@ -1286,19 +1286,20 @@ def webhook():
 def _generate_product_details_with_gemini(name, price):
     """Use Gemini to auto-generate description, category, size, color, material from product name"""
     if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY missing, cannot auto-describe")
         return None
     try:
-        prompt = f"""আপনি Dhaka Exclusive-এর প্রোডাক্ট ক্যাটালগ ম্যানেজার। নিচের প্রোডাক্টের নাম ও দাম দেখে category, description, size, color, material জেনারেট করুন।
+        prompt = f"""You are a product catalog manager for Dhaka Exclusive e-commerce. Based on the product name and price below, generate category, description, size, color, and material.
 
-প্রোডাক্ট নাম: {name}
-দাম: {price}৳
+Product Name: {name}
+Price: {price} BDT
 
-ফরম্যাট (শুধু নিচের ফরম্যাটে উত্তর দিন):
-Category: [shirt/panjabi/t-shirt/pant/etc]
-Description: [২ লাইনের আকর্ষণীয় বর্ণনা বাংলায়]
-Size: [M, L, XL, Free]
-Color: [Black, Navy, White, etc]
-Material: [Cotton, Linen, Polyester, etc]
+Respond ONLY in this exact format:
+Category: [category like Home, Kitchen, Electronics, Fashion, Beauty, Health]
+Description: [2-line attractive description in Bengali/Bangla]
+Size: [size or N/A]
+Color: [color or N/A]
+Material: [material or N/A]
 """
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -1309,11 +1310,17 @@ Material: [Cotton, Linen, Polyester, etc]
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         res = resp.json()
         
+        if "error" in res:
+            logger.error(f"Gemini API error for '{name}': {res.get('error')}")
+            return None
+        
         candidates = res.get("candidates", [])
         if candidates:
             text_resp = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            logger.info(f"Gemini raw response for '{name}': {text_resp[:200]}")
             result = {"category": "", "description": "", "size": "", "color": "", "material": ""}
             for line in text_resp.strip().split("\n"):
+                line = line.strip()
                 if line.startswith("Category:"):
                     result["category"] = line.split(":", 1)[1].strip()
                 elif line.startswith("Description:"):
@@ -1324,10 +1331,12 @@ Material: [Cotton, Linen, Polyester, etc]
                     result["color"] = line.split(":", 1)[1].strip()
                 elif line.startswith("Material:"):
                     result["material"] = line.split(":", 1)[1].strip()
-            logger.info(f"Auto-describe for '{name}': {result}")
+            logger.info(f"Auto-describe parsed for '{name}': {result}")
             return result
+        else:
+            logger.warning(f"No candidates from Gemini for '{name}': {res}")
     except Exception as e:
-        logger.error(f"Auto-describe error: {e}")
+        logger.error(f"Auto-describe error for '{name}': {e}")
     return None
 
 @app.route("/admin/product/auto-describe/<int:pid>")
@@ -1358,7 +1367,7 @@ def auto_describe_all_products():
     if not session.get("logged_in"):
         return redirect("/admin/login")
     try:
-        products = db_query("SELECT id, name, price FROM products WHERE description IS NULL OR description = '' LIMIT 20", fetchall=True) or []
+        products = db_query("SELECT id, name, price FROM products WHERE COALESCE(description, '') = '' LIMIT 20", fetchall=True) or []
         updated = 0
         for p in products:
             details = _generate_product_details_with_gemini(p["name"], p["price"])
