@@ -595,10 +595,100 @@ def _detect_intent(msg):
             return intent
     return "general"
 
+def _extract_order_from_text(text, phone):
+    """Use Gemini to extract order details from customer message."""
+    if not GEMINI_API_KEY:
+        return None
+    
+    # Get product list for context
+    products = db_query("SELECT name, price FROM products LIMIT 20", fetchall=True) or []
+    product_lines = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products])
+    
+    extract_prompt = f"""তুমি একটি অর্ডার এক্সট্রাকশন bot। কাস্টমারের মেসেজ থেকে অর্ডারের তথ্য বের করো।
+
+প্রোডাক্ট লিস্ট:
+{product_lines}
+
+কাস্টমারের মেসেজ: "{text}"
+ফোন: {phone}
+
+যদি কাস্টমার অর্ডার দিতে চায়, তাহলে শুধু নিচের ফরম্যাটে JSON রিটার্ন করো (অন্য কিছু লিখো না):
+{{
+  "is_order": true,
+  "name": "কাস্টমারের নাম",
+  "address": "কাস্টমারের ঠিকানা",
+  "product": "কোন প্রোডাক্ট চেয়েছে",
+  "quantity": 1,
+  "total": 0,
+  "phone": "{phone}"
+}}
+
+যদি অর্ডার না হয়:
+{{
+  "is_order": false
+}}"""
+
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300, "topP": 0.9}
+        }
+        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
+        res = r.json()
+        
+        if res.get("candidates"):
+            txt = res["candidates"][0]["content"]["parts"][0]["text"]
+            # Find JSON block
+            import re
+            json_match = re.search(r'\{.*\}', txt, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                if data.get("is_order"):
+                    return data
+        return None
+    except Exception as e:
+        logger.error(f"Order extraction error: {e}")
+        return None
+
+def _save_order(order_data):
+    """Save extracted order to database."""
+    try:
+        name = order_data.get("name", "Unknown")
+        address = order_data.get("address", "Not provided")
+        product = order_data.get("product", "")
+        quantity = order_data.get("quantity", 1)
+        total = order_data.get("total", 0)
+        phone = order_data.get("phone", "")
+        
+        # Try to find product price if total is 0
+        if total == 0 and product:
+            prod = db_query("SELECT price FROM products WHERE name LIKE ? LIMIT 1", (f"%{product}%",), fetchone=True)
+            if prod:
+                total = prod["price"] * quantity
+        
+        db_query(
+            "INSERT INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?, ?, ?, ?, ?, ?)",
+            (f"WA-{int(time.time())}", phone, name, f"{product} x{quantity} | {address}", total, "pending"),
+            commit=True
+        )
+        logger.info(f"Order saved for {phone}: {product} x{quantity}")
+        return True
+    except Exception as e:
+        logger.error(f"Save order error: {e}")
+        return False
+
 def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
         return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
+
+    # Check if this is an order
+    if _detect_intent(user_message) == "confirm_order":
+        order_data = _extract_order_from_text(user_message, customer_phone)
+        if order_data and order_data.get("is_order"):
+            _save_order(order_data)
+            return f"✅ অর্ডার কনফার্মড!\n\n📝 অর্ডার ডিটেইলস:\n• নাম: {order_data.get('name')}\n• প্রোডাক্ট: {order_data.get('product')} x{order_data.get('quantity', 1)}\n• ঠিকানা: {order_data.get('address')}\n• মোট: {order_data.get('total', 0)}৳\n\n📦 ডেলিভারি: ঢাকায় ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা। ক্যাশ অন ডেলিভারি। আপনার অর্ডারটি প্রসেসিং এ আছে!"
 
     intent = _detect_intent(user_message)
     products_text = _get_products_text()
