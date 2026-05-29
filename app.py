@@ -8,6 +8,8 @@ import time
 import requests
 import random
 import pandas as pd
+import base64
+import re
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
@@ -63,7 +65,6 @@ except Exception as e:
 # C++ / ASM WRAPPER FUNCTIONS (Actually Used!)
 # -----------------------------------------------------------------
 def cpp_engine_command(cmd: str) -> str:
-    """Send command to C++ engine and return response string."""
     if lib is None:
         return "C++ Engine Not Loaded"
     try:
@@ -74,7 +75,6 @@ def cpp_engine_command(cmd: str) -> str:
         return f"C++ Error: {e}"
 
 def asm_engine_command(cmd: str) -> str:
-    """Send command to ASM engine and return response string."""
     if asm_lib is None:
         return "ASM Engine Not Loaded"
     try:
@@ -85,7 +85,6 @@ def asm_engine_command(cmd: str) -> str:
         return f"ASM Error: {e}"
 
 def asm_fast_strlen(text: str) -> int:
-    """Pure ASM string length calculation."""
     if asm_lib is None:
         return len(text)
     try:
@@ -95,7 +94,6 @@ def asm_fast_strlen(text: str) -> int:
         return len(text)
 
 def asm_fast_checksum(text: str) -> int:
-    """Pure ASM XOR rolling checksum."""
     if asm_lib is None:
         return 0
     try:
@@ -113,7 +111,7 @@ def init_db():
         c = conn.cursor()
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, follow_up_sent INTEGER DEFAULT 0)")
         c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, stock INTEGER DEFAULT 10, image_url TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
@@ -121,10 +119,13 @@ def init_db():
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
         try:
             c.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'Customer'")
-            logger.info("Migrated users table: added name column")
         except sqlite3.OperationalError as e:
             if "duplicate column name" not in str(e).lower():
                 logger.error(f"Migration error: {e}")
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN follow_up_sent INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
         conn.close()
 
@@ -167,7 +168,7 @@ def inject_globals():
     return dict(unread_chat_count=count)
 
 # =====================================================================
-# WHATSAPP MEDIA UPLOAD & SEND
+# WHATSAPP MEDIA UPLOAD, DOWNLOAD & SEND
 # =====================================================================
 def upload_media_to_whatsapp(file_path, media_type="image"):
     s = get_all_settings()
@@ -191,6 +192,35 @@ def upload_media_to_whatsapp(file_path, media_type="image"):
             return None
     except Exception as e:
         logger.error(f"Media upload exception: {e}")
+        return None
+
+def _download_whatsapp_media(media_id, media_type="image"):
+    """Download media from WhatsApp servers by media_id."""
+    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+    if not token:
+        logger.error("WhatsApp token missing for media download")
+        return None
+    try:
+        url = f"https://graph.facebook.com/v22.0/{media_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(url, headers=headers, timeout=30)
+        res = r.json()
+        media_url = res.get("url")
+        if not media_url:
+            logger.error(f"Media URL not found: {res}")
+            return None
+        
+        ext = "jpg" if media_type == "image" else ("ogg" if media_type in ["voice", "audio"] else "bin")
+        filename = f"{media_type}_{int(time.time())}.{ext}"
+        file_path = os.path.join(MEDIA_FOLDER, filename)
+        
+        r2 = requests.get(media_url, headers=headers, timeout=60)
+        with open(file_path, "wb") as f:
+            f.write(r2.content)
+        logger.info(f"Media downloaded: {file_path} ({len(r2.content)} bytes)")
+        return file_path
+    except Exception as e:
+        logger.error(f"Media download error: {e}")
         return None
 
 def send_whatsapp_media(to_phone, media_id, media_type="image", caption=""):
@@ -502,7 +532,6 @@ def admin_logout():
 # =====================================================================
 @app.route("/api/engine-status")
 def api_engine_status():
-    """Health check for C++ and ASM engines."""
     cpp_result = cpp_engine_command("status")
     asm_result = asm_engine_command("asm_status")
     return jsonify({
@@ -514,7 +543,6 @@ def api_engine_status():
 
 @app.route("/api/asm-checksum", methods=["POST"])
 def api_asm_checksum():
-    """Compute ASM fast checksum for given text."""
     text = request.json.get("text", "") if request.is_json else request.form.get("text", "")
     if not text:
         return jsonify({"error": "No text provided"}), 400
@@ -530,12 +558,49 @@ def api_asm_checksum():
     })
 
 # =====================================================================
+# FOLLOW-UP SYSTEM (Cron Endpoint)
+# =====================================================================
+@app.route("/cron/followup")
+def cron_followup():
+    """Call this via cron job every 6-12 hours. Send follow-up to inactive customers."""
+    secret = request.args.get("secret", "")
+    if secret != os.environ.get("CRON_SECRET", "dhaka-followup-2026"):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    candidates = db_query("""
+        SELECT DISTINCT u.phone, u.name, u.last_active, u.follow_up_sent 
+        FROM users u
+        LEFT JOIN orders o ON u.phone = o.phone
+        WHERE o.id IS NULL 
+        AND u.follow_up_sent = 0
+        AND u.last_active > datetime('now', '-48 hours')
+        LIMIT 50
+    """, fetchall=True) or []
+    
+    sent_count = 0
+    for user in candidates:
+        phone = user.get("phone", "")
+        msg = (
+            "🛍️ প্রিয় গ্রাহক, আপনি কি Dhaka Exclusive-এর প্রোডাক্টগুলো দেখেছেন? "
+            "আমাদের হট কালেকশন শেষ হওয়ার আগেই অর্ডার করুন! "
+            "ক্যাটালগ দেখতে 'লিস্ট' লিখুন। COD + ফ্রি ডেলিভারি! 🚚"
+        )
+        if send_whatsapp_message(phone, msg):
+            db_query("UPDATE users SET follow_up_sent = 1 WHERE phone = ?", (phone,), commit=True)
+            sent_count += 1
+            time.sleep(1)
+    
+    logger.info(f"Follow-up sent to {sent_count} customers")
+    return jsonify({"sent": sent_count, "candidates": len(candidates)})
+
+# =====================================================================
 # GEMINI AI SALES INTELLIGENCE ENGINE
 # =====================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
+ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "")
 
 _PRIMARY_MODEL = "gemini-2.5-flash"
 _FALLBACK_MODEL = "gemini-2.5-pro"
@@ -577,6 +642,90 @@ def _get_customer_context(phone):
 - Total Spent: {total_spent}৳
 - Last Order Status: {last_order.get('status', 'N/A')}"""
 
+def _get_order_status(phone):
+    if not phone:
+        return None
+    orders = db_query("SELECT id, pathao_order_id, total, status, created_at FROM orders WHERE phone=? ORDER BY id DESC LIMIT 3", (phone,), fetchall=True) or []
+    if not orders:
+        return None
+    lines = ["📦 *আপনার অর্ডার স্ট্যাটাস:*\n"]
+    for o in orders:
+        lines.append(f"• অর্ডার #{o.get('pathao_order_id', o['id'])}")
+        lines.append(f"  স্ট্যাটাস: {o['status']}")
+        lines.append(f"  মোট: {o['total']}৳")
+        lines.append(f"  তারিখ: {o.get('created_at', 'N/A')[:10]}")
+        lines.append("")
+    lines.append("❓ আরও তথ্যের জন্য আমাদের সাথে যোগাযোগ করুন।")
+    return "\n".join(lines)
+
+def _notify_admin_new_order(order_data):
+    if not ADMIN_PHONE:
+        return
+    try:
+        msg = (
+            f"🔔 *নতুন অর্ডার!*\n\n"
+            f"👤 {order_data.get('name', 'Unknown')}\n"
+            f"📞 {order_data.get('phone', 'N/A')}\n"
+            f"📦 {order_data.get('product', 'N/A')} x{order_data.get('quantity', 1)}\n"
+            f"📍 {order_data.get('address', 'N/A')}\n"
+            f"💰 {order_data.get('total', 0)}৳\n\n"
+            f"📋 Admin Panel: dhaka-exclusive-sms-bot-wp-msg.onrender.com/admin"
+        )
+        send_whatsapp_message(ADMIN_PHONE, msg)
+        logger.info(f"Admin notified for order from {order_data.get('phone')}")
+    except Exception as e:
+        logger.error(f"Admin notify error: {e}")
+
+def _analyze_image_with_gemini(image_path, customer_phone=""):
+    if not GEMINI_API_KEY:
+        return "📷 ছবি পেয়েছি। দুঃখিত, AI ভিশন সার্ভিস বর্তমানে অনুপলব্ধ।"
+    
+    products = db_query("SELECT name, price FROM products LIMIT 20", fetchall=True) or []
+    product_list = ", ".join([p['name'] for p in products]) if products else "No products in catalog"
+    
+    try:
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        
+        ext = os.path.splitext(image_path)[1].lower()
+        mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png" if ext == ".png" else "image/webp"
+        
+        prompt = (
+            f"তুমি Dhaka Exclusive-এর AI সেলস সহায়ক। "
+            f"এই ছবিতে কী প্রোডাক্ট দেখতে পাচ্ছো? "
+            f"আমাদের ক্যাটালগে আছে: {product_list}. "
+            f"যদি এই প্রোডাক্ট বা অনুরূপ কিছু ক্যাটালগে থাকে, বলো। "
+            f"দাম, স্টক, এবং অর্ডার করার উপায় জানাও। "
+            f"বাংলায় উত্তর দাও এবং 'প্রিয় গ্রাহক' বলে সম্বোধন করো।"
+        )
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime, "data": image_b64}}
+                ]
+            }],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 600, "topP": 0.9}
+        }
+        headers = {"Content-Type": "application/json"}
+        r = requests.post(url, json=payload, headers=headers, timeout=45)
+        res = r.json()
+        
+        if res.get("candidates"):
+            parts = res["candidates"][0].get("content", {}).get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    return part["text"].strip()
+        logger.error(f"Image analysis failed: {res}")
+        return "📷 ছবি পেয়েছি। দুঃখিত, এটি বিশ্লেষণ করতে সমস্যা হচ্ছে। অনুগ্রহ করে প্রোডাক্টের নাম লিখে পাঠান।"
+    except Exception as e:
+        logger.error(f"Image analysis exception: {e}")
+        return "📷 ছবি পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
+
 def _detect_intent(msg):
     msg_lower = msg.lower()
     intents = {
@@ -589,6 +738,9 @@ def _detect_intent(msg):
         "greeting": ["হাই", "hello", "hi", "আসসালামু", "salam", "কেমন"],
         "confirm_order": ["কিনব", "buy", "কনফার্ম", "confirm", "নিব", "চাই", "book"],
         "location": ["ঠিকানা", "address", "লোকেশন", "shop", "দোকান", "where"],
+        "catalog_request": ["লিস্ট", "list", "ক্যাটালগ", "catalog", "সব", "all", "কী আছে", "ki ace", "কি আছে", "প্রোডাক্ট লিস্ট"],
+        "track_order": ["আমার অর্ডার", "my order", "অর্ডার ট্র্যাক", "track", "কোথায় আমার", "অর্ডারের স্ট্যাটাস"],
+        "payment": ["পেমেন্ট", "payment", "বিকাশ", "bkash", "নগদ", "nagad", "টাকা পাঠাব", "send money"],
     }
     for intent, keywords in intents.items():
         if any(k in msg_lower for k in keywords):
@@ -596,11 +748,9 @@ def _detect_intent(msg):
     return "general"
 
 def _extract_order_from_text(text, phone):
-    """Use Gemini to extract order details from customer message."""
     if not GEMINI_API_KEY:
         return None
     
-    # Get product list for context
     products = db_query("SELECT name, price FROM products LIMIT 20", fetchall=True) or []
     product_lines = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products])
     
@@ -639,8 +789,6 @@ def _extract_order_from_text(text, phone):
         
         if res.get("candidates"):
             txt = res["candidates"][0]["content"]["parts"][0]["text"]
-            # Find JSON block
-            import re
             json_match = re.search(r'\{.*\}', txt, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
@@ -652,7 +800,6 @@ def _extract_order_from_text(text, phone):
         return None
 
 def _save_order(order_data):
-    """Save extracted order to database."""
     try:
         name = order_data.get("name", "Unknown")
         address = order_data.get("address", "Not provided")
@@ -661,7 +808,6 @@ def _save_order(order_data):
         total = order_data.get("total", 0)
         phone = order_data.get("phone", "")
         
-        # Try to find product price if total is 0
         if total == 0 and product:
             prod = db_query("SELECT price FROM products WHERE name LIKE ? LIMIT 1", (f"%{product}%",), fetchone=True)
             if prod:
@@ -673,24 +819,64 @@ def _save_order(order_data):
             commit=True
         )
         logger.info(f"Order saved for {phone}: {product} x{quantity}")
+        _notify_admin_new_order(order_data)
         return True
     except Exception as e:
         logger.error(f"Save order error: {e}")
         return False
 
-def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None):
+def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
         return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
 
-    # Check if this is an order
-    if _detect_intent(user_message) == "confirm_order":
+    if image_path:
+        return _analyze_image_with_gemini(image_path, customer_phone)
+
+    intent = _detect_intent(user_message)
+
+    if intent == "track_order":
+        status = _get_order_status(customer_phone)
+        if status:
+            return status
+        return "📦 আপনার কোনো অর্ডার পাওয়া যায়নি। অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!"
+
+    if intent == "payment":
+        return (
+            "💳 *পেমেন্ট পদ্ধতি:*\n\n"
+            "1️⃣ *ক্যাশ অন ডেলিভারি (COD)* - সবচেয়ে জনপ্রিয়\n"
+            "2️⃣ *bKash:* 017XXXXXXXX (Personal)\n"
+            "   - Send Money করুন\n"
+            "   - রেফারেন্সে আপনার ফোন নম্বর লিখুন\n"
+            "3️⃣ *Nagad:* 017XXXXXXXX\n"
+            "   - Cash Out/Send Money\n\n"
+            "✅ অর্ডার কনফার্মের পর পেমেন্ট করুন। "
+            "বিকাশ/নগদে পেমেন্ট করলে স্ক্রিনশট পাঠান।"
+        )
+
+    if intent == "confirm_order":
         order_data = _extract_order_from_text(user_message, customer_phone)
         if order_data and order_data.get("is_order"):
             _save_order(order_data)
             return f"✅ অর্ডার কনফার্মড!\n\n📝 অর্ডার ডিটেইলস:\n• নাম: {order_data.get('name')}\n• প্রোডাক্ট: {order_data.get('product')} x{order_data.get('quantity', 1)}\n• ঠিকানা: {order_data.get('address')}\n• মোট: {order_data.get('total', 0)}৳\n\n📦 ডেলিভারি: ঢাকায় ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা। ক্যাশ অন ডেলিভারি। আপনার অর্ডারটি প্রসেসিং এ আছে!"
 
-    intent = _detect_intent(user_message)
+    if intent == "catalog_request":
+        products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 30", fetchall=True) or []
+        if not products:
+            return "📦 বর্তমানে ক্যাটালগ আপডেট হচ্ছে। আমাদের নতুন কালেকশন শীঘ্রই আসছে! অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।"
+        
+        catalog_lines = ["🛍️ *Dhaka Exclusive - প্রোডাক্ট ক্যাটালগ*\n"]
+        for i, p in enumerate(products, 1):
+            stock_status = "✅ In Stock" if p.get('stock', 0) > 5 else f"⚠️ Only {p.get('stock', 0)} left!"
+            catalog_lines.append(f"{i}. {p['name']}\n   💰 {p['price']}৳ | {stock_status}")
+        
+        catalog_lines.append(f"\n📌 মোট {len(products)}টি প্রোডাক্ট")
+        catalog_lines.append("🚚 ডেলিভারি: ঢাকা ২৪ ঘণ্টা | বাইরে ৪৮-৭২ ঘণ্টা")
+        catalog_lines.append("💳 পেমেন্ট: ক্যাশ অন ডেলিভারি")
+        catalog_lines.append("\n✨ অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!")
+        
+        return "\n".join(catalog_lines)
+
     products_text = _get_products_text()
     hot_products = _get_hot_products()
     customer_ctx = _get_customer_context(customer_phone)
@@ -715,6 +901,9 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         "confirm_order": "Customer wants to BUY! Confirm enthusiastically. Ask for confirmation details. Create urgency - limited stock.",
         "location": "Customer asking about LOCATION/SHOP. Explain online-based with COD nationwide.",
         "general": "General inquiry. Be helpful and steer towards placing an order.",
+        "catalog_request": "Customer wants to see the FULL PRODUCT CATALOG. List ALL available products with prices clearly. Mention COD and fast delivery.",
+        "track_order": "Customer wants to TRACK their order. Check order status and reassure them.",
+        "payment": "Customer is asking about PAYMENT METHODS. Explain COD, bKash, Nagad clearly.",
     }
 
     system_instruction = f"""আপনি Dhaka Exclusive-এর প্রধান AI সেলস অ্যাসিস্ট্যান্ট। আপনার নাম "Dhaka Exclusive Bot"।
@@ -844,12 +1033,24 @@ def webhook():
                     for msg in messages:
                         phone = msg.get("from", "")
                         m_type = msg.get("type", "text")
+                        
+                        content = ""
+                        image_path = None
+                        
                         if m_type == "text":
                             content = msg.get("text", {}).get("body", "")
                         elif m_type == "image":
-                            content = "📷 [Photo Received]"
+                            media_id = msg.get("image", {}).get("id", "")
+                            image_path = _download_whatsapp_media(media_id, "image")
+                            content = "[Photo Received]"
                         elif m_type in ["voice", "audio"]:
+                            media_id = msg.get(m_type, {}).get("id", "")
+                            voice_path = _download_whatsapp_media(media_id, "voice")
                             content = "🎤 [Voice Received]"
+                            if voice_path:
+                                send_whatsapp_message(phone, "🎤 আপনার ভয়েস মেসেজ পেয়েছি। অনুগ্রহ করে টাইপ করে জানান কী প্রয়োজন, যাতে আমরা আরও ভালোভাবে সাহায্য করতে পারি।")
+                                db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
+                                continue
                         else:
                             content = f"[{m_type.upper()} Received]"
 
@@ -863,7 +1064,7 @@ def webhook():
                         recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
                         recent_msgs.reverse()
 
-                        reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs)
+                        reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, image_path=image_path)
 
                         if reply:
                             sent = send_whatsapp_message(phone, reply)
