@@ -502,7 +502,7 @@ def admin_portal():
     products_order = sort_map.get(sort_param, "id DESC")
     # Pagination
     page = int(request.args.get("page", 1))
-    per_page = 50
+    per_page = 20
     offset = (page - 1) * per_page
     
     total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
@@ -1545,6 +1545,15 @@ def auto_describe_all_products():
 # =====================================================================
 # PRODUCT MANAGEMENT ROUTES
 # =====================================================================
+@app.route("/admin/product/edit-page/<int:pid>")
+def edit_product_page(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    p = db_query("SELECT * FROM products WHERE id=?", (pid,), fetchone=True)
+    if not p:
+        return redirect("/admin?tab=inventory&msg=Product not found")
+    return render_template("edit_product.html", product=p)
+
 @app.route("/admin/products/search")
 def search_products():
     if not session.get("logged_in"):
@@ -1761,7 +1770,7 @@ def export_excel():
     products_order = sort_map.get(sort_param, "id DESC")
     # Pagination
     page = int(request.args.get("page", 1))
-    per_page = 50
+    per_page = 20
     offset = (page - 1) * per_page
     
     total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
@@ -1821,7 +1830,7 @@ def export_pdf():
     products_order = sort_map.get(sort_param, "id DESC")
     # Pagination
     page = int(request.args.get("page", 1))
-    per_page = 50
+    per_page = 20
     offset = (page - 1) * per_page
     
     total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
