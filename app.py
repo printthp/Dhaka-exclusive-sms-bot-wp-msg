@@ -1305,6 +1305,13 @@ def delete_product(pid):
     db_query("DELETE FROM products WHERE id=?", (pid,), commit=True)
     return redirect("/admin?tab=products&msg=Product Deleted")
 
+@app.route("/admin/products/clear")
+def clear_all_products():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM products", commit=True)
+    return redirect("/admin?tab=inventory&msg=All Products Cleared — Ready for Re-Sync")
+
 @app.route("/admin/sync-facebook-trigger")
 def sync_facebook_trigger():
     if not session.get("logged_in"):
