@@ -825,10 +825,57 @@ def _save_order(order_data):
         logger.error(f"Save order error: {e}")
         return False
 
-def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None):
+def _analyze_voice_with_gemini(voice_path, customer_phone=""):
+    if not GEMINI_API_KEY:
+        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস সার্ভিস বর্তমানে অনুপলব্ধ। অনুগ্রহ করে টাইপ করে জানান।"
+    try:
+        with open(voice_path, "rb") as f:
+            voice_bytes = f.read()
+        voice_b64 = base64.b64encode(voice_bytes).decode("utf-8")
+        
+        prompt = (
+            "তুমি Dhaka Exclusive-এর AI সেলস সহায়ক। "
+            "এই অডিওটি শুনো। কাস্টমার কী বলেছেন বাংলায় বা ইংরেজিতে, "
+            "তা বুঝে সঠিক এবং সুন্দরভাবে বাংলায় রিপ্লাই দাও। "
+            "'প্রিয় গ্রাহক' বলে সম্বোধন করো। "
+            "যদি অর্ডার সংক্রান্ত কিছু বলেন, অর্ডার নিতে উৎসাহিত করো। "
+            "যদি প্রোডাক্ট জানতে চান, প্রোডাক্ট লিস্ট দাও। "
+            "প্রতিটি উত্তর সম্পূর্ণ এবং সুন্দরভাবে শেষ করো।"
+        )
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": "audio/ogg", "data": voice_b64}}
+                ]
+            }],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
+        }
+        headers = {"Content-Type": "application/json"}
+        r = requests.post(url, json=payload, headers=headers, timeout=45)
+        res = r.json()
+        
+        if res.get("candidates"):
+            parts = res["candidates"][0].get("content", {}).get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    return part["text"].strip()
+        logger.error(f"Voice analysis failed: {res}")
+        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি স্পষ্টভাবে বোঝা যায়নি। অনুগ্রহ করে টাইপ করে জানান।"
+    except Exception as e:
+        logger.error(f"Voice analysis exception: {e}")
+        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
+
+def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
         return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
+
+    if voice_path:
+        return _analyze_voice_with_gemini(voice_path, customer_phone)
 
     if image_path:
         return _analyze_image_with_gemini(image_path, customer_phone)
@@ -1048,8 +1095,18 @@ def webhook():
                             voice_path = _download_whatsapp_media(media_id, "voice")
                             content = "🎤 [Voice Received]"
                             if voice_path:
-                                send_whatsapp_message(phone, "🎤 আপনার ভয়েস মেসেজ পেয়েছি। অনুগ্রহ করে টাইপ করে জানান কী প্রয়োজন, যাতে আমরা আরও ভালোভাবে সাহায্য করতে পারি।")
                                 db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
+                                db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (phone, sender_name), commit=True)
+                                db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
+                                
+                                recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
+                                recent_msgs.reverse()
+                                
+                                reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, voice_path=voice_path)
+                                if reply:
+                                    sent = send_whatsapp_message(phone, reply)
+                                    if sent:
+                                        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
                                 continue
                         else:
                             content = f"[{m_type.upper()} Received]"
