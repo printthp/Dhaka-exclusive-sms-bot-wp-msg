@@ -1316,53 +1316,65 @@ def sync_facebook_trigger():
         if not catalog_id or not token:
             return redirect("/admin?tab=inventory&msg=Facebook Catalog ID or Token Missing")
         
-        # Fetch products from Facebook Catalog
-        url = f"https://graph.facebook.com/v18.0/{catalog_id}/products"
+        added = 0
+        updated = 0
+        total_fetched = 0
+        next_url = f"https://graph.facebook.com/v18.0/{catalog_id}/products"
         params = {
             "access_token": token,
             "fields": "id,name,price,availability,image_url",
             "limit": 100
         }
-        r = requests.get(url, params=params, timeout=30)
-        res = r.json()
         
-        if "error" in res:
-            err_msg = res.get("error", {}).get("message", "Unknown error")
-            return redirect(f"/admin?tab=inventory&msg=Facebook Error: {err_msg}")
-        
-        items = res.get("data", [])
-        added = 0
-        updated = 0
-        for item in items:
-            fb_id = item.get("id", "")
-            name = item.get("name", "")
-            price_str = item.get("price", "0")
-            # Price comes as "1000 BDT" — parse number
-            price = 0
-            try:
-                price = int(float(price_str.split()[0]))
-            except:
-                price = 0
-            availability = item.get("availability", "")
-            image = item.get("image_url", "")
-            stock = 10 if availability == "in stock" else 0
+        # Pagination loop — fetch ALL products
+        while next_url and total_fetched < 5000:
+            r = requests.get(next_url, params=params if next_url == f"https://graph.facebook.com/v18.0/{catalog_id}/products" else None, timeout=30)
+            res = r.json()
             
-            # Check if product exists
-            existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
-            if existing:
-                db_query(
-                    "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
-                    (name, price, stock, image, fb_id), commit=True
-                )
-                updated += 1
-            else:
-                db_query(
-                    "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
-                    (fb_id, name, price, stock, image), commit=True
-                )
-                added += 1
+            if "error" in res:
+                err_msg = res.get("error", {}).get("message", "Unknown error")
+                return redirect(f"/admin?tab=inventory&msg=Facebook Error: {err_msg}")
+            
+            items = res.get("data", [])
+            if not items:
+                break
+            
+            for item in items:
+                fb_id = item.get("id", "")
+                name = item.get("name", "")
+                price_str = item.get("price", "0")
+                price = 0
+                try:
+                    price = int(float(price_str.split()[0]))
+                except:
+                    price = 0
+                availability = item.get("availability", "")
+                image = item.get("image_url", "")
+                stock = 10 if availability == "in stock" else 0
+                
+                existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
+                if existing:
+                    db_query(
+                        "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
+                        (name, price, stock, image, fb_id), commit=True
+                    )
+                    updated += 1
+                else:
+                    db_query(
+                        "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
+                        (fb_id, name, price, stock, image), commit=True
+                    )
+                    added += 1
+            
+            total_fetched += len(items)
+            logger.info(f"Fetched {len(items)} products, total: {total_fetched}")
+            
+            # Get next page URL
+            paging = res.get("paging", {})
+            next_url = paging.get("next")
+            params = None  # next URL already contains all params
         
-        msg = f"Facebook Sync: {added} added, {updated} updated"
+        msg = f"Facebook Sync: {added} added, {updated} updated (Total: {total_fetched})"
         logger.info(msg)
         return redirect(f"/admin?tab=inventory&msg={msg}")
     except Exception as e:
