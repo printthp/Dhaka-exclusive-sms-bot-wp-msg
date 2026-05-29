@@ -1,40 +1,60 @@
 import os
-import requests
+import google.generativeai as genai
 import logging
 
-logger = logging.getLogger(__name__)
+# Configure Gemini API
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
 
-def get_gemini_reply(user_msg, phone, db_query_func, settings):
-    api_key = settings.get("gemini_key") or os.environ.get("GEMINI_KEY", "")
-    if not api_key:
-        return "Dhaka Exclusive এ স্বাগতম! আমাদের টিম শীঘ্রই যোগাযোগ করবে।"
-    
-    # প্রোডাক্ট ডাটা আনা
-    products = db_query_func("SELECT name, price FROM products LIMIT 15", fetchall=True) or []
-    p_text = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products])
-    
-    # কাস্টমার ইতিহাস আনা
-    orders = db_query_func("SELECT status FROM orders WHERE phone=? ORDER BY id DESC LIMIT 1", (phone,), fetchone=True)
-    history = f"কাস্টমারের শেষ অর্ডারের স্ট্যাটাস: {orders['status']}" if orders else "নতুন কাস্টমার।"
+# System prompt for Sales Agent
+SALES_SYSTEM_PROMPT = """তুমি 'Dhaka Exclusive'-এর একজন পেশাদার সেলস এজেন্ট। 
+তোমার কাজ হলো গ্রাহকের সাথে বাংলায় কথা বলা এবং প্রোডাক্ট সম্পর্কে তথ্য দেওয়া।
 
-    instruction = f"""তুমি Dhaka Exclusive-এর স্মার্ট সেলস AI। তোমার লক্ষ্য কাস্টমারকে সন্তুষ্ট করে অর্ডার নেওয়া।
-বিজনেস তথ্য: ডেলিভারি ঢাকা ২৪ ঘণ্টা, বাইরে ৩ দিন। Cash on Delivery। 
-প্রোডাক্ট লিস্ট:
-{p_text}
-ইতিহাস: {history}
+## গুরুত্বপূর্ণ নিয়ম:
+1. **ভাষা:** সবসময় বাংলায় উত্তর দাও। গ্রাহককে 'আপনি' বলে সম্বোধন করো।
+2. **টোন:** বন্ধুত্বপূর্ণ কিন্তু পেশাদার থাকো। হাসি-খুশি ও সহায়ক মনোভাব দেখাও।
+3. **প্রোডাক্ট নলেজ:** নিচের প্রোডাক্ট তালিকা থেকে তথ্য দাও। যদি প্রোডাক্ট না থাকে, তাহলে বলো "বর্তমাবে এই প্রোডাক্টটি আমাদের স্টকে নেই।"
+4. **অর্ডার স্ট্যাটাস:** যদি গ্রাহক অর্ডার স্ট্যাটাস জানতে চায়, তাহলে প্রদত্ত অর্ডার তথ্য থেকে উত্তর দাও।
+5. **সেলস অপর্চুনিটি:** গ্রাহক যদি কোনো প্রোডাক্টে আগ্রহ দেখায়, তাহলে ডেলিভারি সময় (৩-৫ কার্যদিবস) এবং মূল্য নিশ্চিত করো।
+6. **কনফিডেন্স:** যদি নিশ্চিত না হও, তাহলে বলো "আমি বিষয়টি চেক করে নিচ্ছি, একজন এক্সিকিউটিভ শীঘ্রই আপনার সাথে যোগাযোগ করবে।"
 
-নিয়ম:
-১. বাংলায় উত্তর দাও। ২. কাস্টমারকে 'Sir/Maam' সম্বোধন করো। ৩. প্রতি উত্তরের শেষে অর্ডার করতে উৎসাহিত করো। ৪. বিনয়ী কিন্তু স্মার্ট হও।"""
+## প্রোডাক্ট তালিকা (উদাহরণ):
+- ফ্যাশন: পাঞ্জাবি (১৫০০-৩৫০০ টাকা), থ্রি-পিস (২৫০০-৬০০০ টাকা)
+- ইলেকট্রনিক্স: ব্লুটুথ স্পিকার (১২০০ টাকা), পাওয়ার ব্যাংক (৮০০ টাকা)
+- হোম: ডিজাইন শোপিস (৫০০-২০০০ টাকা)
 
+## ডেলিভারি টার্মস:
+- ঢাকা সিটির মধ্যে: ২-৩ কার্যদিবস
+- ঢাকার বাইরে: ৪-৬ কার্যদিবস
+- ক্যাশ অন ডেলিভারি (COD) সুবিধা আছে
+"""
+
+def generate_sales_response(customer_phone, customer_message, order_context_json):
+    """
+    Main function that Gemini uses to generate sales response.
+    Called from app.py webhook.
+    """
     try:
-        # লেটেস্ট মোডেল gemini-1.5-flash-latest ব্যবহার
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-        payload = {
-            "contents": [{"parts": [{"text": f"{instruction}\n\nCustomer: {user_msg}"}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 450}
-        }
-        r = requests.post(url, json=payload, timeout=30).json()
-        return r['candidates'][0]['content']['parts'][0]['text'].strip()
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash-latest",
+            system_instruction=SALES_SYSTEM_PROMPT
+        )
+
+        # Build context for the AI
+        prompt = f"""
+গ্রাহকের ফোন নম্বর: {customer_phone}
+
+গ্রাহকের বার্তা: "{customer_message}"
+
+গ্রাহকের পূর্ববর্তী অর্ডার তথ্য:
+{order_context_json}
+
+উপরের তথ্যের ভিত্তিতে গ্রাহককে একটি উপযুক্ত উত্তর দাও।
+"""
+
+        response = model.generate_content(prompt)
+        return response.text.strip()
+
     except Exception as e:
-        logger.error(f"AI Engine Error: {e}")
-        return "ধন্যবাদ! আমরা আপনার মেসেজটি পেয়েছি এবং শীঘ্রই আমাদের প্রতিনিধি যোগাযোগ করবে।"
+        logging.error(f"Gemini API Error: {e}")
+        return "ক্ষমা করবেন, এই মুহূর্তে সার্ভারে সমস্যা হচ্ছে। একজন এক্সিকিউটিভ শীঘ্রই আপনার সাথে যোগাযোগ করবে। 🤝"
