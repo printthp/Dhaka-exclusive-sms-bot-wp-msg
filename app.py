@@ -1306,7 +1306,7 @@ Material: [material or N/A]
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300, "topP": 0.95}
         }
         headers = {"Content-Type": "application/json"}
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         res = resp.json()
         
