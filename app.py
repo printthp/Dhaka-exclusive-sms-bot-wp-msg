@@ -632,7 +632,7 @@ def _extract_order_from_text(text, phone):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300, "topP": 0.9}
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500, "topP": 0.9}
         }
         r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
         res = r.json()
@@ -717,14 +717,13 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         "general": "General inquiry. Be helpful and steer towards placing an order.",
     }
 
-    system_instruction = f"""তুমি Dhaka Exclusive-এর প্রধান AI সেলস অ্যাসিস্ট্যান্ট। তোমার নাম "Dhaka Exclusive Bot"।
+    system_instruction = f"""আপনি Dhaka Exclusive-এর প্রধান AI সেলস অ্যাসিস্ট্যান্ট। আপনার নাম "Dhaka Exclusive Bot"।
 
 বিজনেস তথ্য:
-- নাম: Dhaka Exclusive
-- ধরন: Premium E-Commerce (ঘরে বসে ডেলিভারি)
-- ডেলিভারি: Dhaka-তে ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা
-- পেমেন্ট: Cash on Delivery (COD) + বিকাশ/নগদ
-- রিটার্ন: ৭ দিনের মধ্যে (ড্যামেজ হলে)
+- নাম: Dhaka Exclusive (Premium E-Commerce)
+- ডেলিভারি: Dhaka ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা
+- পেমেন্ট: COD + বিকাশ/নগদ
+- রিটার্ন: ৭ দিন (ড্যামেজ হলে)
 
 চলতি প্রোডাক্ট:
 {products_text}
@@ -740,12 +739,14 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
 {intent_prompts.get(intent, intent_prompts['general'])}
 
 নিয়ম:
-1. বাংলায় উত্তর দাও
-2. "প্রিয় গ্রাহক" বলে সম্বোধন
-3. অর্ডার করতে উৎসাহিত করো
-4. দাম বলার সময় "মাত্র" "শুধু" ব্যবহার করো
-5. স্টক কম থাকলে "শেষ হওয়ার আগেই অর্ডার করুন"
-6. কখনো কঠোরভাবে না বলো না
+1. শুধু বাংলায় উত্তর দিন
+2. "প্রিয় গ্রাহক" বলে সম্বোধন করুন
+3. কখনো "আরে ভাই/আপু" বা "ভাই/আপু" বলবেন না
+4. অর্ডার করতে উৎসাহিত করুন
+5. দাম বলার সময় "মাত্র" "শুধু" ব্যবহার করুন
+6. স্টক কম থাকলে "শেষ হওয়ার আগেই অর্ডার করুন"
+7. কখনো কঠোরভাবে না বলবেন না
+8. প্রতিটি উত্তর সম্পূর্ণ এবং সুন্দরভাবে শেষ করুন
 """
 
     payload = {
@@ -755,7 +756,7 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         }],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 500,
+            "maxOutputTokens": 1000,
             "topP": 0.95
         }
     }
