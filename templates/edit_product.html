@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Edit Product{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto mt-10 pb-24">
+    <div class="glass p-8 rounded-[3rem] border border-indigo-500/20 shadow-2xl">
+        <h3 class="text-white font-black text-lg uppercase tracking-widest mb-6">Edit Product</h3>
+        <form method="POST" action="/admin/product/update/{{product.id}}" enctype="multipart/form-data">
+            <div class="space-y-4">
+                <input name="name" value="{{ product.name }}" required class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                <div class="grid grid-cols-3 gap-4">
+                    <input name="price" type="number" value="{{ product.price }}" required class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                    <input name="discount_price" type="number" value="{{ product.discount_price or '' }}" placeholder="Discount" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-rose-500 outline-none text-sm">
+                    <input name="stock" type="number" value="{{ product.stock }}" required class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                </div>
+                <input name="fb_product_id" value="{{ product.fb_product_id or '' }}" placeholder="Facebook Product ID" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                <input type="file" name="image" accept="image/*" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl text-sm text-slate-400">
+                <input name="image_url" value="{{ product.image_url or '' }}" placeholder="Or Image URL" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                <div class="grid grid-cols-2 gap-4">
+                    <input name="category" value="{{ product.category or '' }}" placeholder="Category" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                    <input name="size" value="{{ product.size or '' }}" placeholder="Size" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <input name="color" value="{{ product.color or '' }}" placeholder="Color" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                    <input name="material" value="{{ product.material or '' }}" placeholder="Material" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">
+                </div>
+                <textarea name="description" placeholder="Description" rows="3" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-indigo-500 outline-none text-sm">{{ product.description or '' }}</textarea>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Update</button>
+                <a href="/admin?tab=inventory" class="flex-1 bg-slate-700 hover:bg-slate-600 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all text-center">Cancel</a>
+            </div>
+        </form>
+        <a href="/admin/product/delete/{{product.id}}" onclick="return confirm('Delete?')" class="block mt-4 text-center text-rose-400 text-[10px] font-black uppercase">Delete</a>
+    </div>
+</div>
+{% endblock %}
