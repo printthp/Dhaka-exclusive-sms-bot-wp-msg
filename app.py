@@ -469,7 +469,17 @@ def admin_portal():
 
     orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
-    products = db_query("SELECT * FROM products ORDER BY id DESC", fetchall=True) or []
+    sort_param = request.args.get("sort", "id_desc")
+    sort_map = {
+        "id_desc": "id DESC",
+        "price_low": "price ASC",
+        "price_high": "price DESC",
+        "name_az": "name COLLATE NOCASE ASC",
+        "stock_low": "stock ASC",
+        "stock_high": "stock DESC",
+    }
+    products_order = sort_map.get(sort_param, "id DESC")
+    products = db_query(f"SELECT * FROM products ORDER BY {products_order}", fetchall=True) or []
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
     payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
 
@@ -1633,6 +1643,195 @@ def clear_all_products():
         return redirect("/admin/login")
     db_query("DELETE FROM products", commit=True)
     return redirect("/admin?tab=inventory&msg=All Products Cleared — Ready for Re-Sync")
+
+
+# =====================================================================
+# PRODUCT SORTING
+# =====================================================================
+@app.route("/admin/products/sort")
+def sort_products():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    sort_by = request.args.get("sort_by", "id_desc")
+    return redirect(f"/admin?tab=inventory&sort={sort_by}")
+
+# =====================================================================
+# PRODUCT BULK ACTION
+# =====================================================================
+@app.route("/admin/products/bulk-action", methods=["POST"])
+def bulk_action():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    action = request.form.get("bulk_action", "")
+    selected = request.form.getlist("selected_products")
+    if not selected:
+        return redirect("/admin?tab=inventory&msg=No products selected")
+    
+    ids = [int(x) for x in selected]
+    placeholders = ",".join(["?"] * len(ids))
+    
+    if action == "delete":
+        db_query(f"DELETE FROM products WHERE id IN ({placeholders})", tuple(ids), commit=True)
+        msg = f"Deleted {len(ids)} products"
+    elif action == "stock_10":
+        db_query(f"UPDATE products SET stock = 10 WHERE id IN ({placeholders})", tuple(ids), commit=True)
+        msg = f"Set stock to 10 for {len(ids)} products"
+    elif action == "stock_50":
+        db_query(f"UPDATE products SET stock = 50 WHERE id IN ({placeholders})", tuple(ids), commit=True)
+        msg = f"Set stock to 50 for {len(ids)} products"
+    elif action == "discount_10":
+        for pid in ids:
+            p = db_query("SELECT price FROM products WHERE id=?", (pid,), fetchone=True)
+            if p:
+                disc = int(p["price"] * 0.9)
+                db_query("UPDATE products SET discount_price = ? WHERE id = ?", (disc, pid), commit=True)
+        msg = f"Applied 10% discount to {len(ids)} products"
+    elif action == "discount_25":
+        for pid in ids:
+            p = db_query("SELECT price FROM products WHERE id=?", (pid,), fetchone=True)
+            if p:
+                disc = int(p["price"] * 0.75)
+                db_query("UPDATE products SET discount_price = ? WHERE id = ?", (disc, pid), commit=True)
+        msg = f"Applied 25% discount to {len(ids)} products"
+    elif action == "clear_discount":
+        db_query(f"UPDATE products SET discount_price = NULL WHERE id IN ({placeholders})", tuple(ids), commit=True)
+        msg = f"Cleared discount for {len(ids)} products"
+    else:
+        msg = "Unknown action"
+    
+    return redirect(f"/admin?tab=inventory&msg={msg}")
+
+# =====================================================================
+# EXPORT TO EXCEL
+# =====================================================================
+@app.route("/admin/products/export/excel")
+def export_excel():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    sort_param = request.args.get("sort", "id_desc")
+    sort_map = {
+        "id_desc": "id DESC",
+        "price_low": "price ASC",
+        "price_high": "price DESC",
+        "name_az": "name COLLATE NOCASE ASC",
+        "stock_low": "stock ASC",
+        "stock_high": "stock DESC",
+    }
+    products_order = sort_map.get(sort_param, "id DESC")
+    products = db_query(f"SELECT * FROM products ORDER BY {products_order}", fetchall=True) or []
+    
+    from io import BytesIO
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Products"
+    headers = ["ID", "FB ID", "Name", "Price", "Discount", "Stock", "Category", "Size", "Color", "Material", "Description"]
+    ws.append(headers)
+    for p in products:
+        ws.append([
+            p["id"], p.get("fb_product_id", ""), p["name"], p["price"],
+            p.get("discount_price", ""), p["stock"], p.get("category", ""),
+            p.get("size", ""), p.get("color", ""), p.get("material", ""),
+            p.get("description", "")
+        ])
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name="dhaka_exclusive_products.xlsx")
+
+# =====================================================================
+# EXPORT TO PDF
+# =====================================================================
+@app.route("/admin/products/export/pdf")
+def export_pdf():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    sort_param = request.args.get("sort", "id_desc")
+    sort_map = {
+        "id_desc": "id DESC",
+        "price_low": "price ASC",
+        "price_high": "price DESC",
+        "name_az": "name COLLATE NOCASE ASC",
+        "stock_low": "stock ASC",
+        "stock_high": "stock DESC",
+    }
+    products_order = sort_map.get(sort_param, "id DESC")
+    products = db_query(f"SELECT * FROM products ORDER BY {products_order}", fetchall=True) or []
+    
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib import colors
+    
+    output = BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph("<b>Dhaka Exclusive - Product Catalog</b>", styles["Title"]))
+    elements.append(Spacer(1, 12))
+    
+    data = [["#", "Name", "Price", "Stock", "Category"]]
+    for p in products[:100]:
+        data.append([str(p["id"]), p["name"][:30], f"{p['price']}৳", str(p["stock"]), p.get("category", "")])
+    
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#334155")),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+    output.seek(0)
+    return send_file(output, mimetype="application/pdf", as_attachment=True, download_name="dhaka_exclusive_products.pdf")
+
+# =====================================================================
+# QR CODE GENERATOR
+# =====================================================================
+@app.route("/admin/product/qr/<int:pid>")
+def generate_qr(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    p = db_query("SELECT * FROM products WHERE id=?", (pid,), fetchone=True)
+    if not p:
+        return "Product not found", 404
+    
+    import qrcode
+    from io import BytesIO
+    
+    data = f"Product: {p['name']}\nPrice: {p['price']}৳\nStock: {p['stock']}"
+    img = qrcode.make(data)
+    output = BytesIO()
+    img.save(output, "PNG")
+    output.seek(0)
+    return send_file(output, mimetype="image/png")
+
+# =====================================================================
+# ADD REVIEW
+# =====================================================================
+@app.route("/admin/product/review/<int:pid>", methods=["POST"])
+def add_review(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    rating = int(request.form.get("rating", 5))
+    comment = request.form.get("comment", "").strip()
+    customer_name = request.form.get("customer_name", "Anonymous").strip()
+    
+    db_query(
+        "INSERT INTO product_reviews (product_id, rating, comment, customer_name) VALUES (?, ?, ?, ?)",
+        (pid, rating, comment, customer_name), commit=True
+    )
+    return redirect(f"/admin?tab=inventory&msg=Review added")
+
 
 @app.route("/admin/sync-facebook-trigger")
 def sync_facebook_trigger():
