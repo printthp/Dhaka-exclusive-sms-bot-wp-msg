@@ -1342,8 +1342,8 @@ def auto_describe_product(pid):
         details = _generate_product_details_with_gemini(p["name"], p["price"])
         if details:
             db_query(
-                "UPDATE products SET category=?, description=?, size=?, color==? WHERE id=?",
-                (details.get("category"), details.get("description"), details.get("size"), details.get("color"), pid),
+                "UPDATE products SET category=?, description=?, size=?, color=?, material=? WHERE id=?",
+                (details.get("category"), details.get("description"), details.get("size"), details.get("color"), details.get("material"), pid),
                 commit=True
             )
             msg = f"Auto-described: {p['name'][:30]}..."
