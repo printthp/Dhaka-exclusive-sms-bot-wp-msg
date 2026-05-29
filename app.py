@@ -1,10 +1,18 @@
-import os, sys, json, sqlite3, logging, ctypes, time, requests, random, pandas as pd
+import os
+import sys
+import json
+import sqlite3
+import logging
+import ctypes
+import time
+import requests
+import random
+import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
 from xhtml2pdf import pisa
-from werkzeug.utils import secure_filename
 
 # =====================================================================
 # SYSTEM & STORAGE SETUP (Render Persistence)
@@ -104,61 +112,6 @@ def inject_globals():
     return dict(unread_chat_count=count)
 
 # =====================================================================
-# WHATSAPP MEDIA UPLOAD & SEND (NEW - Voice + Image)
-# =====================================================================
-MEDIA_FOLDER = os.path.join(os.path.dirname(DB_PATH), "media")
-if not os.path.exists(MEDIA_FOLDER):
-    os.makedirs(MEDIA_FOLDER)
-
-def upload_media_to_whatsapp(file_path, media_type="image"):
-    s = get_all_settings()
-    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
-    if not token or not phone_id:
-        logger.error("WhatsApp credentials missing for media upload")
-        return None
-    url = f"https://graph.facebook.com/v22.0/{phone_id}/media"
-    try:
-        with open(file_path, "rb") as f:
-            files = {"file": (os.path.basename(file_path), f, f"{media_type}/*")}
-            data = {"type": media_type, "messaging_product": "whatsapp"}
-            headers = {"Authorization": f"Bearer {token}"}
-            r = requests.post(url, headers=headers, files=files, data=data, timeout=60)
-            res = r.json()
-            if r.status_code in (200, 201) and "id" in res:
-                logger.info(f"Media uploaded: {res['id']}")
-                return res["id"]
-            logger.error(f"Media upload failed: {res}")
-            return None
-    except Exception as e:
-        logger.error(f"Media upload exception: {e}")
-        return None
-
-def send_whatsapp_media(to_phone, media_id, media_type="image", caption=""):
-    s = get_all_settings()
-    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
-    if not token or not phone_id:
-        return False
-    url = f"https://graph.facebook.com/v22.0/{phone_id}/messages"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    body = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": to_phone, "type": media_type}
-    if media_type == "image":
-        body["image"] = {"id": media_id, "caption": caption}
-    elif media_type == "audio":
-        body["audio"] = {"id": media_id}
-    try:
-        r = requests.post(url, json=body, headers=headers, timeout=30)
-        if r.status_code in (200, 201):
-            logger.info(f"WhatsApp {media_type} sent to {to_phone}")
-            return True
-        logger.error(f"WhatsApp {media_type} failed: {r.status_code} {r.text}")
-        return False
-    except Exception as e:
-        logger.error(f"WhatsApp {media_type} error: {e}")
-        return False
-
-# =====================================================================
 # PATHAO SYNC (Bearer & Auto-Login Hybrid)
 # =====================================================================
 def get_pathao_token():
@@ -166,6 +119,7 @@ def get_pathao_token():
     bearer = s.get('pathao_bearer_token', '').strip()
     if bearer and len(bearer) > 20:
         return bearer
+
     url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
     payload = {
         "client_id": str(s.get('pathao_client_id', '')).strip(),
@@ -189,19 +143,23 @@ def pull_orders_from_pathao():
     token = get_pathao_token()
     if isinstance(token, str) and "Error" in token:
         return token
+
     s = get_all_settings()
     store_id = str(s.get('pathao_store_id', '')).strip()
     if not store_id:
         return "Error: Store ID Missing"
+
     url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
     try:
         r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
         if r.status_code == 401:
             db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
             return "Token Expired. Please refresh again."
+
         res = r.json()
         data_block = res.get('data', [])
         orders_list = data_block.get('data', []) if isinstance(data_block, dict) else data_block
+
         pulled = 0
         for o in orders_list:
             p_id = str(o.get('consignment_id') or o.get('order_id'))
@@ -266,7 +224,12 @@ def api_check_fraud():
         return jsonify({"error": "No phone"}), 400
     random.seed(phone)
     success = random.randint(35, 100)
-    return jsonify({"phone": phone, "return_count": random.randint(0, 10), "success_rate": success, "risk": 100 - success})
+    return jsonify({
+        "phone": phone,
+        "return_count": random.randint(0, 10),
+        "success_rate": success,
+        "risk": 100 - success
+    })
 
 def get_chart_data():
     labels, data = [], []
@@ -342,41 +305,6 @@ def admin_send_message():
         send_whatsapp_message(phone, msg)
     return redirect(f"/admin?tab=chat&chat_with={phone}")
 
-@app.route("/admin/chat/send-image", methods=["POST"])
-def admin_send_image():
-    phone = request.form.get("phone")
-    file = request.files.get("image")
-    caption = request.form.get("caption", "")
-    if not phone or not file:
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=No image selected")
-    filename = secure_filename(f"img_{int(time.time())}_{file.filename}")
-    file_path = os.path.join(MEDIA_FOLDER, filename)
-    file.save(file_path)
-    media_id = upload_media_to_whatsapp(file_path, media_type="image")
-    if media_id and send_whatsapp_media(phone, media_id, media_type="image", caption=caption):
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, f"[IMAGE:{file_path}]", session.get("username")), commit=True)
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Image sent!")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Image upload failed")
-
-@app.route("/admin/chat/send-voice", methods=["POST"])
-def admin_send_voice():
-    phone = request.form.get("phone")
-    voice_file = request.files.get("voice")
-    if not phone or not voice_file:
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=No voice message")
-    filename = secure_filename(f"voice_{int(time.time())}.webm")
-    file_path = os.path.join(MEDIA_FOLDER, filename)
-    voice_file.save(file_path)
-    media_id = upload_media_to_whatsapp(file_path, media_type="audio")
-    if media_id and send_whatsapp_media(phone, media_id, media_type="audio"):
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, "[VOICE MESSAGE]", session.get("username")), commit=True)
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Voice sent!")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Voice upload failed")
-
 @app.route("/admin/chat/delete/<phone>")
 def delete_chat(phone):
     db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
@@ -438,168 +366,23 @@ WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
 
-# ============================================================================
-# REPLACE THIS SECTION IN YOUR app.py
-# ============================================================================
-# FIND:  def get_gemini_reply(user_message: str) -> str:
-# REPLACE THE ENTIRE FUNCTION WITH THE CODE BELOW
-# ============================================================================
-
-GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
-WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
-
-# ---- CACHE FOR PRODUCTS & SETTINGS ----
-_ai_cache = {"products": None, "last_fetch": 0, "orders": None}
-
-def _get_products_text():
-    """Fetch all active products for AI context - cached for 2 minutes"""
-    now = time.time()
-    if _ai_cache["products"] is None or (now - _ai_cache["last_fetch"]) > 120:
-        rows = db_query("SELECT * FROM products WHERE active = 1 ORDER BY id DESC", fetchall=True) or []
-        lines = []
-        for p in rows:
-            stock = "In Stock" if p.get('stock', 0) > 5 else f"Only {p.get('stock', 0)} left!"
-            lines.append(f"- {p['name']} — {p['price']}৳ — {stock}")
-        _ai_cache["products"] = "\n".join(lines) if lines else "No products available"
-        _ai_cache["last_fetch"] = now
-    return _ai_cache["products"]
-
-def _get_hot_products():
-    """Get top selling products based on orders"""
-    hot = db_query("""
-        SELECT p.name, p.price, COUNT(o.id) as sold
-        FROM orders o
-        JOIN products p ON o.product_id = p.id
-        WHERE o.created_at > datetime('now', '-30 days')
-        GROUP BY p.id
-        ORDER BY sold DESC
-        LIMIT 5
-    """, fetchall=True)
-    if not hot:
-        hot = db_query("SELECT name, price FROM products WHERE active = 1 ORDER BY id DESC LIMIT 5", fetchall=True) or []
-    return hot
-
-def _get_customer_context(phone: str):
-    """Get customer purchase history for personalized responses"""
-    if not phone:
-        return ""
-    orders = db_query("SELECT * FROM orders WHERE phone=? ORDER BY id DESC LIMIT 3", (phone,), fetchall=True) or []
-    if not orders:
-        return "This is a NEW customer. No previous orders."
-    total_spent = sum(o.get('total', 0) for o in orders)
-    last_order = orders[0]
-    return f"""Customer History:
-- Total Orders: {len(orders)}
-- Total Spent: {total_spent}৳
-- Last Order: {last_order.get('status', 'N/A')} — {last_order.get('total', 0)}৳
-- Preferred Address: {last_order.get('address', 'N/A')[:50]}
-"""
-
-def _detect_intent(msg: str) -> str:
-    """Detect customer intent for targeted responses"""
-    msg_lower = msg.lower()
-    intents = {
-        "price_inquiry": ["দাম", "price", "কত", "cost", "tk", "৳", "tk.", "taka"],
-        "order_status": ["অর্ডার", "order", "কবে", "when", "status", "delivery", "ডেলিভারি", "কোথায়"],
-        "product_inquiry": ["প্রোডাক্ট", "product", "আছে", "available", "stock", "item", "কি আছে"],
-        "discount_request": ["ডিসকাউন্ট", "discount", "offer", "অফার", "ছাড়", "deal", "কম", "cheaper"],
-        "complaint": ["খারাপ", "bad", "problem", "সমস্যা", "complain", "defect", "ভুল"],
-        "return": ["রিটার্ন", "return", "ফেরত", "change", "বদল"],
-        "greeting": ["হাই", "hello", "hi", "আসসালামু", "salam", "কেমন", "কি খবর"],
-        "confirm_order": ["কিনব", "buy", "কনফার্ম", "confirm", "নিব", "চাই", "book"],
-        "location": ["ঠিকানা", "address", "লোকেশন", "shop", "দোকান", "where"],
-    }
-    for intent, keywords in intents.items():
-        if any(k in msg_lower for k in keywords):
-            return intent
-    return "general"
-
-def get_gemini_reply(user_message: str, customer_phone: str = "", chat_history: list = None) -> str:
-    """Advanced Gemini AI with business intelligence"""
+def get_gemini_reply(user_message: str) -> str:
     if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY missing")
         return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
-
-    intent = _detect_intent(user_message)
-    products_text = _get_products_text()
-    hot_products = _get_hot_products()
-    customer_ctx = _get_customer_context(customer_phone)
-
-    # Build hot products text
-    hot_text = "\n".join([f"- {p['name']} — {p['price']}৳ (🔥 Hot Selling)" for p in hot_products[:5]])
-
-    # Recent chat context (last 3 messages)
-    chat_ctx = ""
-    if chat_history and len(chat_history) > 0:
-        recent = chat_history[-6:]  # last 6 messages
-        chat_ctx = "Recent conversation:\n" + "\n".join([
-            f"{'Customer' if m.get('direction') == 'inbound' else 'Assistant'}: {m.get('content', '')[:100]}"
-            for m in recent
-        ])
-
-    # Sales-focused system prompt based on intent
-    intent_prompts = {
-        "price_inquiry": "Customer is asking about PRICE. Be transparent about pricing. Mention if we have any bundle deals or free shipping. ALWAYS end with a soft order confirmation question.",
-        "order_status": "Customer is asking about ORDER STATUS. Be reassuring. Give estimated delivery time. If delayed, apologize and offer compensation/discount on next order.",
-        "product_inquiry": "Customer wants to know about PRODUCTS. List relevant products enthusiastically. Highlight benefits and unique selling points. Suggest complementary items (upsell).",
-        "discount_request": "Customer wants DISCOUNT. Be polite but firm. Mention loyalty program, referral bonus, or bulk order discounts. Don't give discounts easily - create scarcity.",
-        "complaint": "Customer has a COMPLAINT. Apologize sincerely. Acknowledge the issue. Promise quick resolution. Offer replacement/refund + discount coupon for next purchase.",
-        "return": "Customer wants to RETURN. Be understanding. Explain return policy simply. Offer exchange first, then refund. Make it easy for them.",
-        "greeting": "Customer greeted us. Warm welcome. Briefly mention today's hot deals or new arrivals. Ask what they're looking for.",
-        "confirm_order": "Customer wants to BUY! Confirm enthusiastically. Ask for confirmation details (size, color, quantity). Create urgency - mention limited stock.",
-        "location": "Customer asking about LOCATION/SHOP. Explain we are online-based with COD nationwide. Mention fast delivery to their area.",
-        "general": "General inquiry. Be helpful, friendly, and always steer towards placing an order or checking out products.",
-    }
-
-    system_instruction = f"""তুমি Dhaka Exclusive-এর প্রধান AI সেলস অ্যাসিস্ট্যান্ট। তোমার নাম "Dhaka Exclusive AI"।
-
-তোমার লক্ষ্য: প্রতিটি কাস্টমারকে সন্তুষ্ট করে বেশি বেশি অর্ডার নেওয়া।
-
-বিজনেস তথ্য:
-- নাম: Dhaka Exclusive
-- ধরন: Premium E-Commerce (ঘরে বসে ডেলিভারি)
-- ডেলিভারি: Dhaka-তে ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা
-- পেমেন্ট: Cash on Delivery (COD) + বিকাশ/নগদ
-- রিটার্ন পলিসি: ৭ দিনের মধ্যে (প্রোডাক্ট ড্যামেজ হলে)
-- হেল্পলাইন: WhatsApp এ মেসেজ করুন
-
-চলতি প্রোডাক্ট ক্যাটালগ:
-{products_text}
-
-🔥 হট সেলিং প্রোডাক্টস:
-{hot_text}
-
-{customer_ctx}
-
-{chat_ctx}
-
-বর্তমান ইনটেন্ট: {intent}
-{intent_prompts.get(intent, intent_prompts['general'])}
-
-গুরুত্বপূর্ণ নিয়ম:
-1. সবসময় বাংলায় উত্তর দাও (ইংরেজি শব্দ মিশিয়ে লিখতে পারো)
-2. কাস্টমারকে "ভাই/আপু" বলে সম্বোধন করো
-3. অর্ডার করতে উৎসাহিত করো — প্রতিটি মেসেজের শেষে একটি কল-টু-অ্যাকশন থাকবে
-4. দাম বলার সময় "মাত্র" "শুধু" "মাত্র আজকের জন্য" ইত্যাদি শব্দ ব্যবহার করো
-5. স্টক কম থাকলে "শেষ হওয়ার আগেই অর্ডার করুন" বলো
-6. কাস্টমার অর্ডার নিশ্চিত করলে তাকে ধন্যবাদ দাও এবং ট্র্যাকিং আইডি দেওয়ার প্রমিস করো
-7. কখনো কঠোরভাবে না বলো না — সবসময় বিকল্প অফার করো
-8. স্প্যাম/বিরক্তিকর মনে না হওয়ার চেষ্টা করো
-"""
-
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        system_prompt = (
+            "তুমি Dhaka Exclusive নামক একটি ই-কমার্স স্টোরের AI সহায়ক। "
+            "তুমি বাংলা এবং ইংরেজি উভয় ভাষায় কথা বলতে পারো। "
+            "গ্রাহকদের অর্ডার, পণ্য এবং ডেলিভারি সম্পর্কিত তথ্য দাও। "
+            "সংক্ষিপ্ত এবং সুন্দরভাবে উত্তর দাও।"
+        )
         payload = {
             "contents": [{
                 "role": "user",
-                "parts": [{"text": f"{system_instruction}\n\nCustomer Message: {user_message}"}]
-            }],
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 500,
-                "topP": 0.95
-            }
+                "parts": [{"text": f"{system_prompt}\n\nCustomer: {user_message}"}]
+            }]
         }
         headers = {"Content-Type": "application/json"}
         r = requests.post(url, json=payload, headers=headers, timeout=30)
@@ -608,18 +391,39 @@ def get_gemini_reply(user_message: str, customer_phone: str = "", chat_history: 
         if candidates:
             parts = candidates[0].get("content", {}).get("parts", [])
             if parts:
-                reply = parts[0].get("text", "").strip()
-                # Post-process for sales optimization
-                if intent == "confirm_order" and "অর্ডার" not in reply:
-                    reply += "\n\n✅ অর্ডার কনফার্ম করতে আপনার পূর্ণ ঠিকানা ও ফোন নাম্বারটি দিন!"
-                elif intent == "price_inquiry" and "অর্ডার" not in reply:
-                    reply += "\n\n🚀 মাত্র আজকের জন্য ফ্রি ডেলিভারি! অর্ডার করুন?"
-                return reply
+                return parts[0].get("text", "").strip()
         logger.error(f"Gemini unexpected response: {res}")
         return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
         return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
+
+def send_whatsapp_message(to_phone: str, message: str) -> bool:
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning("WhatsApp credentials missing")
+        return False
+    try:
+        url = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to_phone,
+            "type": "text",
+            "text": {"body": message}
+        }
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        if r.status_code in (200, 201):
+            logger.info(f"WhatsApp message sent to {to_phone}")
+            return True
+        logger.error(f"WhatsApp send failed: {r.status_code} {r.text}")
+        return False
+    except Exception as e:
+        logger.error(f"WhatsApp send error: {e}")
+        return False
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
