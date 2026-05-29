@@ -113,7 +113,19 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, follow_up_sent INTEGER DEFAULT 0)")
         c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, fb_product_id TEXT UNIQUE, name TEXT, price INTEGER, stock INTEGER DEFAULT 10, image_url TEXT)")
+        c.execute("""CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fb_product_id TEXT UNIQUE,
+            name TEXT,
+            price INTEGER,
+            stock INTEGER DEFAULT 10,
+            image_url TEXT,
+            description TEXT,
+            category TEXT,
+            size TEXT,
+            color TEXT,
+            material TEXT
+        )""")
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
         c.execute("""
@@ -675,11 +687,23 @@ _AI_CACHE = {"products": None, "last_fetch": 0}
 def _get_products_text():
     now = time.time()
     if _AI_CACHE["products"] is None or (now - _AI_CACHE["last_fetch"]) > 120:
-        rows = db_query("SELECT name, price, stock FROM products ORDER BY id DESC", fetchall=True) or []
+        rows = db_query("SELECT name, price, stock, description, category, size, color, material FROM products ORDER BY id DESC", fetchall=True) or []
         lines = []
         for p in rows:
             stock = "In Stock" if p.get('stock', 0) > 5 else f"Only {p.get('stock', 0)} left!"
-            lines.append(f"- {p['name']} — {p['price']}৳ — {stock}")
+            desc = p.get('description', '') or ''
+            cat = p.get('category', '') or ''
+            size = p.get('size', '') or ''
+            color = p.get('color', '') or ''
+            material = p.get('material', '') or ''
+            extras = []
+            if cat: extras.append(f"Category: {cat}")
+            if size: extras.append(f"Size: {size}")
+            if color: extras.append(f"Color: {color}")
+            if material: extras.append(f"Material: {material}")
+            if desc: extras.append(f"Details: {desc}")
+            extra_str = f" ({'; '.join(extras)})" if extras else ""
+            lines.append(f"- {p['name']} — {p['price']}৳ — {stock}{extra_str}")
         _AI_CACHE["products"] = "\n".join(lines) if lines else "No products available"
         _AI_CACHE["last_fetch"] = now
     return _AI_CACHE["products"]
@@ -1254,9 +1278,15 @@ def add_product():
             else:
                 image_url = file_path  # fallback local path
         
+        description = request.form.get("description", "").strip()
+        category = request.form.get("category", "").strip()
+        size = request.form.get("size", "").strip()
+        color = request.form.get("color", "").strip()
+        material = request.form.get("material", "").strip()
+        
         db_query(
-            "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
-            (fb_id or None, name, price, stock, image_url or None),
+            "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (fb_id or None, name, price, stock, image_url or None, description or None, category or None, size or None, color or None, material or None),
             commit=True
         )
         db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_PRODUCT', ?)",
@@ -1288,9 +1318,15 @@ def update_product(pid):
             else:
                 image_url = file_path
         
+        description = request.form.get("description", "").strip()
+        category = request.form.get("category", "").strip()
+        size = request.form.get("size", "").strip()
+        color = request.form.get("color", "").strip()
+        material = request.form.get("material", "").strip()
+        
         db_query(
-            "UPDATE products SET fb_product_id=?, name=?, price=?, stock=?, image_url=? WHERE id=?",
-            (fb_id or None, name, price, stock, image_url or None, pid),
+            "UPDATE products SET fb_product_id=?, name=?, price=?, stock=?, image_url=?, description=?, category=?, size=?, color=?, material=? WHERE id=?",
+            (fb_id or None, name, price, stock, image_url or None, description or None, category or None, size or None, color or None, material or None, pid),
             commit=True
         )
         return redirect("/admin?tab=products&msg=Product Updated")
@@ -1375,7 +1411,7 @@ def sync_facebook_trigger():
                     updated += 1
                 else:
                     db_query(
-                        "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)",
                         (fb_id, name, price, stock, image), commit=True
                     )
                     added += 1
