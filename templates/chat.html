@@ -1,102 +1,118 @@
 {% extends "base.html" %}
-{% block title %}Inbox{% endblock %}
+{% block title %}Live Chat{% endblock %}
 {% block content %}
-<div class="flex h-[88vh] md:h-[82vh] gap-4 flex-col md:flex-row overflow-hidden">
-    <!-- কাস্টমার লিস্ট -->
-    <div class="h-44 md:h-auto w-full md:w-80 glass rounded-[2rem] overflow-hidden flex flex-col shrink-0">
-        <div class="p-4 border-b border-slate-800 bg-slate-900/50">
-            <h3 class="font-black text-[10px] uppercase text-slate-500 tracking-widest text-center md:text-left">ইনবক্স (সক্রিয়)</h3>
-        </div>
-        <div id="user-list" class="flex-1 overflow-y-auto custom-scrollbar">
-            {% for u in users %}
-            <a href="/admin?tab=chat&chat_with={{ u.phone }}" class="block p-4 border-b border-slate-800/30 hover:bg-indigo-500/10 transition-all {% if active_chat == u.phone %}bg-indigo-500/10 border-l-4 border-l-indigo-500{% endif %}">
-                <div class="font-bold text-xs text-white">{{ u.phone }}</div>
-                <div class="text-[9px] text-slate-500 mt-0.5">Active: {{ u.last_active }}</div>
-            </a>
-            {% else %}
-            <div class="p-10 text-center text-[10px] text-slate-600 uppercase font-black">Empty Chat</div>
-            {% endfor %}
-        </div>
-    </div>
-
-    <!-- মেইন চ্যাট উইন্ডো -->
-    <div class="flex-1 glass rounded-[2rem] overflow-hidden flex flex-col relative min-h-0">
-        <div class="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center sticky top-0 z-10 px-6">
-            <div class="flex items-center gap-3">
-                <h4 class="font-black text-indigo-400 text-sm tracking-tighter">
-                    <i class="fa-solid fa-circle text-[7px] mr-1.5 text-emerald-500"></i> {{ active_chat or 'চ্যাট সিলেক্ট করুন' }}
-                </h4>
-            </div>
-            {% if active_chat %}
-            <div class="flex items-center gap-4">
-                <a href="/admin/chat/delete/{{ active_chat }}" onclick="return confirm('পুরো চ্যাট ডিলিট করবেন? এই কাস্টমারের সব মেসেজ মুছে যাবে।')" class="text-rose-400 text-[10px] uppercase font-black hover:text-white transition-colors border border-rose-500/20 px-3 py-1 rounded-full">
-                    <i class="fa-solid fa-trash-can mr-1"></i> Delete Chat
-                </a>
-            </div>
-            {% endif %}
-        </div>
-        
-        <!-- চ্যাট মেসেজ উইন্ডো (Socket-free Version) -->
-        <div id="chat-window" class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-slate-950/20 custom-scrollbar scroll-smooth">
-            {% for m in chat_history %}
-            <div class="p-4 rounded-2xl text-[13px] max-w-[85%] md:max-w-md shadow-lg leading-relaxed {% if m.direction == 'inbound' %}bg-slate-800 self-start text-slate-100 rounded-tl-none{% else %}bg-indigo-600 self-end text-white rounded-tr-none{% endif %}">
-                {{ m.content }}
-                <div class="text-[8px] mt-1 opacity-40 {% if m.direction == 'inbound' %}text-left{% else %}text-right{% endif %} font-black uppercase">
-                    {{ m.created_at or 'Just Now' }}
-                </div>
-            </div>
-            {% else %}
-            {% if active_chat %}
-            <div class="flex-1 flex items-center justify-center text-slate-600 italic text-xs">আপনার কথোপকথন এখানে শুরু করুন...</div>
-            {% else %}
-            <div class="flex-1 flex flex-col items-center justify-center text-slate-700">
-                <i class="fa-solid fa-comments text-5xl mb-4 opacity-20"></i>
-                <p class="uppercase text-[10px] font-black tracking-widest">Inbox System Ready</p>
-            </div>
-            {% endif %}
-            {% endfor %}
-        </div>
-
-        {% if active_chat %}
-        <form id="send-form" action="/admin/chat/send" method="POST" class="p-4 glass border-t border-slate-800 flex gap-3">
-            <input type="hidden" name="phone" value="{{ active_chat }}">
-            <input id="msg-input" name="message" class="flex-1 bg-slate-900 border border-white/5 px-6 py-4 rounded-2xl outline-none focus:border-indigo-500 transition text-sm text-white placeholder-slate-600" placeholder="একটি বার্তা লিখুন..." required autocomplete="off">
-            <button type="submit" class="bg-indigo-600 px-8 rounded-2xl font-black text-white hover:bg-white hover:text-indigo-600 active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
-                <i class="fa-solid fa-paper-plane"></i>
-            </button>
-        </form>
-        {% endif %}
-    </div>
-</div>
 
 <style>
-    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-    /* চ্যাট ব্যাকগ্রাউন্ড প্যাটার্ন */
-    #chat-window {
-        background-color: #0c1120;
-        background-image: url("https://www.transparenttextures.com/patterns/fake-luxury.png");
-    }
+    /* === DYNAMIC CHAT LAYOUT === */
+    .chat-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 800px; margin: 0 auto; }
+    .chat-card { background: rgba(30,41,59,0.5); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; overflow: hidden; }
+    .chat-header { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between; }
+    .chat-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #a855f7); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px; }
+    .chat-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; }
+    @media (min-width: 768px) { .chat-body { max-height: 60vh; } }
+    .msg-in { align-self: flex-start; background: rgba(30,41,59,0.9); padding: 10px 14px; border-radius: 16px 16px 16px 4px; max-width: 80%; word-break: break-word; font-size: 14px; border: 1px solid rgba(255,255,255,0.04); }
+    .msg-out { align-self: flex-end; background: linear-gradient(135deg, #6366f1, #818cf8); color: white; padding: 10px 14px; border-radius: 16px 16px 4px 16px; max-width: 80%; word-break: break-word; font-size: 14px; }
+    .msg-time { font-size: 10px; opacity: 0.5; margin-top: 4px; display: block; }
+    .chat-footer { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.05); background: rgba(15,23,42,0.8); }
+    .input-wrap { display: flex; align-items: center; gap: 8px; background: rgba(30,41,59,0.8); border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 6px 6px 6px 14px; }
+    .input-wrap input { flex: 1; background: transparent; border: none; color: #e2e8f0; font-size: 15px; outline: none; }
+    .input-wrap input::placeholder { color: #64748b; }
+    .ibtn { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: none; cursor: pointer; font-size: 14px; flex-shrink: 0; text-decoration: none; }
+    .ibtn-green { background: rgba(16,185,129,0.15); color: #34d399; }
+    .ibtn-amber { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .ibtn-indigo { background: rgba(99,102,241,0.15); color: #818cf8; }
+    .ibtn-send { background: linear-gradient(135deg, #6366f1, #818cf8); color: white; }
+    .contact-list { display: flex; flex-direction: column; gap: 8px; }
+    .contact-item { display: flex; align-items: center; justify-content: space-between; padding: 14px; background: rgba(30,41,59,0.5); border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); text-decoration: none; color: inherit; transition: all 0.2s; }
+    .contact-item:hover, .contact-item.active { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.2); }
+    .contact-phone { font-weight: bold; color: white; font-size: 14px; }
+    .contact-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .empty { text-align: center; padding: 50px 20px; color: #475569; }
 </style>
 
+<div class="chat-wrap">
+    <!-- Customer List -->
+    <div class="chat-card">
+        <div class="chat-header">
+            <h3 class="font-bold text-white"><i class="fa-solid fa-users text-indigo-400 mr-2"></i>Active Customers</h3>
+            <span class="text-xs bg-indigo-600/20 text-indigo-400 px-3 py-1 rounded-full">{{ users|length }} total</span>
+        </div>
+        <div class="chat-body contact-list">
+            {% for user in users %}
+            <a href="/admin?tab=chat&chat_with={{ user.phone }}" class="contact-item {% if active_chat == user.phone %}active{% endif %}">
+                <div>
+                    <div class="contact-phone">{{ user.phone }}</div>
+                    <div class="contact-meta">{{ user.name or 'Customer' }} &bull; {{ user.last_active }}</div>
+                </div>
+                <i class="fa-solid fa-chevron-right text-slate-600 text-xs"></i>
+            </a>
+            {% else %}
+            <div class="empty">No customers yet</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Chat Area -->
+    {% if active_chat %}
+    <div class="chat-card">
+        <div class="chat-header">
+            <div class="flex items-center gap-3">
+                <div class="chat-avatar">{{ active_chat[-4:] }}</div>
+                <div>
+                    <div class="font-bold text-white text-sm">{{ active_chat }}</div>
+                    <div class="text-[10px] text-emerald-400 flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Online
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="tel:{{ active_chat }}" class="ibtn ibtn-indigo" title="Call"><i class="fa-solid fa-phone"></i></a>
+                <a href="/admin/chat/delete/{{ active_chat }}" class="ibtn" style="background:rgba(244,63,94,0.15);color:#fb7185;" onclick="return confirm('Delete chat?')" title="Delete"><i class="fa-solid fa-trash"></i></a>
+            </div>
+        </div>
+
+        <div class="chat-body" id="msgBox">
+            {% for msg in chat_history %}
+            <div class="{% if msg.direction == 'outbound' %}msg-out{% else %}msg-in{% endif %}">
+                {{ msg.content }}
+                <span class="msg-time">{{ msg.created_at or '' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="chat-footer">
+            <form action="/admin/chat/send" method="POST" class="input-wrap" enctype="multipart/form-data">
+                <input type="hidden" name="phone" value="{{ active_chat }}">
+
+                <label class="ibtn ibtn-green cursor-pointer" title="Send Image">
+                    <i class="fa-solid fa-image"></i>
+                    <input type="file" name="image" accept="image/*" class="hidden" onchange="this.form.submit()">
+                </label>
+
+                <button type="button" class="ibtn ibtn-amber" title="Voice Note" onclick="alert('Voice recording coming soon!')">
+                    <i class="fa-solid fa-microphone"></i>
+                </button>
+
+                <a href="tel:{{ active_chat }}" class="ibtn ibtn-indigo" title="Call Customer">
+                    <i class="fa-solid fa-phone"></i>
+                </a>
+
+                <input type="text" name="message" placeholder="Type a message..." autocomplete="off" required>
+
+                <button type="submit" class="ibtn ibtn-send" title="Send Message">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
 <script>
-    // অটো নিচে স্ক্রল করার ফাংশন
-    function scrollToBottom() {
-        const chatWindow = document.getElementById('chat-window');
-        if (chatWindow) {
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-    }
-
-    // পেজ লোড এবং সব রিসোর্স লোড হওয়ার পর স্ক্রল করবে
-    window.addEventListener('load', () => {
-        setTimeout(scrollToBottom, 100);
-    });
-
-    // ফর্ম সাবমিট হবার পর স্ক্রল ধরে রাখবে
-    if(window.history.replaceState) {
-        window.history.replaceState(null, null, window.location.href);
-    }
+    (function() {
+        const box = document.getElementById('msgBox');
+        if (box) box.scrollTop = box.scrollHeight;
+    })();
 </script>
+
 {% endblock %}
