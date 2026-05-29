@@ -531,8 +531,12 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param)
-
+    all_prods = db_query("SELECT * FROM products", fetchall=True) or []
+    low = sum(1 for p in all_prods if p["stock"] < 5)
+    out = sum(1 for p in all_prods if p["stock"] == 0)
+    disc = sum(1 for p in all_prods if p.get("discount_price") and p["discount_price"] > 0)
+    val = sum(p["price"] * p["stock"] for p in all_prods)
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low, out_stock_count=out, discount_count=disc, total_value=val)
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
     res = pull_orders_from_pathao()
