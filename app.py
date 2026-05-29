@@ -39,7 +39,7 @@ application = app
 db_lock = Lock()
 
 # =====================================================================
-# ENGINE LOADERS (C++ & ASSEMBLY CORE) - NEVER REMOVED
+# ENGINE LOADERS (C++ & ASSEMBLY CORE)
 # =====================================================================
 lib = None
 asm_lib = None
@@ -47,12 +47,62 @@ try:
     if os.path.exists("engine.so"):
         lib = ctypes.CDLL(os.path.abspath("engine.so"))
         lib.process_business_logic.restype = ctypes.c_char_p
+        logger.info("C++ Engine (engine.so) Linked Successfully.")
     if os.path.exists("asm_engine.so"):
         asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
         asm_lib.asm_process_command.restype = ctypes.c_char_p
-    logger.info("High-Performance Engines Linked Successfully.")
+        asm_lib.asm_strlen.restype = ctypes.c_uint64
+        asm_lib.asm_strlen.argtypes = [ctypes.c_char_p]
+        asm_lib.asm_checksum.restype = ctypes.c_uint64
+        asm_lib.asm_checksum.argtypes = [ctypes.c_char_p]
+        logger.info("ASM Engine (asm_engine.so) Linked Successfully.")
 except Exception as e:
     logger.error(f"Engine Load Fail: {e}")
+
+# -----------------------------------------------------------------
+# C++ / ASM WRAPPER FUNCTIONS (Actually Used!)
+# -----------------------------------------------------------------
+def cpp_engine_command(cmd: str) -> str:
+    """Send command to C++ engine and return response string."""
+    if lib is None:
+        return "C++ Engine Not Loaded"
+    try:
+        result = lib.process_business_logic(cmd.encode("utf-8"))
+        return result.decode("utf-8") if result else ""
+    except Exception as e:
+        logger.error(f"C++ engine error: {e}")
+        return f"C++ Error: {e}"
+
+def asm_engine_command(cmd: str) -> str:
+    """Send command to ASM engine and return response string."""
+    if asm_lib is None:
+        return "ASM Engine Not Loaded"
+    try:
+        result = asm_lib.asm_process_command(cmd.encode("utf-8"))
+        return result.decode("utf-8") if result else ""
+    except Exception as e:
+        logger.error(f"ASM engine error: {e}")
+        return f"ASM Error: {e}"
+
+def asm_fast_strlen(text: str) -> int:
+    """Pure ASM string length calculation."""
+    if asm_lib is None:
+        return len(text)
+    try:
+        return asm_lib.asm_strlen(text.encode("utf-8"))
+    except Exception as e:
+        logger.error(f"ASM strlen error: {e}")
+        return len(text)
+
+def asm_fast_checksum(text: str) -> int:
+    """Pure ASM XOR rolling checksum."""
+    if asm_lib is None:
+        return 0
+    try:
+        return asm_lib.asm_checksum(text.encode("utf-8"))
+    except Exception as e:
+        logger.error(f"ASM checksum error: {e}")
+        return 0
 
 # =====================================================================
 # DATABASE UTILITIES
@@ -295,7 +345,7 @@ def get_chart_data():
     return {"labels": labels, "data": data}
 
 # =====================================================================
-# ADMIN PANEL ROUTES (ALL IN ONE)
+# ADMIN PANEL ROUTES
 # =====================================================================
 @app.route("/")
 def index():
@@ -448,7 +498,39 @@ def admin_logout():
     return redirect("/admin/login")
 
 # =====================================================================
-# GEMINI AI SALES INTELLIGENCE ENGINE (EMBEDDED)
+# API ROUTES (Including Engine Status)
+# =====================================================================
+@app.route("/api/engine-status")
+def api_engine_status():
+    """Health check for C++ and ASM engines."""
+    cpp_result = cpp_engine_command("status")
+    asm_result = asm_engine_command("asm_status")
+    return jsonify({
+        "cpp_engine": cpp_result,
+        "asm_engine": asm_result,
+        "cpp_available": lib is not None,
+        "asm_available": asm_lib is not None
+    })
+
+@app.route("/api/asm-checksum", methods=["POST"])
+def api_asm_checksum():
+    """Compute ASM fast checksum for given text."""
+    text = request.json.get("text", "") if request.is_json else request.form.get("text", "")
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+    checksum = asm_fast_checksum(text)
+    py_len = len(text)
+    asm_len = asm_fast_strlen(text)
+    return jsonify({
+        "text": text,
+        "asm_checksum": checksum,
+        "asm_strlen": asm_len,
+        "py_strlen": py_len,
+        "match": asm_len == py_len
+    })
+
+# =====================================================================
+# GEMINI AI SALES INTELLIGENCE ENGINE
 # =====================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
