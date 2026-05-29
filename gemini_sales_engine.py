@@ -58,32 +58,29 @@ def get_optimized_gemini_reply(user_message, phone, db_query_func):
     {history_ctx}
     """
 
-    try:
-        # API Endpoint (Using Stable V1 version for gemini-1.5-flash)
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+  try:
+        # মডেল: models/gemini-1.5-flash (সর্বশেষ স্টেবল ইউআরএল)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
         
         payload = {
             "contents": [{
                 "parts": [{"text": f"{system_instruction}\n\nCustomer Message: {user_message}"}]
-            }],
-            "generationConfig": {
-                "temperature": 0.8,
-                "maxOutputTokens": 500,
-                "topP": 0.9
-            }
+            }]
         }
         
         headers = {"Content-Type": "application/json"}
         response = requests.post(url, json=payload, headers=headers, timeout=25)
         res_data = response.json()
         
+        # যদি gemini-pro কাজ না করে তবে ব্যাকআপ হিসেবে ফ্ল্যাশ ট্রাই করবে
+        if 'error' in res_data:
+             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+             response = requests.post(url, json=payload, headers=headers, timeout=25)
+             res_data = response.json()
+
         if 'candidates' in res_data and len(res_data['candidates']) > 0:
             ai_reply = res_data['candidates'][0]['content']['parts'][0]['text']
             return ai_reply.strip()
-        
-        # Log failure reason for diagnosis
-        logger.error(f"Gemini API Error Response: {res_data}")
-        return "ধন্যবাদ! আমরা আপনার মেসেজটি পেয়েছি। একজন এজেন্ট শীঘ্রই আপনার সাথে কথা বলবে।"
 
     except Exception as e:
         logger.critical(f"Critical Error in Sales Engine: {e}")
