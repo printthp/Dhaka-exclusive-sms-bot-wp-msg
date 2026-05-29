@@ -1522,10 +1522,14 @@ def sync_facebook_trigger():
                                 price_found = True
                                 break
                             elif isinstance(price_raw, str):
-                                # Try "1000.00 BDT" or just "1000"
-                                price = int(float(price_raw.split()[0]))
-                                price_found = True
-                                break
+                                # Handle "BDT590.00", "BDT1,050.00", "1000 BDT", "1000.00"
+                                import re
+                                # Remove currency text and commas, extract number
+                                cleaned = re.sub(r'[^\d.]', '', price_raw.replace(',', ''))
+                                if cleaned:
+                                    price = int(float(cleaned))
+                                    price_found = True
+                                    break
                             elif isinstance(price_raw, (int, float)):
                                 price = int(price_raw)
                                 price_found = True
@@ -1539,7 +1543,14 @@ def sync_facebook_trigger():
                     pdata = item.get("product_data", {})
                     if pdata and "price" in pdata:
                         try:
-                            price = int(float(pdata["price"].get("amount", 0)))
+                            pdata_price = pdata["price"]
+                            if isinstance(pdata_price, dict):
+                                price = int(float(pdata_price.get("amount", 0)))
+                            elif isinstance(pdata_price, str):
+                                import re
+                                cleaned = re.sub(r'[^\d.]', '', pdata_price.replace(',', ''))
+                                if cleaned:
+                                    price = int(float(cleaned))
                         except:
                             pass
                 
@@ -1549,19 +1560,40 @@ def sync_facebook_trigger():
                 image = item.get("image_url", "")
                 stock = 10 if availability == "in stock" else 0
                 
-                existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
-                if existing:
-                    db_query(
-                        "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
-                        (name, price, stock, image, fb_id), commit=True
-                    )
-                    updated += 1
-                else:
-                    db_query(
-                        "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)",
-                        (fb_id, name, price, stock, image), commit=True
-                    )
-                    added += 1
+                # Check if products table has new columns (description etc)
+                try:
+                    existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
+                    if existing:
+                        db_query(
+                            "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
+                            (name, price, stock, image, fb_id), commit=True
+                        )
+                        updated += 1
+                    else:
+                        db_query(
+                            "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)",
+                            (fb_id, name, price, stock, image), commit=True
+                        )
+                        added += 1
+                except Exception as e:
+                    if "no column named" in str(e).lower():
+                        # Fallback: old schema without description/category columns
+                        logger.warning(f"New columns missing, using fallback insert for {fb_id}")
+                        existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
+                        if existing:
+                            db_query(
+                                "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
+                                (name, price, stock, image, fb_id), commit=True
+                            )
+                            updated += 1
+                        else:
+                            db_query(
+                                "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
+                                (fb_id, name, price, stock, image), commit=True
+                            )
+                            added += 1
+                    else:
+                        raise
             
             total_fetched += len(items)
             logger.info(f"Fetched {len(items)} products, total: {total_fetched}")
