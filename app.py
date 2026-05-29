@@ -290,8 +290,7 @@ def admin_portal():
         chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
         chat_history.reverse()
 
-    return render_template(f"{tab}.html", 
-                           settings=s, analytics=analytics, orders=orders, users=users, products=products, frauds=frauds, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
+    return render_template(f"{tab}.html",settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, chat_history=chat_history, active_chat=chat_with, msg=msg)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
