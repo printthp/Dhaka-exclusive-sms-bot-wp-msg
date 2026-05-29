@@ -1,341 +1,112 @@
 {% extends "base.html" %}
-{% block title %}Inventory Management
-<!-- Image Hover Preview -->
-<div id="img-preview" class="fixed z-[100] hidden pointer-events-none">
-    <img src="" class="max-w-xs max-h-64 rounded-2xl shadow-2xl border-2 border-white/20" alt="Preview">
-</div>
-
-<script>
-function toggleAll(source) {
-    document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = source.checked);
-}
-function showPreview(img, src) {
-    const preview = document.getElementById('img-preview');
-    preview.querySelector('img').src = src;
-    preview.classList.remove('hidden');
-    document.addEventListener('mousemove', movePreview);
-}
-function hidePreview() {
-    document.getElementById('img-preview').classList.add('hidden');
-    document.removeEventListener('mousemove', movePreview);
-}
-function movePreview(e) {
-    const preview = document.getElementById('img-preview');
-    preview.style.left = (e.clientX + 20) + 'px';
-    preview.style.top = (e.clientY - 50) + 'px';
-}
-
-// Flash sale countdown
-function updateFlashTimers() {
-    document.querySelectorAll('[data-flash-end]').forEach(el => {
-        const end = new Date(el.dataset.flashEnd);
-        const now = new Date();
-        const diff = end - now;
-        if (diff <= 0) {
-            el.querySelector('.flash-timer').textContent = 'ENDED';
-            el.classList.add('opacity-50');
-            return;
-        }
-        const h = Math.floor(diff / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        el.querySelector('.flash-timer').textContent = 
-            String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-    });
-}
-setInterval(updateFlashTimers, 1000);
-updateFlashTimers();
-</script>
-{% endblock %}
+{% block title %}Inventory{% endblock %}
 {% block content %}
 <div class="max-w-7xl mx-auto pb-24">
-    <form id="bulk-form" method="POST" action="/admin/products/bulk-action">
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-        <div>
-            <h2 class="text-4xl font-black text-white italic tracking-tighter">স্টক ও ইনভেন্টরি</h2>
-            <p class="text-slate-500 text-sm mt-2 font-medium uppercase tracking-widest">Dhaka Exclusive Product Catalog</p>
-        </div>
-        <div class="flex flex-wrap gap-3">
-            <a href="/admin/sync-facebook-trigger" class="bg-indigo-600 hover:bg-white hover:text-indigo-600 px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-indigo-600/20">FB Sync</a>
-            <a href="/admin/products/auto-describe-all" onclick="return confirm('AI দিয়ে সব description জেনারেট করব?')" class="bg-purple-600 hover:bg-purple-500 px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-purple-600/20">AI Describe</a>
-            <a href="/admin/products/export/excel" class="bg-emerald-600 hover:bg-emerald-500 px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-600/20">📊 Excel</a>
-            <a href="/admin/products/export/pdf" class="bg-rose-600 hover:bg-rose-500 px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-rose-600/20">📄 PDF</a>
-            <button type="button" onclick="document.getElementById('add-modal').classList.remove('hidden')" class="bg-slate-600 hover:bg-slate-500 px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all">+ নতুন</button>
-        </div>
+  <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div>
+      <h2 class="text-4xl font-black text-white italic tracking-tighter">Inventory</h2>
     </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="/admin/sync-facebook-trigger" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase">FB Sync</a>
+      <a href="/admin/products/export/excel" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase">Excel</a>
+      <a href="/admin/products/export/pdf" class="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase">PDF</a>
+      <button onclick="document.getElementById('add-modal').classList.remove('hidden')" class="bg-slate-600 hover:bg-slate-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase">+ New</button>
+    </div>
+  </div>
 
-    <!-- Bulk Action Bar -->
-    <div class="flex flex-wrap items-center gap-3 mb-6 p-4 glass rounded-2xl">
-        <label class="flex items-center gap-2 text-slate-400 text-xs font-bold cursor-pointer">
-            <input type="checkbox" id="select-all" onclick="toggleAll(this)" class="w-4 h-4 rounded accent-indigo-600">
-            সব সিলেক্ট
-        </label>
-        <select name="bulk_action" class="bg-[#020617] border border-slate-800 px-4 py-2 rounded-xl text-xs text-white outline-none">
-            <option value="">Bulk Action...</option>
-            <option value="delete">🗑️ Delete Selected</option>
-            <option value="stock_10">📦 Set Stock = 10</option>
-            <option value="stock_50">📦 Set Stock = 50</option>
-            <option value="discount_10">🏷️ 10% Discount</option>
-            <option value="discount_25">🏷️ 25% Discount</option>
-            <option value="clear_discount">❌ Clear Discount</option>
-        </select>
-        <button type="submit" onclick="return confirm('Apply bulk action?')" class="bg-amber-600 hover:bg-amber-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all">Apply</button>
-        <div class="flex-1"></div>
-        <form method="GET" action="/admin/products/sort" class="flex gap-2" id="sort-form">
-            <select name="sort_by" onchange="document.getElementById('sort-form').submit()" class="bg-[#020617] border border-slate-800 px-4 py-2 rounded-xl text-xs text-white outline-none">
-                <option value="id_desc">Newest First</option>
-                <option value="price_low">Price: Low → High</option>
-                <option value="price_high">Price: High → Low</option>
-                <option value="name_az">Name: A → Z</option>
-                <option value="stock_low">Stock: Low First</option>
-                <option value="stock_high">Stock: High First</option>
-            </select>
-        </form>
-    </div>
+  {% if msg %}
+  <div class="mb-6 p-4 rounded-2xl bg-emerald-500/10 text-emerald-400 text-xs font-bold text-center">{{ msg }}</div>
+  {% endif %}
+
+  <div class="mb-6">
+    <form method="GET" action="/admin/products/search" class="flex gap-3">
+      <input type="text" name="q" value="{{ search_query or '' }}" placeholder="Search products..." class="flex-1 bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl text-sm text-white">
+      <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-3 rounded-xl text-[10px] font-black">Search</button>
     </form>
+  </div>
 
-    {% if msg %}
-    <div class="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold animate-pulse text-center uppercase tracking-widest">
-        {{ msg }}
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+    <div class="glass p-5 rounded-3xl text-center">
+      <p class="text-[10px] text-slate-500 uppercase">Total</p>
+      <p class="text-2xl font-black text-white">{{ total_products }}</p>
     </div>
-    {% endif %}
-
-    <!-- Search Bar -->
-    <div class="mb-8">
-        <form method="GET" action="/admin/products/search" class="flex gap-3">
-            <input type="text" name="q" value="{{ search_query or '' }}" placeholder="প্রোডাক্ট খুঁজুন (নাম, ক্যাটাগরি, দাম)..." 
-                class="flex-1 bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-indigo-500 outline-none text-sm text-white placeholder-slate-600">
-            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-4 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-indigo-600/20">
-                <i class="fa-solid fa-magnifying-glass"></i> Search
-            </button>
-            {% if search_query %}
-            <a href="/admin?tab=inventory" class="bg-slate-700 hover:bg-slate-600 px-6 py-4 rounded-2xl text-[10px] font-black uppercase transition-all">Clear</a>
-            {% endif %}
-        </form>
+    <div class="glass p-5 rounded-3xl text-center">
+      <p class="text-[10px] text-slate-500 uppercase">Low Stock</p>
+      <p class="text-2xl font-black text-rose-400">{{ low_stock_count|default(0) }}</p>
     </div>
-
-    <!-- Stats -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <div class="glass p-5 rounded-3xl text-center">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest">মোট প্রোডাক্ট</p>
-            <p class="text-2xl font-black text-white mt-2">{{ products|length }}</p>
-        </div>
-        <div class="glass p-5 rounded-3xl text-center">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest">লো স্টক</p>
-            <p class="text-2xl font-black text-rose-400 mt-2">
-                {% set low = 0 %}{% for p in products %}{% if p.stock < 5 %}{% set low = low + 1 %}{% endif %}{% endfor %}{{ low }}
-            </p>
-        </div>
-        <div class="glass p-5 rounded-3xl text-center">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest">আউট অফ স্টক</p>
-            <p class="text-2xl font-black text-slate-400 mt-2">
-                {% set out = 0 %}{% for p in products %}{% if p.stock == 0 %}{% set out = out + 1 %}{% endif %}{% endfor %}{{ out }}
-            </p>
-        </div>
-        <div class="glass p-5 rounded-3xl text-center">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest">অফার চলছে</p>
-            <p class="text-2xl font-black text-amber-400 mt-2">
-                {% set disc = 0 %}{% for p in products %}{% if p.discount_price and p.discount_price > 0 %}{% set disc = disc + 1 %}{% endif %}{% endfor %}{{ disc }}
-            </p>
-        </div>
-        <div class="glass p-5 rounded-3xl text-center">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest">মোট মূল্য</p>
-            <p class="text-2xl font-black text-emerald-400 mt-2">
-                {% set total_val = 0 %}{% for p in products %}{% set total_val = total_val + (p.price * p.stock) %}{% endfor %}{{ total_val|default(0) }}৳
-            </p>
-        </div>
+    <div class="glass p-5 rounded-3xl text-center">
+      <p class="text-[10px] text-slate-500 uppercase">Out of Stock</p>
+      <p class="text-2xl font-black text-slate-400">{{ out_stock_count|default(0) }}</p>
     </div>
-            <p class="text-3xl font-black text-slate-400 mt-2">
-                {% set out = 0 %}{% for p in products %}{% if p.stock == 0 %}{% set out = out + 1 %}{% endif %}{% endfor %}{{ out }}
-            </p>
-        </div>
+    <div class="glass p-5 rounded-3xl text-center">
+      <p class="text-[10px] text-slate-500 uppercase">On Sale</p>
+      <p class="text-2xl font-black text-amber-400">{{ discount_count|default(0) }}</p>
     </div>
-
-    <!-- Product Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {% for p in products %}
-        <div class="glass rounded-[2.5rem] overflow-hidden group border border-slate-800 hover:border-indigo-500/50 transition-all duration-500 shadow-2xl">
-            <div class="relative overflow-hidden h-56">
-                <img src="{{ p.image_url or 'https://placehold.co/400x300/1e293b/475569?text=No+Image' }}" class="w-full h-full object-cover group-hover:scale-110 transition-all duration-700">
-                {% if p.stock < 5 %}
-                <div class="absolute top-4 right-4 bg-rose-500 text-white text-[10px] font-black px-3 py-1.5 rounded-full animate-pulse uppercase tracking-wider">Low Stock</div>
-                {% endif %}
-                {% if p.stock == 0 %}
-                <div class="absolute inset-0 bg-black/70 flex items-center justify-center">
-                    <span class="text-rose-400 font-black text-lg uppercase tracking-widest">Out of Stock</span>
-                </div>
-                {% elif p.stock < 5 %}
-                <div class="absolute top-3 left-10 z-20 bg-rose-500/90 text-white px-3 py-1 rounded-xl text-[10px] font-black uppercase animate-bounce">
-                    ⚠️ Only {{ p.stock }} left!
-                </div>
-                {% endif %}
-                <div class="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-4 py-1.5 rounded-xl text-sm">
-                    {% if p.discount_price and p.discount_price > 0 %}
-                    <span class="text-slate-400 line-through text-xs">{{ p.price }}৳</span>
-                    <span class="text-rose-400 font-black ml-1">{{ p.discount_price }}৳</span>
-                    {% else %}
-                    <span class="text-emerald-400 font-black">{{ p.price }}৳</span>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="p-6">
-                <h4 class="font-black text-white text-lg truncate" title="{{ p.name }}">{{ p.name }}</h4>
-                <p class="text-[10px] text-slate-500 uppercase mt-1 tracking-wider">ID: {{ p.fb_product_id or 'MANUAL-' + p.id|string }}</p>
-                <div class="flex items-center gap-1 mt-1">
-                    {% set rating = p.avg_rating|default(0)|int %}
-                    {% for i in range(5) %}
-                    <i class="fa-solid fa-star text-[10px] {{ 'text-amber-400' if i < rating else 'text-slate-700' }}"></i>
-                    {% endfor %}
-                    <span class="text-[10px] text-slate-500 ml-1">({{ p.review_count|default(0) }})</span>
-                </div>
-                {% if p.category %}
-                <span class="inline-block mt-2 px-3 py-1 rounded-xl text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">{{ p.category }}</span>
-                {% endif %}
-                {% if p.description %}
-                <p class="text-[10px] text-slate-400 mt-2 line-clamp-2">{{ p.description }}</p>
-                {% endif %}
-                <div class="flex justify-between items-center mt-5">
-                    <div class="text-xs font-bold text-slate-400 uppercase">স্টক: <span class="{% if p.stock < 5 %}text-rose-400{% else %}text-emerald-400{% endif %}">{{ p.stock }} পিস</span></div>
-                    <div class="flex gap-2">
-                        <a href="/admin/product/qr/{{p.id}}" target="_blank" title="QR Code" class="bg-slate-500/10 text-slate-400 p-2.5 rounded-xl border border-slate-500/20 hover:bg-slate-600 hover:text-white transition-all"><i class="fa-solid fa-qrcode"></i></a>
-                        <button onclick="document.getElementById('review-modal-{{p.id}}').classList.remove('hidden')" title="Reviews" class="bg-amber-500/10 text-amber-400 p-2.5 rounded-xl border border-amber-500/20 hover:bg-amber-600 hover:text-white transition-all"><i class="fa-solid fa-star"></i></button>
-                        {% if not p.description %}
-                        <a href="/admin/product/auto-describe/{{p.id}}" title="AI Auto Describe" class="bg-purple-500/10 text-purple-400 p-2.5 rounded-xl border border-purple-500/20 hover:bg-purple-600 hover:text-white transition-all"><i class="fa-solid fa-wand-magic-sparkles"></i></a>
-                        {% endif %}
-                        <a href="/admin/product/edit-page/{{p.id}}" class="bg-indigo-500/10 text-indigo-400 p-2.5 rounded-xl border border-indigo-500/20 hover:bg-indigo-600 hover:text-white transition-all"><i class="fa-solid fa-pen-to-square"></i></a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Review Modal -->
-        <div id="review-modal-{{p.id}}" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div class="glass p-8 rounded-[3rem] max-w-lg w-full border border-amber-500/20 shadow-2xl overflow-y-auto max-h-[90vh]">
-                <h3 class="text-white font-black text-lg uppercase tracking-widest mb-4">Reviews: {{ p.name[:30] }}</h3>
-                <div class="space-y-3 mb-6 max-h-60 overflow-y-auto">
-                    <p class="text-slate-500 text-sm text-center py-4">Reviews coming soon</p>
-                </div>
-                <form method="POST" action="/admin/product/review/{{p.id}}">
-                    <div class="space-y-3">
-                        <div class="flex gap-2">
-                            <select name="rating" class="bg-[#020617] border border-slate-800 px-4 py-2 rounded-xl text-xs text-white">
-                                <option value="5">5 Stars</option>
-                                <option value="4">4 Stars</option>
-                                <option value="3">3 Stars</option>
-                                <option value="2">2 Stars</option>
-                                <option value="1">1 Star</option>
-                            </select>
-                            <input name="customer_name" placeholder="Customer Name" class="flex-1 bg-[#020617] border border-slate-800 px-4 py-2 rounded-xl text-xs text-white">
-                        </div>
-                        <textarea name="comment" placeholder="Review comment..." rows="2" class="w-full bg-[#020617] border border-slate-800 px-4 py-2 rounded-xl text-xs text-white"></textarea>
-                        <button type="submit" class="w-full bg-amber-600 hover:bg-amber-500 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all">Add Review</button>
-                    </div>
-                </form>
-                <button onclick="document.getElementById('review-modal-{{p.id}}').classList.add('hidden')" class="w-full mt-3 bg-slate-700 hover:bg-slate-600 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all">Close</button>
-            </div>
-        </div>
-        {% endfor %}
+    <div class="glass p-5 rounded-3xl text-center">
+      <p class="text-[10px] text-slate-500 uppercase">Value</p>
+      <p class="text-2xl font-black text-emerald-400">{{ total_value|default(0) }}৳</p>
     </div>
+  </div>
 
-    {% if not products %}
-    <div class="text-center py-20">
-        <p class="text-slate-500 text-lg font-black uppercase tracking-widest">কোনো প্রোডাক্ট পাওয়া যায়নি</p>
-        <p class="text-slate-600 text-sm mt-2">নতুন প্রোডাক্ট যোগ করতে উপরের বাটনে ক্লিক করুন</p>
-    </div>
-    {% endif %}
-
-    <!-- Pagination -->
-    {% if total_pages > 1 %}
-    <div class="flex justify-center items-center gap-2 mt-10 mb-6">
-        {% if page > 1 %}
-        <a href="/admin?tab=inventory&page={{ page - 1 }}&sort={{ sort_by }}" class="bg-slate-800 hover:bg-indigo-600 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all">← Prev</a>
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+    {% for p in products %}
+    <div class="glass rounded-2xl overflow-hidden border border-slate-800 hover:border-indigo-500/40 transition-all group">
+      {% if p.discount_price and p.discount_price > 0 %}
+      <div class="absolute top-2 right-2 z-20 bg-rose-500 text-white px-2 py-1 rounded-lg text-[10px] font-black">-{{ ((p.price - p.discount_price) / p.price * 100)|int }}%</div>
+      {% endif %}
+      <div class="relative h-44 overflow-hidden">
+        {% if p.image_url %}
+        <img src="{{ p.image_url }}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt="{{ p.name }}">
+        {% else %}
+        <div class="w-full h-full bg-slate-800 flex items-center justify-center"><i class="fa-solid fa-box text-slate-600 text-3xl"></i></div>
         {% endif %}
-        <span class="text-slate-400 text-xs font-bold">Page {{ page }} of {{ total_pages }} ({{ total_products }} items)</span>
-        {% if page < total_pages %}
-        <a href="/admin?tab=inventory&page={{ page + 1 }}&sort={{ sort_by }}" class="bg-slate-800 hover:bg-indigo-600 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all">Next →</a>
-        {% endif %}
+        <div class="absolute bottom-2 left-2 bg-black/60 px-3 py-1 rounded-lg text-sm">
+          {% if p.discount_price and p.discount_price > 0 %}
+          <span class="text-slate-400 line-through text-xs">{{ p.price }}৳</span><span class="text-rose-400 font-black ml-1">{{ p.discount_price }}৳</span>
+          {% else %}
+          <span class="text-emerald-400 font-black">{{ p.price }}৳</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="p-4">
+        <h4 class="font-black text-white text-base truncate">{{ p.name }}</h4>
+        <div class="flex justify-between items-center mt-3">
+          <span class="text-xs text-slate-400">Stock: <span class="{% if p.stock < 5 %}text-rose-400{% else %}text-emerald-400{% endif %}">{{ p.stock }}</span></span>
+          <a href="/admin/product/edit-page/{{p.id}}" class="bg-indigo-600 text-white p-2 rounded-lg text-[10px]"><i class="fa-solid fa-pen"></i></a>
+        </div>
+      </div>
     </div>
-    {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if total_pages > 1 %}
+  <div class="flex justify-center items-center gap-3 mt-10">
+    {% if page > 1 %}<a href="/admin?tab=inventory&page={{ page - 1 }}" class="bg-slate-800 px-4 py-2 rounded-xl text-xs font-black">Prev</a>{% endif %}
+    <span class="text-slate-400 text-xs">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}<a href="/admin?tab=inventory&page={{ page + 1 }}" class="bg-slate-800 px-4 py-2 rounded-xl text-xs font-black">Next</a>{% endif %}
+  </div>
+  {% endif %}
 </div>
 
-<!-- Add Modal -->
-<div id="add-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="glass p-8 rounded-[3rem] max-w-xl w-full border border-emerald-500/20 shadow-2xl overflow-y-auto max-h-[90vh]">
-        <h3 class="text-white font-black text-lg uppercase tracking-widest mb-6">নতুন প্রোডাক্ট যোগ করুন</h3>
-        <form method="POST" action="/admin/product/add" enctype="multipart/form-data">
-            <div class="space-y-4">
-                <input name="name" placeholder="প্রোডাক্টের নাম" required class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                <div class="grid grid-cols-2 gap-4">
-                    <input name="price" type="number" placeholder="দাম (৳)" required class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                    <input name="stock" type="number" placeholder="স্টক" value="10" required class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                </div>
-                <input name="fb_product_id" placeholder="Facebook Product ID (Optional)" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                <input type="file" name="image" accept="image/*" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl text-sm text-slate-400">
-                <input name="image_url" placeholder="Or Image URL" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                
-                <!-- NEW: Description & Category -->
-                <div class="grid grid-cols-2 gap-4">
-                    <input name="category" placeholder="Category (e.g. Shirt, Panjabi)" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                    <input name="size" placeholder="Size (e.g. M, L, XL, Free)" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <input name="color" placeholder="Color (e.g. Black, Navy)" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                    <input name="material" placeholder="Material (e.g. Cotton, Linen)" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm">
-                </div>
-                <textarea name="description" placeholder="Product Description for AI (e.g. Premium cotton shirt with embroidery, perfect for Eid)" rows="3" class="w-full bg-[#020617] border border-slate-800 px-5 py-3 rounded-2xl focus:border-emerald-500 outline-none text-sm"></textarea>
-            </div>
-            <div class="flex gap-3 mt-6">
-                <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-500 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">যোগ করুন</button>
-                <button type="button" onclick="document.getElementById('add-modal').classList.add('hidden')" class="flex-1 bg-slate-700 hover:bg-slate-600 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Cancel</button>
-            </div>
-        </form>
-    </div>
+<div id="add-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+  <div class="glass p-8 rounded-[2rem] max-w-lg w-full max-h-[90vh] overflow-y-auto">
+    <h3 class="text-white font-black text-lg uppercase mb-6">New Product</h3>
+    <form method="POST" action="/admin/product/add" enctype="multipart/form-data">
+      <div class="space-y-3">
+        <input name="name" placeholder="Name" required class="w-full bg-[#020617] border border-slate-800 px-4 py-3 rounded-xl text-sm">
+        <div class="grid grid-cols-2 gap-3">
+          <input name="price" type="number" placeholder="Price" required class="w-full bg-[#020617] border border-slate-800 px-4 py-3 rounded-xl text-sm">
+          <input name="stock" type="number" placeholder="Stock" value="10" required class="w-full bg-[#020617] border border-slate-800 px-4 py-3 rounded-xl text-sm">
+        </div>
+        <input name="fb_product_id" placeholder="FB Product ID" class="w-full bg-[#020617] border border-slate-800 px-4 py-3 rounded-xl text-sm">
+        <input type="file" name="image" accept="image/*" class="w-full bg-[#020617] border border-slate-800 px-4 py-3 rounded-xl text-sm text-slate-400">
+        <input name="image_url" placeholder="Image URL" class="w-full bg-[#020617] border border-slate-800 px-4 py-3 rounded-xl text-sm">
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button type="submit" class="flex-1 bg-emerald-600 py-3 rounded-xl font-black text-[10px] uppercase">Add</button>
+        <button type="button" onclick="document.getElementById('add-modal').classList.add('hidden')" class="flex-1 bg-slate-700 py-3 rounded-xl font-black text-[10px] uppercase">Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
-
-<!-- Image Hover Preview -->
-<div id="img-preview" class="fixed z-[100] hidden pointer-events-none">
-    <img src="" class="max-w-xs max-h-64 rounded-2xl shadow-2xl border-2 border-white/20" alt="Preview">
-</div>
-
-<script>
-function toggleAll(source) {
-    document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = source.checked);
-}
-function showPreview(img, src) {
-    const preview = document.getElementById('img-preview');
-    preview.querySelector('img').src = src;
-    preview.classList.remove('hidden');
-    document.addEventListener('mousemove', movePreview);
-}
-function hidePreview() {
-    document.getElementById('img-preview').classList.add('hidden');
-    document.removeEventListener('mousemove', movePreview);
-}
-function movePreview(e) {
-    const preview = document.getElementById('img-preview');
-    preview.style.left = (e.clientX + 20) + 'px';
-    preview.style.top = (e.clientY - 50) + 'px';
-}
-
-// Flash sale countdown
-function updateFlashTimers() {
-    document.querySelectorAll('[data-flash-end]').forEach(el => {
-        const end = new Date(el.dataset.flashEnd);
-        const now = new Date();
-        const diff = end - now;
-        if (diff <= 0) {
-            el.querySelector('.flash-timer').textContent = 'ENDED';
-            el.classList.add('opacity-50');
-            return;
-        }
-        const h = Math.floor(diff / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        el.querySelector('.flash-timer').textContent = 
-            String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-    });
-}
-setInterval(updateFlashTimers, 1000);
-updateFlashTimers();
-</script>
 {% endblock %}
