@@ -9,6 +9,7 @@ import requests
 import random
 import pandas as pd
 from io import BytesIO
+import gemini_sales_engine
 from datetime import datetime, timedelta
 from threading import Lock
 from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
@@ -434,60 +435,42 @@ def webhook():
         if mode == "subscribe" and token == VERIFY_TOKEN:
             logger.info("Webhook verified successfully.")
             return challenge, 200
-        logger.warning(f"Webhook verification failed. mode={mode}, token={token}")
         return "Verification failed", 403
 
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
-        logger.info(f"Webhook received: {json.dumps(data, ensure_ascii=False)}")
         try:
             entry_list = data.get("entry", [])
             for entry in entry_list:
                 changes = entry.get("changes", [])
                 for change in changes:
                     value = change.get("value", {})
-                    if value.get("messaging_product") != "whatsapp":
-                        continue
+                    if value.get("messaging_product") != "whatsapp": continue
+                    
                     messages = value.get("messages", [])
                     contacts = value.get("contacts", [])
                     sender_name = contacts[0].get("profile", {}).get("name", "Customer") if contacts else "Customer"
+                    
                     for msg in messages:
                         phone = msg.get("from", "")
                         m_type = msg.get("type", "text")
-                        if m_type == "text":
-                            content = msg.get("text", {}).get("body", "")
-                        elif m_type == "image":
-                            content = "📷 [Photo Received]"
-                        elif m_type in ["voice", "audio"]:
-                            content = "🎤 [Voice Received]"
-                        else:
-                            content = f"[{m_type.upper()} Received]"
-                        if not phone or not content:
-                            continue
-                        db_query(
-                            "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', ?)",
-                            (phone, content, "whatsapp"),
-                            commit=True
-                        )
-                        db_query(
-                            "INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)",
-                            (phone, sender_name),
-                            commit=True
-                        )
-                        db_query(
-                            "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?",
-                            (phone,),
-                            commit=True
-                        )
-                        logger.info(f"Received from {phone}: {content}")
-                        reply = get_gemini_reply(content)
-                        sent = send_whatsapp_message(phone, reply)
-                        if sent:
-                            db_query(
-                                "INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)",
-                                (phone, reply, "gemini_ai"),
-                                commit=True
-                            )
+                        content = msg.get("text", {}).get("body", "") if m_type == "text" else f"[{m_type.upper()} Received]"
+                        
+                        if not phone or not content: continue
+
+                        # DB Logging
+                        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
+                        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (phone, sender_name), commit=True)
+                        db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
+
+                        # 🤖 AI Call (New Engine)
+                        # পুরনো reply = get_gemini_reply(content) এর বদলে এই নিচের লাইনটি:
+                        reply = gemini_sales_engine.get_optimized_gemini_reply(content, phone, db_query)
+                        
+                        if reply:
+                            sent = send_whatsapp_message(phone, reply)
+                            if sent:
+                                db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
         except Exception as e:
             logger.error(f"Webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
