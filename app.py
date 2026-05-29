@@ -1362,24 +1362,36 @@ def auto_describe_product(pid):
     except Exception as e:
         return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
 
+import threading
+
 @app.route("/admin/products/auto-describe-all")
 def auto_describe_all_products():
     if not session.get("logged_in"):
         return redirect("/admin/login")
     try:
-        products = db_query("SELECT id, name, price FROM products WHERE COALESCE(description, '') = '' LIMIT 20", fetchall=True) or []
-        updated = 0
-        for p in products:
-            details = _generate_product_details_with_gemini(p["name"], p["price"])
-            if details:
-                db_query(
-                    "UPDATE products SET category=?, description=?, size=?, color=?, material=? WHERE id=?",
-                    (details.get("category"), details.get("description"), details.get("size"), details.get("color"), details.get("material"), p["id"]),
-                    commit=True
-                )
-                updated += 1
-                time.sleep(0.5)  # Rate limit
-        return redirect(f"/admin?tab=inventory&msg=Auto-described {updated} products")
+        products = db_query("SELECT id, name, price FROM products WHERE COALESCE(description, '') = '' LIMIT 50", fetchall=True) or []
+        if not products:
+            return redirect("/admin?tab=inventory&msg=All products already have descriptions")
+        
+        def _process_batch():
+            updated = 0
+            for p in products:
+                try:
+                    details = _generate_product_details_with_gemini(p["name"], p["price"])
+                    if details:
+                        db_query(
+                            "UPDATE products SET category=?, description=?, size=?, color=?, material=? WHERE id=?",
+                            (details.get("category"), details.get("description"), details.get("size"), details.get("color"), details.get("material"), p["id"]),
+                            commit=True
+                        )
+                        updated += 1
+                        time.sleep(0.3)
+                except Exception as e:
+                    logger.error(f"Auto-describe error for {p['name']}: {e}")
+            logger.info(f"Background auto-describe completed: {updated}/{len(products)} products")
+        
+        threading.Thread(target=_process_batch, daemon=True).start()
+        return redirect(f"/admin?tab=inventory&msg=Auto-describing {len(products)} products in background... Refresh in 1 minute")
     except Exception as e:
         return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
 
