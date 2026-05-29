@@ -1226,3 +1226,88 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
+# =====================================================================
+# PRODUCT MANAGEMENT ROUTES
+# =====================================================================
+@app.route("/admin/product/add", methods=["POST"])
+def add_product():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    try:
+        name = request.form.get("name", "").strip()
+        price = int(request.form.get("price", 0))
+        stock = int(request.form.get("stock", 10))
+        fb_id = request.form.get("fb_product_id", "").strip()
+        image_url = request.form.get("image_url", "").strip()
+        
+        # Handle image upload
+        file = request.files.get("image")
+        if file and file.filename:
+            filename = secure_filename(f"prod_{int(time.time())}_{file.filename}")
+            file_path = os.path.join(MEDIA_FOLDER, filename)
+            file.save(file_path)
+            # Upload to WhatsApp media if possible
+            media_id = upload_media_to_whatsapp(file_path, "image")
+            if media_id:
+                image_url = f"[MEDIA:{media_id}]"
+            else:
+                image_url = file_path  # fallback local path
+        
+        db_query(
+            "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
+            (fb_id or None, name, price, stock, image_url or None),
+            commit=True
+        )
+        db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_PRODUCT', ?)",
+                 (session.get("username"), f"Added {name}"), commit=True)
+        return redirect("/admin?tab=products&msg=Product Added Successfully")
+    except Exception as e:
+        logger.error(f"Add product error: {e}")
+        return redirect(f"/admin?tab=products&msg=Error: {str(e)}")
+
+@app.route("/admin/product/update/<int:pid>", methods=["POST"])
+def update_product(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    try:
+        name = request.form.get("name", "").strip()
+        price = int(request.form.get("price", 0))
+        stock = int(request.form.get("stock", 0))
+        fb_id = request.form.get("fb_product_id", "").strip()
+        image_url = request.form.get("image_url", "").strip()
+        
+        file = request.files.get("image")
+        if file and file.filename:
+            filename = secure_filename(f"prod_{int(time.time())}_{file.filename}")
+            file_path = os.path.join(MEDIA_FOLDER, filename)
+            file.save(file_path)
+            media_id = upload_media_to_whatsapp(file_path, "image")
+            if media_id:
+                image_url = f"[MEDIA:{media_id}]"
+            else:
+                image_url = file_path
+        
+        db_query(
+            "UPDATE products SET fb_product_id=?, name=?, price=?, stock=?, image_url=? WHERE id=?",
+            (fb_id or None, name, price, stock, image_url or None, pid),
+            commit=True
+        )
+        return redirect("/admin?tab=products&msg=Product Updated")
+    except Exception as e:
+        logger.error(f"Update product error: {e}")
+        return redirect(f"/admin?tab=products&msg=Error: {str(e)}")
+
+@app.route("/admin/product/delete/<int:pid>")
+def delete_product(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM products WHERE id=?", (pid,), commit=True)
+    return redirect("/admin?tab=products&msg=Product Deleted")
+
+@app.route("/admin/sync-facebook-trigger")
+def sync_facebook_trigger():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    # Placeholder for Facebook catalog sync
+    return redirect("/admin?tab=products&msg=Facebook Sync Triggered (Implementation Required)")
