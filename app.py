@@ -1342,11 +1342,18 @@ def sync_facebook_trigger():
             for item in items:
                 fb_id = item.get("id", "")
                 name = item.get("name", "")
-                price_str = item.get("price", "0")
+                # Facebook price can be object: {"amount": "100.00", "currency": "BDT"}
+                price_raw = item.get("price", "0")
                 price = 0
                 try:
-                    price = int(float(price_str.split()[0]))
-                except:
+                    if isinstance(price_raw, dict):
+                        price = int(float(price_raw.get("amount", 0)))
+                    elif isinstance(price_raw, str):
+                        price = int(float(price_raw.split()[0]))
+                    else:
+                        price = int(float(price_raw))
+                except Exception as e:
+                    logger.warning(f"Price parse error for {fb_id}: {price_raw} — {e}")
                     price = 0
                 availability = item.get("availability", "")
                 image = item.get("image_url", "")
