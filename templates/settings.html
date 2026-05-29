@@ -176,7 +176,7 @@
                     <option value="bKash">bKash</option>
                     <option value="Nagad">Nagad</option>
                     <option value="Rocket">Rocket</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Bank">Bank Transfer</option>
                     <option value="Card">Card Payment</option>
                 </select>
                 <input name="number" placeholder="নম্বর / একাউন্ট নং" class="w-full bg-[#020617] border border-slate-800 px-6 py-4 rounded-2xl focus:border-emerald-500 outline-none transition text-sm">
@@ -214,7 +214,7 @@
                                 {% if p.type == 'bKash' %}bg-pink-500/20 text-pink-400 border border-pink-500/30
                                 {% elif p.type == 'Nagad' %}bg-orange-500/20 text-orange-400 border border-orange-500/30
                                 {% elif p.type == 'Rocket' %}bg-blue-500/20 text-blue-400 border border-blue-500/30
-                                {% elif p.type == 'Bank Transfer' %}bg-indigo-500/20 text-indigo-400 border border-indigo-500/30
+                                {% elif p.type == 'Bank' %}bg-indigo-500/20 text-indigo-400 border border-indigo-500/30
                                 {% elif p.type == 'COD' %}bg-emerald-500/20 text-emerald-400 border border-emerald-500/30
                                 {% else %}bg-slate-500/20 text-slate-400 border border-slate-500/30{% endif %}">
                                 {{ p.type }}
@@ -245,7 +245,7 @@
                                         <option value="bKash" {% if p.type=='bKash' %}selected{% endif %}>bKash</option>
                                         <option value="Nagad" {% if p.type=='Nagad' %}selected{% endif %}>Nagad</option>
                                         <option value="Rocket" {% if p.type=='Rocket' %}selected{% endif %}>Rocket</option>
-                                        <option value="Bank Transfer" {% if p.type=='Bank Transfer' %}selected{% endif %}>Bank Transfer</option>
+                                        <option value="Bank" {% if p.type=='Bank' %}selected{% endif %}>Bank Transfer</option>
                                         <option value="Card" {% if p.type=='Card' %}selected{% endif %}>Card</option>
                                     </select>
                                     <input name="number" value="{{ p.number or '' }}" class="w-full bg-[#020617] border border-slate-700 px-4 py-3 rounded-xl focus:border-indigo-500 outline-none transition text-sm">
