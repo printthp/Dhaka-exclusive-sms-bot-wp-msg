@@ -1226,8 +1226,6 @@ def webhook():
             logger.error(f"Webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
 
 # =====================================================================
 # PRODUCT MANAGEMENT ROUTES
@@ -1311,5 +1309,66 @@ def delete_product(pid):
 def sync_facebook_trigger():
     if not session.get("logged_in"):
         return redirect("/admin/login")
-    # Placeholder for Facebook catalog sync
-    return redirect("/admin?tab=products&msg=Facebook Sync Triggered (Implementation Required)")
+    try:
+        s = get_all_settings()
+        catalog_id = s.get("fb_catalogue_id", "").strip()
+        token = s.get("fb_access_token", "").strip()
+        if not catalog_id or not token:
+            return redirect("/admin?tab=inventory&msg=Facebook Catalog ID or Token Missing")
+        
+        # Fetch products from Facebook Catalog
+        url = f"https://graph.facebook.com/v18.0/{catalog_id}/products"
+        params = {
+            "access_token": token,
+            "fields": "id,name,price,availability,image_url",
+            "limit": 100
+        }
+        r = requests.get(url, params=params, timeout=30)
+        res = r.json()
+        
+        if "error" in res:
+            err_msg = res.get("error", {}).get("message", "Unknown error")
+            return redirect(f"/admin?tab=inventory&msg=Facebook Error: {err_msg}")
+        
+        items = res.get("data", [])
+        added = 0
+        updated = 0
+        for item in items:
+            fb_id = item.get("id", "")
+            name = item.get("name", "")
+            price_str = item.get("price", "0")
+            # Price comes as "1000 BDT" — parse number
+            price = 0
+            try:
+                price = int(float(price_str.split()[0]))
+            except:
+                price = 0
+            availability = item.get("availability", "")
+            image = item.get("image_url", "")
+            stock = 10 if availability == "in stock" else 0
+            
+            # Check if product exists
+            existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
+            if existing:
+                db_query(
+                    "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
+                    (name, price, stock, image, fb_id), commit=True
+                )
+                updated += 1
+            else:
+                db_query(
+                    "INSERT INTO products (fb_product_id, name, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
+                    (fb_id, name, price, stock, image), commit=True
+                )
+                added += 1
+        
+        msg = f"Facebook Sync: {added} added, {updated} updated"
+        logger.info(msg)
+        return redirect(f"/admin?tab=inventory&msg={msg}")
+    except Exception as e:
+        logger.error(f"Facebook sync error: {e}")
+        return redirect(f"/admin?tab=inventory&msg=Sync Error: {str(e)}")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
