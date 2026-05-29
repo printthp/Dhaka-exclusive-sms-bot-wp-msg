@@ -282,6 +282,19 @@ updateFlashTimers();
         <p class="text-slate-600 text-sm mt-2">নতুন প্রোডাক্ট যোগ করতে উপরের বাটনে ক্লিক করুন</p>
     </div>
     {% endif %}
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div class="flex justify-center items-center gap-2 mt-10 mb-6">
+        {% if page > 1 %}
+        <a href="/admin?tab=inventory&page={{ page - 1 }}&sort={{ sort_by }}" class="bg-slate-800 hover:bg-indigo-600 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all">← Prev</a>
+        {% endif %}
+        <span class="text-slate-400 text-xs font-bold">Page {{ page }} of {{ total_pages }} ({{ total_products }} items)</span>
+        {% if page < total_pages %}
+        <a href="/admin?tab=inventory&page={{ page + 1 }}&sort={{ sort_by }}" class="bg-slate-800 hover:bg-indigo-600 px-4 py-2 rounded-xl text-xs font-black uppercase transition-all">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 
 <!-- Add Modal -->
