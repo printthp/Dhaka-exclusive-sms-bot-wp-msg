@@ -1252,6 +1252,101 @@ def webhook():
 
 
 # =====================================================================
+# AI AUTO-DESCRIBE PRODUCT
+# =====================================================================
+def _generate_product_details_with_gemini(name, price):
+    """Use Gemini to auto-generate description, category, size, color, material from product name"""
+    if not GEMINI_API_KEY:
+        return None
+    try:
+        prompt = f"""আপনি Dhaka Exclusive-এর প্রোডাক্ট ক্যাটালগ ম্যানেজার। নিচের প্রোডাক্টের নাম ও দাম দেখে category, description, size, color, material জেনারেট করুন।
+
+প্রোডাক্ট নাম: {name}
+দাম: {price}৳
+
+ফরম্যাট (শুধু নিচের ফরম্যাটে উত্তর দিন):
+Category: [shirt/panjabi/t-shirt/pant/etc]
+Description: [২ লাইনের আকর্ষণীয় বর্ণনা বাংলায়]
+Size: [M, L, XL, Free]
+Color: [Black, Navy, White, etc]
+Material: [Cotton, Linen, Polyester, etc]
+"""
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300, "topP": 0.95}
+        }
+        headers = {"Content-Type": "application/json"}
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        res = resp.json()
+        
+        candidates = res.get("candidates", [])
+        if candidates:
+            text_resp = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            result = {"category": "", "description": "", "size": "", "color": "", "material": ""}
+            for line in text_resp.strip().split("\n"):
+                if line.startswith("Category:"):
+                    result["category"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Description:"):
+                    result["description"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Size:"):
+                    result["size"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Color:"):
+                    result["color"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Material:"):
+                    result["material"] = line.split(":", 1)[1].strip()
+            logger.info(f"Auto-describe for '{name}': {result}")
+            return result
+    except Exception as e:
+        logger.error(f"Auto-describe error: {e}")
+    return None
+
+@app.route("/admin/product/auto-describe/<int:pid>")
+def auto_describe_product(pid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    try:
+        p = db_query("SELECT name, price FROM products WHERE id=?", (pid,), fetchone=True)
+        if not p:
+            return redirect("/admin?tab=inventory&msg=Product not found")
+        
+        details = _generate_product_details_with_gemini(p["name"], p["price"])
+        if details:
+            db_query(
+                "UPDATE products SET category=?, description=?, size=?, color==? WHERE id=?",
+                (details.get("category"), details.get("description"), details.get("size"), details.get("color"), pid),
+                commit=True
+            )
+            msg = f"Auto-described: {p['name'][:30]}..."
+        else:
+            msg = "Auto-describe failed — check Gemini key"
+        return redirect(f"/admin?tab=inventory&msg={msg}")
+    except Exception as e:
+        return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
+
+@app.route("/admin/products/auto-describe-all")
+def auto_describe_all_products():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    try:
+        products = db_query("SELECT id, name, price FROM products WHERE description IS NULL OR description = '' LIMIT 20", fetchall=True) or []
+        updated = 0
+        for p in products:
+            details = _generate_product_details_with_gemini(p["name"], p["price"])
+            if details:
+                db_query(
+                    "UPDATE products SET category=?, description=?, size=?, color=?, material=? WHERE id=?",
+                    (details.get("category"), details.get("description"), details.get("size"), details.get("color"), details.get("material"), p["id"]),
+                    commit=True
+                )
+                updated += 1
+                time.sleep(0.5)  # Rate limit
+        return redirect(f"/admin?tab=inventory&msg=Auto-described {updated} products")
+    except Exception as e:
+        return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
+
+
+# =====================================================================
 # PRODUCT MANAGEMENT ROUTES
 # =====================================================================
 @app.route("/admin/product/add", methods=["POST"])
@@ -1385,19 +1480,42 @@ def sync_facebook_trigger():
             for item in items:
                 fb_id = item.get("id", "")
                 name = item.get("name", "")
-                # Facebook price can be object: {"amount": "100.00", "currency": "BDT"}
-                price_raw = item.get("price", "0")
+                
+                # Try multiple price fields from Facebook Catalog
                 price = 0
-                try:
-                    if isinstance(price_raw, dict):
-                        price = int(float(price_raw.get("amount", 0)))
-                    elif isinstance(price_raw, str):
-                        price = int(float(price_raw.split()[0]))
-                    else:
-                        price = int(float(price_raw))
-                except Exception as e:
-                    logger.warning(f"Price parse error for {fb_id}: {price_raw} — {e}")
-                    price = 0
+                price_found = False
+                for price_key in ["price", "sale_price", "price_range", "unit_price"]:
+                    price_raw = item.get(price_key)
+                    if price_raw:
+                        try:
+                            if isinstance(price_raw, dict):
+                                price = int(float(price_raw.get("amount", 0)))
+                                price_found = True
+                                break
+                            elif isinstance(price_raw, str):
+                                # Try "1000.00 BDT" or just "1000"
+                                price = int(float(price_raw.split()[0]))
+                                price_found = True
+                                break
+                            elif isinstance(price_raw, (int, float)):
+                                price = int(price_raw)
+                                price_found = True
+                                break
+                        except Exception as e:
+                            logger.debug(f"Price key '{price_key}' failed for {fb_id}: {e}")
+                            continue
+                
+                if not price_found:
+                    # Try nested in product_data
+                    pdata = item.get("product_data", {})
+                    if pdata and "price" in pdata:
+                        try:
+                            price = int(float(pdata["price"].get("amount", 0)))
+                        except:
+                            pass
+                
+                if price == 0:
+                    logger.warning(f"Could not parse price for {fb_id}, name='{name}', raw_price_data={item.get('price')}")
                 availability = item.get("availability", "")
                 image = item.get("image_url", "")
                 stock = 10 if availability == "in stock" else 0
