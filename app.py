@@ -153,7 +153,17 @@ def init_db():
             category TEXT,
             size TEXT,
             color TEXT,
-            material TEXT
+            material TEXT,
+            discount_price INTEGER,
+            flash_sale_end TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS product_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            rating INTEGER DEFAULT 5,
+            comment TEXT,
+            customer_name TEXT DEFAULT 'Anonymous',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
@@ -170,6 +180,17 @@ def init_db():
             )
         """)
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
+        # Migrate products table - add new columns
+        for col_name, col_type in [
+            ("discount_price", "INTEGER"),
+            ("flash_sale_end", "TEXT"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE products ADD COLUMN {col_name} {col_type}")
+                logger.info(f"Added column '{col_name}' to products table")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e).lower():
+                    logger.error(f"Migration error: {e}")
         try:
             c.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'Customer'")
         except sqlite3.OperationalError as e:
@@ -479,7 +500,27 @@ def admin_portal():
         "stock_high": "stock DESC",
     }
     products_order = sort_map.get(sort_param, "id DESC")
-    products = db_query(f"SELECT * FROM products ORDER BY {products_order}", fetchall=True) or []
+    # Pagination
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+    
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_pages = (total_products + per_page - 1) // per_page
+    
+    products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
+    
+    # Attach reviews to products
+    for p in products:
+        reviews = db_query("SELECT * FROM product_reviews WHERE product_id=? ORDER BY id DESC", (p["id"],), fetchall=True) or []
+        p["reviews"] = reviews
+        if reviews:
+            avg = sum(r["rating"] for r in reviews) / len(reviews)
+            p["avg_rating"] = round(avg, 1)
+            p["review_count"] = len(reviews)
+        else:
+            p["avg_rating"] = 0
+            p["review_count"] = 0
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
     payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
 
@@ -490,7 +531,7 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg)
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
@@ -1718,7 +1759,27 @@ def export_excel():
         "stock_high": "stock DESC",
     }
     products_order = sort_map.get(sort_param, "id DESC")
-    products = db_query(f"SELECT * FROM products ORDER BY {products_order}", fetchall=True) or []
+    # Pagination
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+    
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_pages = (total_products + per_page - 1) // per_page
+    
+    products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
+    
+    # Attach reviews to products
+    for p in products:
+        reviews = db_query("SELECT * FROM product_reviews WHERE product_id=? ORDER BY id DESC", (p["id"],), fetchall=True) or []
+        p["reviews"] = reviews
+        if reviews:
+            avg = sum(r["rating"] for r in reviews) / len(reviews)
+            p["avg_rating"] = round(avg, 1)
+            p["review_count"] = len(reviews)
+        else:
+            p["avg_rating"] = 0
+            p["review_count"] = 0
     
     from io import BytesIO
     import openpyxl
@@ -1758,7 +1819,27 @@ def export_pdf():
         "stock_high": "stock DESC",
     }
     products_order = sort_map.get(sort_param, "id DESC")
-    products = db_query(f"SELECT * FROM products ORDER BY {products_order}", fetchall=True) or []
+    # Pagination
+    page = int(request.args.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+    
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_pages = (total_products + per_page - 1) // per_page
+    
+    products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
+    
+    # Attach reviews to products
+    for p in products:
+        reviews = db_query("SELECT * FROM product_reviews WHERE product_id=? ORDER BY id DESC", (p["id"],), fetchall=True) or []
+        p["reviews"] = reviews
+        if reviews:
+            avg = sum(r["rating"] for r in reviews) / len(reviews)
+            p["avg_rating"] = round(avg, 1)
+            p["review_count"] = len(reviews)
+        else:
+            p["avg_rating"] = 0
+            p["review_count"] = 0
     
     from io import BytesIO
     from reportlab.lib.pagesizes import A4
