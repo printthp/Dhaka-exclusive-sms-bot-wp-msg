@@ -12,76 +12,71 @@ GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 def get_optimized_gemini_reply(user_message, phone, db_query_func):
     """
     Sales Intelligence Engine for Dhaka Exclusive.
-    Handles responses even if the product database is empty.
     """
-    
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_KEY missing in Environment Variables")
         return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করছি।"
 
-    # 1. Fetch Customer Context (Order History)
-    history_ctx = "New Customer (No previous orders logged)"
+    # 1. Fetch Customer Context
+    history_ctx = "New Customer"
     try:
-        # Checking for the last 2 orders to give context to AI
-        history = db_query_func("SELECT id, total, status, created_at FROM orders WHERE phone=? ORDER BY id DESC LIMIT 2", (phone,), fetchall=True) or []
+        history = db_query_func("SELECT id, total, status FROM orders WHERE phone=? ORDER BY id DESC LIMIT 2", (phone,), fetchall=True) or []
         if history:
-            history_ctx = f"Customer's recent order history: {json.dumps(history)}"
+            history_ctx = f"Customer's recent history: {json.dumps(history)}"
     except Exception as e:
         logger.error(f"Error fetching customer history: {e}")
 
-    # 2. Fetch Product List Context
-    product_list = "Currently, our digital catalog is being updated. Ask the customer what type of products they are looking for."
+    # 2. Fetch Product Context
+    product_list = "Catalog is updating. Ask customer what they need."
     try:
-        # Dynamic product fetch
-        products = db_query_func("SELECT name, price FROM products LIMIT 15", fetchall=True) or []
+        products = db_query_func("SELECT name, price FROM products LIMIT 10", fetchall=True) or []
         if products:
             product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products])
     except Exception as e:
         logger.error(f"Error fetching products: {e}")
 
-    # 3. System Persona & Instruction
+    # 3. System Instruction
     system_instruction = f"""
-    তুমি 'Dhaka Exclusive'-এর প্রিমিয়াম সেলস বিশেষজ্ঞ। তোমার কাজ হলো অত্যন্ত বিনয়ের সাথে কাস্টমারের প্রশ্নের উত্তর দেওয়া এবং অর্ডার কনফার্ম করা।
+    তুমি 'Dhaka Exclusive'-এর সেলস এক্সপার্ট। 
+    - ভাষা: বাংলা (ভাই/আপু সম্বোধন)।
+    - ডেলিভারি: ঢাকা ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা। 
+    - পেমেন্ট: ক্যাশ অন ডেলিভারি।
+    - লক্ষ্য: কাস্টমারকে অর্ডার কনফার্ম করতে উৎসাহিত করো।
     
-    নির্দেশনা:
-    - সম্বোধন: গ্রাহককে 'ভাই' বা 'আপু' বলে ডাকবে।
-    - ভাষা: শুদ্ধ এবং মার্জিত বাংলা ব্যবহার করবে।
-    - অর্ডার প্রসেস: কাস্টমার কিছু কিনতে চাইলে তার নাম, ফোন নম্বর এবং পূর্ণ ঠিকানা চাইবে।
-    - ডেলিভারি তথ্য: ঢাকা সিটি ২৪ ঘণ্টা, ঢাকার বাইরে ৪৮-৭২ ঘণ্টা। ক্যাশ অন ডেলিভারি (COD) অ্যাভেইলেবল।
-    - কাস্টমার এক্সপেরিয়েন্স: প্রতিটি মেসেজের শেষে একটি প্রশ্ন করবে (যেমন: "ভাই, আর কোনো সাহায্য করতে পারি?" বা "অর্ডারটি কি কনফার্ম করবো?")।
-    
-    বিজনেসের বর্তমান তথ্য:
-    উপলব্ধ প্রোডাক্ট তালিকা:
-    {product_list}
-    
-    গ্রাহকের গত অর্ডারের তথ্য:
-    {history_ctx}
+    ডাটা:
+    প্রোডাক্টস: {product_list}
+    কাস্টমার ডাটা: {history_ctx}
     """
 
-  try:
-        # মডেল: models/gemini-1.5-flash (সর্বশেষ স্টেবল ইউআরএল)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": f"{system_instruction}\n\nCustomer Message: {user_message}"}]
-            }]
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(url, json=payload, headers=headers, timeout=25)
+    # 4. API Call with Backup Model Logic
+    # এখানে v1/gemini-pro ব্যবহার করছি যা গুগল সিগনেচারের জন্য সবচেয়ে স্টেবল
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    
+    payload = {
+        "contents": [{
+            "parts": [{"text": f"{system_instruction}\n\nCustomer: {user_message}"}]
+        }]
+    }
+    
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=20)
         res_data = response.json()
-        
-        # যদি gemini-pro কাজ না করে তবে ব্যাকআপ হিসেবে ফ্ল্যাশ ট্রাই করবে
+
+        # যদি gemini-pro কাজ না করে তবে gemini-1.5-flash ট্রাই করবে
         if 'error' in res_data:
-             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-             response = requests.post(url, json=payload, headers=headers, timeout=25)
-             res_data = response.json()
+            logger.info("Retrying with gemini-1.5-flash...")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            response = requests.post(url, json=payload, headers=headers, timeout=20)
+            res_data = response.json()
 
         if 'candidates' in res_data and len(res_data['candidates']) > 0:
-            ai_reply = res_data['candidates'][0]['content']['parts'][0]['text']
-            return ai_reply.strip()
+            return res_data['candidates'][0]['content']['parts'][0]['text'].strip()
+        
+        logger.error(f"Gemini API Error: {res_data}")
+        return "ধন্যবাদ! আমরা আপনার মেসেজটি পেয়েছি এবং শীঘ্রই রিপ্লাই দিচ্ছি।"
 
     except Exception as e:
-        logger.critical(f"Critical Error in Sales Engine: {e}")
-        return "দুঃখিত ভাই/আপু, আমাদের সার্ভারে কিছুটা টেকনিক্যাল সমস্যা হচ্ছে। আপনার মেসেজটি সেভ করা হয়েছে, আমরা দ্রুত রিপ্লাই দিচ্ছি।"
+        logger.error(f"Critical Engine Error: {e}")
+        return "আমাদের সার্ভারে কাজ চলছে, আমরা দ্রুত আপনার সাথে যোগাযোগ করছি।"
