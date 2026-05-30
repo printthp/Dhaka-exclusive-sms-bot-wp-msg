@@ -923,7 +923,7 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
         )
         
         # Vision requires specific model - use flash for speed
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "role": "user",
@@ -1068,7 +1068,7 @@ def _extract_order_from_text(text, phone):
   "is_order": false
 }}"""
             
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
             payload = {
                 "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500, "topP": 0.9}
@@ -1174,7 +1174,7 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
         )
         
         # Use gemini-1.5-flash which reliably supports audio
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "role": "user",
@@ -1496,6 +1496,57 @@ def webhook():
         data = request.get_json(force=True, silent=True) or {}
         logger.info(f"Webhook received: {json.dumps(data, ensure_ascii=False)[:500]}")
         try:
+            # Detect if this is a Messenger message (object: "page")
+            if data.get("object") == "page":
+                for entry in data.get("entry", []):
+                    for event in entry.get("messaging", []):
+                        sender_id = event.get("sender", {}).get("id", "")
+                        if not sender_id:
+                            continue
+                        sender_name = _get_messenger_name(sender_id)
+                        message = event.get("message", {})
+                        if not message:
+                            continue
+
+                        msg_text = message.get("text", "")
+                        attachments = message.get("attachments", [])
+                        content = msg_text or ""
+                        image_path = None
+                        voice_path = None
+
+                        if attachments:
+                            att = attachments[0]
+                            att_type = att.get("type", "")
+                            if att_type == "image":
+                                image_url = att.get("payload", {}).get("url", "")
+                                if image_url:
+                                    image_path = _download_messenger_media(image_url)
+                                content = "[Photo Received]"
+                            elif att_type in ["audio", "voice"]:
+                                audio_url = att.get("payload", {}).get("url", "")
+                                if audio_url:
+                                    voice_path = _download_messenger_media(audio_url)
+                                content = "🎤 [Voice Received]"
+                            else:
+                                content = f"[{att_type.upper()} Received]"
+
+                        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'messenger')", (sender_id, content), commit=True)
+                        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
+                        db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (sender_id,), commit=True)
+
+                        recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (sender_id,), fetchall=True) or []
+                        recent_msgs.reverse()
+
+                        reply = get_optimized_gemini_reply(content, customer_phone=sender_id, chat_history=recent_msgs, image_path=image_path, voice_path=voice_path)
+                        if reply:
+                            sent = send_messenger_message(sender_id, reply)
+                            if sent:
+                                db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (sender_id, reply), commit=True)
+                            if "ছবি" in content or "photo" in content.lower():
+                                _try_send_product_image(sender_id, content, recent_msgs)
+                return "EVENT_RECEIVED", 200
+
+            # WhatsApp message handling
             entry_list = data.get("entry", [])
             for entry in entry_list:
                 changes = entry.get("changes", [])
