@@ -521,6 +521,14 @@ def admin_portal():
         else:
             p["avg_rating"] = 0
             p["review_count"] = 0
+
+    # Inventory stats
+    all_prods = db_query("SELECT * FROM products", fetchall=True) or []
+    low_stock_count = sum(1 for p in all_prods if p["stock"] < 5)
+    out_stock_count = sum(1 for p in all_prods if p["stock"] == 0)
+    discount_count = sum(1 for p in all_prods if p.get("discount_price") and p["discount_price"] > 0)
+    total_value = sum(p["price"] * p["stock"] for p in all_prods)
+
     agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
     payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
 
@@ -531,7 +539,7 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param)
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
@@ -889,8 +897,8 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
     if not GEMINI_API_KEY:
         return "📷 ছবি পেয়েছি। দুঃখিত, AI ভিশন সার্ভিস বর্তমানে অনুপলব্ধ।"
     
-    products = db_query("SELECT name, price FROM products LIMIT 20", fetchall=True) or []
-    product_list = ", ".join([p['name'] for p in products]) if products else "No products in catalog"
+    products = db_query("SELECT name, price, image_url FROM products LIMIT 50", fetchall=True) or []
+    product_list = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products]) if products else "No products in catalog"
     
     try:
         with open(image_path, "rb") as f:
@@ -900,25 +908,18 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
         ext = os.path.splitext(image_path)[1].lower()
         mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png" if ext == ".png" else "image/webp"
         
-        # Find product by matching customer image to catalog
-        product_match = None
-        try:
-            from PIL import Image
-            # This is a placeholder - in production you'd use vision embeddings
-            # For now, just analyze the image with Gemini and respond
-            pass
-        except:
-            pass
-        
+        # Use gemini-1.5-flash which supports vision
         prompt = (
-            f"You are Dhaka Exclusive sales assistant. Analyze this image. "
-            f"If it contains a product, identify what it is. "
-            f"If the customer is asking about a product from our catalog: {product_list}, "
-            f"provide details. If they sent a product photo, acknowledge it and help them order. "
-            f"Respond in Bengali/Bangla. Be concise and friendly."
+            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। এই ছবিটি দেখো।\n"
+            "যদি এটি কোনো প্রোডাক্টের ছবি হয়, তাহলে চিনতে চেষ্টা করো।\n"
+            "কাস্টমার যদি কোনো প্রোডাক্টের ছবি পাঠিয়ে থাকে, তাহলে সেটি কিনতে সাহায্য করো।\n"
+            "যদি স্ক্রিনশট/ছবিতে কোনো প্রোডাক্ট আমাদের ক্যাটালগের মতো দেখায়, তাহলে দাম বলো।\n"
+            f"আমাদের ক্যাটালগ:\n{product_list}\n\n"
+            "সংক্ষিপ্ত ও বন্ধুসুলভ ভাবে বাংলায় উত্তর দাও।"
         )
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        # Vision requires specific model - use flash for speed
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "role": "user",
@@ -938,8 +939,13 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
             for part in parts:
                 if "text" in part:
                     return part["text"].strip()
-        logger.error(f"Image analysis failed: {res}")
-        return "📷 ছবি পেয়েছি। দুঃখিত, এটি বিশ্লেষণ করতে সমস্যা হচ্ছে। অনুগ্রহ করে প্রোডাক্টের নাম লিখে পাঠান।"
+        
+        # Log the actual error for debugging
+        if "error" in res:
+            logger.error(f"Image analysis API error: {res.get('error')}")
+        else:
+            logger.error(f"Image analysis no candidates: {res}")
+        return "📷 ছবি পেয়েছি। দুঃখিত, ছবিটি এখন বিশ্লেষণ করা সম্ভব হচ্ছে না। অনুগ্রহ করে প্রোডাক্টের নাম লিখে পাঠান।"
     except Exception as e:
         logger.error(f"Image analysis exception: {e}")
         return "📷 ছবি পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
@@ -967,13 +973,74 @@ def _detect_intent(msg):
     return "general"
 
 def _extract_order_from_text(text, phone):
-    if not GEMINI_API_KEY:
-        return None
+    """Extract order info from customer message. Uses AI first, falls back to regex."""
+    text_lower = text.lower().strip()
     
-    products = db_query("SELECT name, price FROM products LIMIT 20", fetchall=True) or []
-    product_lines = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products])
+    # Quick reject - if no order keywords, skip
+    order_keywords = ["অর্ডার", "order", "কিনব", "buy", "নিব", "চাই", "book", "confirm", "কনফার্ম"]
+    has_order_intent = any(kw in text_lower for kw in order_keywords)
     
-    extract_prompt = f"""তুমি একটি অর্ডার এক্সট্রাকশন bot। কাস্টমারের মেসেজ থেকে অর্ডারের তথ্য বের করো।
+    # Check if message contains product + location info
+    products = db_query("SELECT name, price FROM products LIMIT 50", fetchall=True) or []
+    matched_product = None
+    matched_price = 0
+    for p in products:
+        pname_lower = p["name"].lower()
+        # Match if any significant word (3+ chars) from product name is in text
+        for word in pname_lower.split():
+            if len(word) >= 3 and word in text_lower:
+                matched_product = p["name"]
+                matched_price = p["price"]
+                break
+        if matched_product:
+            break
+    
+    # FALLBACK PARSER (no AI needed) - detect name, address, quantity
+    def _fallback_parse():
+        result = {"is_order": True, "name": "", "address": "", "product": matched_product or "", "quantity": 1, "total": 0, "phone": phone}
+        
+        # Extract quantity (e.g., "2 টি", "x3", "3pcs")
+        qty_match = re.search(r'(\d+)\s*(টি|pcs|piece|x|X)', text)
+        if qty_match:
+            result["quantity"] = int(qty_match.group(1))
+        
+        # Extract name - look for "আমার নাম" or first sentence
+        name_match = re.search(r'(আমার নাম\s+([\w\s]+))|(name[\s:]+([\w\s]+))', text, re.IGNORECASE)
+        if name_match:
+            result["name"] = (name_match.group(2) or name_match.group(4) or "").strip()[:50]
+        else:
+            # Use first 2-3 words as fallback name
+            words = [w for w in text.split() if len(w) > 2 and not any(k in w.lower() for k in ["অর্ডার", "order", "কিনব", "buy"])]
+            if words:
+                result["name"] = words[0][:20]
+        
+        # Extract address - look for locations/areas in Dhaka
+        dhaka_areas = ["মিরপুর", "গুলশান", "বনানী", "ধানমন্ডি", "উত্তরা", "মোহাম্মদপুর", "শ্যামলী", "আজিমপুর", "খিলগাঁও", "রামপুরা", "হাতিরঝিল", "বসুন্ধরা", "বারিধারা", "তেজগাঁও", "মগবাজার", "মালিবাগ", "খিলক্ষেত", "নিকেতন", "কাকরাইল", "পল্টন", "সেগুনবাগিচা", "শাহবাগ", "এলিফ্যান্ট রোড", "নিউমার্কেট", "ফার্মগেট", "কারওয়ান বাজার", "মহাখালী", "গুলিস্তান", "সদরঘাট", "লালবাগ", "কামরাঙ্গীরচর", "শেরেবাংলা নগর", "আদাবর", "কল্যাণপুর", "শ্যামপুর", "জুরাইন", "কদমতলী", "ডেমরা", "সাভার", "আশুলিয়া", "কেরানীগঞ্জ"]
+        for area in dhaka_areas:
+            if area.lower() in text_lower:
+                result["address"] = area
+                break
+        
+        # If no area matched but has numbers/addresses
+        if not result["address"]:
+            addr_match = re.search(r'(ঠিকানা[\s:]+([\w\s,\.]+))|(address[\s:]+([\w\s,\.]+))', text, re.IGNORECASE)
+            if addr_match:
+                result["address"] = (addr_match.group(2) or addr_match.group(4) or "").strip()[:100]
+            else:
+                # Last resort - anything after product name
+                result["address"] = text.strip()[:100]
+        
+        # Calculate total
+        if matched_price and result["quantity"]:
+            result["total"] = matched_price * result["quantity"]
+        
+        return result if matched_product else {"is_order": False}
+    
+    # Try AI extraction first if we have API key and order intent detected
+    if GEMINI_API_KEY and has_order_intent and matched_product:
+        try:
+            product_lines = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products[:20]])
+            extract_prompt = f"""তুমি একটি অর্ডার এক্সট্রাকশন bot। কাস্টমারের মেসেজ থেকে অর্ডারের তথ্য বের করো।
 
 প্রোডাক্ট লিস্ট:
 {product_lines}
@@ -981,7 +1048,7 @@ def _extract_order_from_text(text, phone):
 কাস্টমারের মেসেজ: "{text}"
 ফোন: {phone}
 
-যদি কাস্টমার অর্ডার দিতে চায়, তাহলে শুধু নিচের ফরম্যাটে JSON রিটার্ন করো (অন্য কিছু লিখো না):
+শুধু নিচের ফরম্যাটে JSON রিটার্ন করো (অন্য কিছু লিখো না):
 {{
   "is_order": true,
   "name": "কাস্টমারের নাম",
@@ -996,48 +1063,72 @@ def _extract_order_from_text(text, phone):
 {{
   "is_order": false
 }}"""
-
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500, "topP": 0.9}
-        }
-        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
-        res = r.json()
-        
-        if res.get("candidates"):
-            txt = res["candidates"][0]["content"]["parts"][0]["text"]
-            json_match = re.search(r'\{.*\}', txt, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                if data.get("is_order"):
-                    return data
-        return None
-    except Exception as e:
-        logger.error(f"Order extraction error: {e}")
-        return None
+            
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            payload = {
+                "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
+                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500, "topP": 0.9}
+            }
+            r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
+            res = r.json()
+            
+            if res.get("candidates"):
+                txt = res["candidates"][0]["content"]["parts"][0]["text"]
+                json_match = re.search(r'\{.*\}', txt, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+                    if data.get("is_order"):
+                        # Fill in missing values
+                        if not data.get("product") and matched_product:
+                            data["product"] = matched_product
+                        if not data.get("total") and matched_price:
+                            data["total"] = matched_price * data.get("quantity", 1)
+                        if not data.get("phone"):
+                            data["phone"] = phone
+                        return data
+        except Exception as e:
+            logger.warning(f"AI order extraction failed, using fallback: {e}")
+    
+    # Use fallback parser
+    return _fallback_parse() if matched_product else {"is_order": False}
 
 def _save_order(order_data):
     try:
-        name = order_data.get("name", "Unknown")
-        address = order_data.get("address", "Not provided")
+        name = order_data.get("name", "Unknown") or "Unknown"
+        address = order_data.get("address", "Not provided") or "Not provided"
         product = order_data.get("product", "")
-        quantity = order_data.get("quantity", 1)
-        total = order_data.get("total", 0)
+        quantity = int(order_data.get("quantity", 1) or 1)
+        total = int(order_data.get("total", 0) or 0)
         phone = order_data.get("phone", "")
         
+        # Calculate total from product price if missing
         if total == 0 and product:
             prod = db_query("SELECT price FROM products WHERE name LIKE ? LIMIT 1", (f"%{product}%",), fetchone=True)
             if prod:
                 total = prod["price"] * quantity
         
+        # Build a clean order note for address field
+        order_note = f"{product} x{quantity}"
+        if address and address != "Not provided":
+            order_note += f" | {address}"
+        
+        # Insert into orders table
         db_query(
             "INSERT INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?, ?, ?, ?, ?, ?)",
-            (f"WA-{int(time.time())}", phone, name, f"{product} x{quantity} | {address}", total, "pending"),
+            (f"WA-{int(time.time())}", phone, name, order_note, total, "pending"),
             commit=True
         )
-        logger.info(f"Order saved for {phone}: {product} x{quantity}")
+        
+        # Also log to agent_logs for visibility
+        db_query(
+            "INSERT INTO agent_logs (action, details) VALUES (?, ?)",
+            ("new_order", json.dumps({"phone": phone, "name": name, "product": product, "quantity": quantity, "total": total, "address": address})),
+            commit=True
+        )
+        
+        logger.info(f"Order saved for {phone}: {product} x{quantity} = {total}৳")
+        
+        # Notify admin
         _notify_admin_new_order(order_data)
         return True
     except Exception as e:
@@ -1047,25 +1138,39 @@ def _save_order(order_data):
 def _analyze_voice_with_gemini(voice_path, customer_phone=""):
     if not GEMINI_API_KEY:
         return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস সার্ভিস বর্তমানে অনুপলব্ধ। অনুগ্রহ করে টাইপ করে জানান।"
+    
+    # Validate file
+    if not os.path.exists(voice_path):
+        logger.error(f"Voice file not found: {voice_path}")
+        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ফাইলটি পাওয়া যায়নি।"
+    
+    file_size = os.path.getsize(voice_path)
+    if file_size == 0:
+        logger.error("Voice file is empty")
+        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ফাইলটি খালি।"
+    if file_size > 20 * 1024 * 1024:  # 20MB limit
+        logger.error(f"Voice file too large: {file_size} bytes")
+        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি খুব বড়। অনুগ্রহ করে ছোট করে পাঠান।"
+    
     try:
         with open(voice_path, "rb") as f:
             voice_bytes = f.read()
         voice_b64 = base64.b64encode(voice_bytes).decode("utf-8")
         
         products = db_query("SELECT name, price, description FROM products LIMIT 15", fetchall=True) or []
-        product_list = "\\n".join([f"- {p['name']}: {p['price']}৳" for p in products]) if products else "No products"
+        product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products]) if products else "No products"
         
         prompt = (
-            "You are Dhaka Exclusive sales assistant. Listen to this audio. "
-            "The customer is speaking in Bengali or English. "
-            "Reply in Bengali/Bangla ONLY. Be concise. "
-            "Don't say 'প্রিয় গ্রাহক' in every message. "
-            f"Available products:\\n{product_list}\\n\\n"
-            "If they want to order, encourage them. "
-            "If they ask about products, give details from the list above."
+            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। এই অডিওটি শোনো। "
+            "কাস্টমার বাংলা বা ইংরেজিতে কথা বলছে। "
+            "শুধু বাংলায় সংক্ষিপ্ত উত্তর দাও। "
+            "প্রতিটি উত্তরে 'প্রিয় গ্রাহক' বলার দরকার নেই। "
+            f"আমাদের প্রোডাক্ট:\n{product_list}\n\n"
+            "অর্ডার করতে চাইলে সাহায্য করো। প্রশ্নের উত্তর দাও।"
         )
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        # Use gemini-1.5-flash which reliably supports audio
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "role": "user",
@@ -1077,6 +1182,8 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
         }
         headers = {"Content-Type": "application/json"}
+        
+        logger.info(f"Sending voice to Gemini (size: {file_size} bytes)")
         r = requests.post(url, json=payload, headers=headers, timeout=45)
         res = r.json()
         
@@ -1084,8 +1191,17 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
             parts = res["candidates"][0].get("content", {}).get("parts", [])
             for part in parts:
                 if "text" in part:
-                    return part["text"].strip()
-        logger.error(f"Voice analysis failed: {res}")
+                    reply = part["text"].strip()
+                    logger.info(f"Voice reply: {reply[:100]}")
+                    return reply
+        
+        # Log exact error
+        if "error" in res:
+            err = res["error"]
+            logger.error(f"Voice API error: {err}")
+            return f"🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস পড়তে পারছে না। (Error: {err.get('code', 'unknown')})"
+        
+        logger.error(f"Voice analysis no candidates: {res}")
         return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি স্পষ্টভাবে বোঝা যায়নি। অনুগ্রহ করে টাইপ করে জানান।"
     except Exception as e:
         logger.error(f"Voice analysis exception: {e}")
