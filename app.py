@@ -531,12 +531,8 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    all_prods = db_query("SELECT * FROM products", fetchall=True) or []
-    low = sum(1 for p in all_prods if p["stock"] < 5)
-    out = sum(1 for p in all_prods if p["stock"] == 0)
-    disc = sum(1 for p in all_prods if p.get("discount_price") and p["discount_price"] > 0)
-    val = sum(p["price"] * p["stock"] for p in all_prods)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low, out_stock_count=out, discount_count=disc, total_value=val)
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param)
+
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
     res = pull_orders_from_pathao()
@@ -1576,6 +1572,13 @@ def search_products():
         fetchall=True
     ) or []
     
+    # Stats
+    all_prods = db_query("SELECT * FROM products", fetchall=True) or []
+    low = sum(1 for p in all_prods if p["stock"] < 5)
+    out = sum(1 for p in all_prods if p["stock"] == 0)
+    disc = sum(1 for p in all_prods if p.get("discount_price") and p["discount_price"] > 0)
+    val = sum(p["price"] * p["stock"] for p in all_prods)
+
     s = get_all_settings()
     analytics = {
         "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
@@ -1590,18 +1593,11 @@ def search_products():
     msg = f"Found {len(products)} products matching '{q}'"
     return render_template(
         "inventory.html",
-        settings=s,
-        analytics=analytics,
-        orders=orders,
-        users=users,
-        products=products,
-        agent_logs=agent_logs,
-        payment_methods=payment_methods,
-        chat_history=[],
-        active_chat="",
-        msg=msg,
-        search_query=q,
-        tab="inventory"
+        settings=s, analytics=analytics, orders=orders, users=users,
+        products=products, agent_logs=agent_logs, payment_methods=payment_methods,
+        chat_history=[], active_chat="", msg=msg, search_query=q,
+        page=1, total_pages=1, total_products=len(products), per_page=50, sort_by="id_desc",
+        low_stock_count=low, out_stock_count=out, discount_count=disc, total_value=val
     )
 
 @app.route("/admin/product/add", methods=["POST"])
