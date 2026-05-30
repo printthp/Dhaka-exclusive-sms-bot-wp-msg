@@ -765,8 +765,12 @@ def cron_followup():
 GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "dhaka-exclusive-verify-2026")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN") or "dhaka-exclusive-verify-2026"
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "")
+
+# Messenger Config
+MESSENGER_PAGE_ACCESS_TOKEN = os.environ.get("MESSENGER_PAGE_ACCESS_TOKEN", "")
+MESSENGER_VERIFY_TOKEN = os.environ.get("MESSENGER_VERIFY_TOKEN") or VERIFY_TOKEN
 
 _PRIMARY_MODEL = "gemini-2.5-flash"
 _FALLBACK_MODEL = "gemini-2.5-pro"
@@ -2191,6 +2195,159 @@ def sync_facebook_trigger():
     except Exception as e:
         logger.error(f"Facebook sync error: {e}")
         return redirect(f"/admin?tab=inventory&msg=Sync Error: {str(e)}")
+
+
+# =====================================================================
+# MESSENGER BOT FUNCTIONS
+# =====================================================================
+def _download_messenger_media(url):
+    """Download Messenger media from URL (images/videos come as URLs)"""
+    try:
+        r = requests.get(url, timeout=30)
+        if r.status_code == 200:
+            ext = ".jpg" if "image" in r.headers.get("Content-Type", "") else ".mp4"
+            filename = f"msgr_{int(time.time())}{ext}"
+            filepath = os.path.join(MEDIA_FOLDER, filename)
+            with open(filepath, "wb") as f:
+                f.write(r.content)
+            return filepath
+    except Exception as e:
+        logger.error(f"Messenger media download error: {e}")
+    return None
+
+def send_messenger_message(recipient_id, message_text):
+    """Send text reply via Messenger Send API"""
+    if not MESSENGER_PAGE_ACCESS_TOKEN:
+        logger.error("MESSENGER_PAGE_ACCESS_TOKEN not set")
+        return False
+    try:
+        url = f"https://graph.facebook.com/v18.0/me/messages?access_token={MESSENGER_PAGE_ACCESS_TOKEN}"
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {"text": message_text[:2000]}
+        }
+        r = requests.post(url, json=payload, timeout=20)
+        res = r.json()
+        if res.get("message_id"):
+            return True
+        logger.error(f"Messenger send error: {res}")
+        return False
+    except Exception as e:
+        logger.error(f"Messenger send exception: {e}")
+        return False
+
+def _get_messenger_name(sender_id):
+    """Get user name from Messenger profile API"""
+    if not MESSENGER_PAGE_ACCESS_TOKEN:
+        return "Messenger User"
+    try:
+        url = f"https://graph.facebook.com/v18.0/{sender_id}?access_token={MESSENGER_PAGE_ACCESS_TOKEN}&fields=first_name,last_name"
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        fname = data.get("first_name", "")
+        lname = data.get("last_name", "")
+        return f"{fname} {lname}".strip() or "Messenger User"
+    except Exception:
+        return "Messenger User"
+
+@app.route("/messenger-webhook", methods=["GET", "POST"])
+def messenger_webhook():
+    """Handle Messenger Platform webhooks"""
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        logger.info(f"Messenger verify: mode={mode}, token={token}, challenge={challenge}")
+        if mode == "subscribe" and token == MESSENGER_VERIFY_TOKEN:
+            if challenge is not None:
+                # Facebook needs the exact challenge echoed back as plain text
+                logger.info("Messenger webhook verified successfully.")
+                return str(challenge), 200
+            logger.warning("Messenger verify: challenge was None")
+            return "Challenge missing", 400
+        logger.warning(f"Messenger verify failed: mode={mode}, token_match={token == MESSENGER_VERIFY_TOKEN}")
+        return "Verification failed", 403
+
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        logger.info(f"Messenger webhook received: {json.dumps(data, ensure_ascii=False)[:500]}")
+        try:
+            entry_list = data.get("entry", [])
+            for entry in entry_list:
+                messaging_events = entry.get("messaging", [])
+                for event in messaging_events:
+                    sender_id = event.get("sender", {}).get("id", "")
+                    if not sender_id:
+                        continue
+
+                    # Get sender name
+                    sender_name = _get_messenger_name(sender_id)
+
+                    # Handle message
+                    message = event.get("message", {})
+                    if not message:
+                        continue
+
+                    msg_text = message.get("text", "")
+                    attachments = message.get("attachments", [])
+                    msg_type = "text"
+
+                    image_path = None
+                    voice_path = None
+                    content = msg_text or ""
+
+                    # Handle attachments (image, audio, video)
+                    if attachments:
+                        att = attachments[0]
+                        att_type = att.get("type", "")
+                        if att_type == "image":
+                            msg_type = "image"
+                            image_url = att.get("payload", {}).get("url", "")
+                            if image_url:
+                                image_path = _download_messenger_media(image_url)
+                            content = "[Photo Received]"
+                        elif att_type in ["audio", "voice"]:
+                            msg_type = "voice"
+                            audio_url = att.get("payload", {}).get("url", "")
+                            if audio_url:
+                                voice_path = _download_messenger_media(audio_url)
+                            content = "🎤 [Voice Received]"
+                        elif att_type == "video":
+                            msg_type = "video"
+                            content = "[Video Received]"
+                        else:
+                            content = f"[{att_type.upper()} Received]"
+
+                    # Store in DB (use sender_id as 'phone' for Messenger)
+                    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'messenger')", (sender_id, content), commit=True)
+                    db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
+                    db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (sender_id,), commit=True)
+
+                    # Get recent chat history
+                    recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (sender_id,), fetchall=True) or []
+                    recent_msgs.reverse()
+
+                    # Generate AI reply
+                    reply = get_optimized_gemini_reply(
+                        content,
+                        customer_phone=sender_id,
+                        chat_history=recent_msgs,
+                        image_path=image_path,
+                        voice_path=voice_path
+                    )
+
+                    if reply:
+                        sent = send_messenger_message(sender_id, reply)
+                        if sent:
+                            db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (sender_id, reply), commit=True)
+
+                        # Try send product image if mentioned
+                        if msg_type == "text" and ("ছবি" in content or "photo" in content.lower()):
+                            _try_send_product_image(sender_id, content, recent_msgs)
+
+        except Exception as e:
+            logger.error(f"Messenger webhook processing error: {e}")
+        return "EVENT_RECEIVED", 200
 
 
 if __name__ == "__main__":
