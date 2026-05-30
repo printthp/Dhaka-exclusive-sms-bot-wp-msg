@@ -1217,16 +1217,19 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
             if content_text:
                 contents.append({
                     "role": role,
-                    "parts": [{"text": content_text[:200]}]
+                    "parts": [{"text": content_text[:500]}]
                 })
     
-    # Add current system instruction + user message
+    # Add current user message
     contents.append({
         "role": "user",
-        "parts": [{"text": f"{system_instruction}\n\nCustomer: {user_message}"}]
+        "parts": [{"text": user_message}]
     })
     
     payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_instruction}]
+        },
         "contents": contents,
         "generationConfig": {
             "temperature": 0.7,
