@@ -195,6 +195,21 @@ def init_db():
             )
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS bridge_numbers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL,
+                phone TEXT,
+                team_group TEXT,
+                orders_group TEXT,
+                moderator_group TEXT,
+                enabled INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'disconnected',
+                qr_data TEXT,
+                last_seen TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS payment_methods (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -2569,6 +2584,154 @@ def _build_knowledge_base():
 
 
 # =====================================================================
+# BUSINESS WHATSAPP: Silent Monitor + Moderator Alerts
+# =====================================================================
+@app.route("/business-webhook", methods=["POST"])
+def business_webhook():
+    """Customer messages to Business WhatsApp → AI analyzes → Alert moderators"""
+    data = request.get_json(force=True, silent=True) or {}
+    
+    try:
+        customer_phone = data.get("customer_phone", "")
+        customer_name = data.get("customer_name", "Customer")
+        message = data.get("message", "").strip()
+        media_type = data.get("media_type", "")
+        media_data = data.get("media_data", "")
+        
+        if not message and not media_data:
+            return jsonify({"status": "ignored", "reason": "empty"})
+        
+        logger.info(f"[BUSINESS] Customer {customer_name} ({customer_phone}): {message[:60]}")
+        
+        # Save to DB (silent record)
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'business_customer')", (customer_phone, message), commit=True)
+        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (customer_phone, customer_name), commit=True)
+        
+        # Handle image
+        image_path = None
+        if media_data and media_type and media_type.startswith("image"):
+            try:
+                ext = media_type.split("/")[1] if "/" in media_type else "jpg"
+                image_path = f"/tmp/biz_img_{int(time.time())}.{ext}"
+                with open(image_path, "wb") as f:
+                    f.write(base64.b64decode(media_data))
+                logger.info(f"[BUSINESS] Image saved: {image_path}")
+            except Exception as e:
+                logger.error(f"[BUSINESS] Image save error: {e}")
+        
+        # AI Analysis: What does customer want?
+        if not GEMINI_API_KEY:
+            return jsonify({"status": "no_key"})
+        
+        # Get products for context
+        products = db_query("SELECT name, price, stock, image_url FROM products ORDER BY id DESC LIMIT 100", fetchall=True) or []
+        product_list = "\n".join([f"- {p['name']}: {p['price']}৳ (stock: {p['stock']})" for p in products[:30]])
+        
+        # Build analysis prompt
+        image_note = "\n[Customer sent a product photo - please analyze]" if image_path else ""
+        
+        prompt = f"""তুমি Dhaka Exclusive-এর সেলস অ্যানালিস্ট। একজন কাস্টমারের মেসেজ বিশ্লেষণ করো।
+
+কাস্টমার: {customer_name}
+ফোন: {customer_phone}
+মেসেজ: "{message}"{image_note}
+
+আমাদের টপ প্রোডাক্ট:
+{product_list}
+
+তোমার কাজ:
+১. কাস্টমার কী চাইছে তা সারাংশে বলো (1 লাইন)
+২. কোন প্রোডাক্ট সম্পর্কে জিজ্ঞেস করেছে তা চিহ্নিত করো
+৩. কাস্টমারের জন্য একটি পারফেক্ট রিপ্লাই তৈরি করো (বাংলায়, বন্ধুসুলভ)
+৪. Urgency লেভেল বলো (low/medium/high - অর্ডারের সম্ভাবনা অনুযায়ী)
+
+Output format (strictly):
+SUMMARY: <কাস্টমার কী চায়>
+PRODUCT: <ম্যাচ হওয়া প্রোডাক্ট নাম বা "unknown">
+PRICE: <দাম বা "N/A">
+REPLY: <কাস্টমারকে পাঠানোর রিপ্লাই>
+URGENCY: <low/medium/high>
+"""
+
+        # Call Gemini
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800, "topP": 0.9}
+        }
+        
+        # If image present, use vision
+        if image_path and os.path.exists(image_path):
+            with open(image_path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode("utf-8")
+            ext = os.path.splitext(image_path)[1].lower()
+            mime = "image/jpeg" if ext in [".jpg",".jpeg"] else "image/png" if ext==".png" else "image/webp"
+            payload["contents"][0]["parts"].append({"inline_data": {"mime_type": mime, "data": image_b64}})
+        
+        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=45)
+        res = r.json()
+        
+        ai_reply = ""
+        summary = ""
+        product = ""
+        price = ""
+        urgency = "medium"
+        
+        if res.get("candidates"):
+            parts = res["candidates"][0].get("content", {}).get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    ai_reply = part["text"].strip()
+                    break
+            
+            # Parse structured output
+            for line in ai_reply.split("\n"):
+                if line.startswith("SUMMARY:"): summary = line.replace("SUMMARY:", "").strip()
+                if line.startswith("PRODUCT:"): product = line.replace("PRODUCT:", "").strip()
+                if line.startswith("PRICE:"): price = line.replace("PRICE:", "").strip()
+                if line.startswith("REPLY:"): 
+                    reply_text = line.replace("REPLY:", "").strip()
+                if line.startswith("URGENCY:"): urgency = line.replace("URGENCY:", "").strip().lower()
+        
+        if not summary:
+            summary = message[:100]
+        
+        # Build moderator alert
+        urgency_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(urgency, "🟡")
+        
+        alert = f"""{urgency_emoji} *নতুন কাস্টমার ইনকোয়ারি*
+
+👤 *নাম:* {customer_name}
+📱 *নাম্বার:* {customer_phone}
+💬 *মেসেজ:* {message[:200]}{' [📷 Photo]' if image_path else ''}
+
+📋 *AI সারাংশ:*
+{summary}
+
+🎯 *সাজেস্টেড প্রোডাক্ট:* {product or 'N/A'}
+💰 *দাম:* {price or 'N/A'}
+
+✍️ *রিপ্লাই করুন:*
+"{reply_text if 'reply_text' in dir() else ai_reply[:300]}"
+
+⚡ দ্রুত রিপ্লাই দিন যেন অর্ডার মিস না হয়!
+"""
+
+        logger.info(f"[BUSINESS] Alert generated for {customer_phone}, urgency={urgency}")
+        
+        return jsonify({
+            "status": "alert_sent",
+            "customer_phone": customer_phone,
+            "urgency": urgency,
+            "alert_for_moderators": alert
+        })
+        
+    except Exception as e:
+        logger.error(f"[BUSINESS] Webhook error: {e}")
+        return jsonify({"status": "error", "error": str(e)})
+
+
+# =====================================================================
 # WHATSAPP GROUP WEBHOOK (from whatsapp-bridge.js)
 # =====================================================================
 @app.route("/group-webhook", methods=["POST"])
@@ -3084,6 +3247,143 @@ def admin_team_delete(member_id):
         return redirect("/admin/login")
     db_query("DELETE FROM team_members WHERE id = ?", (member_id,), commit=True)
     return redirect("/admin/team")
+
+
+# =====================================================================
+# BRIDGE MANAGEMENT APIs (for Local Bridge Manager)
+# =====================================================================
+BRIDGE_API_KEY = os.environ.get("BRIDGE_API_KEY", "dhaka-exclusive-bridge-2026")
+
+def _check_bridge_auth():
+    key = request.headers.get("X-Bridge-Key", "")
+    return key == BRIDGE_API_KEY
+
+@app.route("/api/bridge-config", methods=["GET"])
+def api_bridge_config():
+    """Local bridge manager fetches config from here"""
+    if not _check_bridge_auth():
+        return jsonify({"error": "unauthorized"}), 401
+    configs = db_query("SELECT id, label, phone, team_group, orders_group, moderator_group, enabled, status FROM bridge_numbers ORDER BY id", fetchall=True) or []
+    return jsonify({"configs": [dict(c) for c in configs]})
+
+@app.route("/api/bridge-qr", methods=["POST"])
+def api_bridge_qr():
+    """Bridge sends QR code data"""
+    if not _check_bridge_auth():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    phone_id = data.get("phone_id", "")
+    qr_data = data.get("qr_data", "")
+    db_query("UPDATE bridge_numbers SET qr_data = ?, status = 'awaiting_scan' WHERE id = ?", (qr_data, phone_id), commit=True)
+    return jsonify({"status": "ok"})
+
+@app.route("/api/bridge-status", methods=["POST"])
+def api_bridge_status():
+    """Bridge sends connection status"""
+    if not _check_bridge_auth():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    phone_id = data.get("phone_id", "")
+    status = data.get("status", "unknown")
+    info = json.dumps(data.get("info", {}))
+    db_query("UPDATE bridge_numbers SET status = ?, last_seen = ?, phone = ? WHERE id = ?",
+             (status, datetime.now().isoformat(), data.get("info", {}).get("number", ""), phone_id), commit=True)
+    return jsonify({"status": "ok"})
+
+@app.route("/api/bridge-alert", methods=["POST"])
+def api_bridge_alert():
+    """Bridge sends alert (optional, mainly handled via group)"""
+    if not _check_bridge_auth():
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify({"status": "ok"})
+
+
+# =====================================================================
+# ADMIN: WhatsApp Bridge Numbers Management
+# =====================================================================
+@app.route("/admin/whatsapp", methods=["GET"])
+def admin_whatsapp():
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
+    numbers = db_query("SELECT * FROM bridge_numbers ORDER BY id DESC", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>WhatsApp Numbers</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}h1{color:#333}.container{max-width:1000px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#25D366;color:white}tr:hover{background:#f1f1f1}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;display:inline-block}
+.btn-green{background:#25D366;color:white}.btn-red{background:#f44336;color:white}.btn-blue{background:#2196F3;color:white}
+input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;width:180px}
+.status-connected{color:#25D366;font-weight:bold}.status-disconnected{color:#f44336}.status-awaiting{color:#ff9800}
+.qr-box{background:#f5f5f5;padding:15px;border-radius:5px;margin:10px 0;font-family:monospace;font-size:12px;word-break:break-all;max-height:100px;overflow:auto}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head>
+<body><div class="container">
+<div class="nav"><a href="/admin-panel">← Admin Panel</a><a href="/admin/team">Team</a><a href="/admin/whatsapp">WhatsApp</a><a href="/admin/group-orders">Group Orders</a></div>
+<h1>📱 WhatsApp Bridge Numbers</h1>
+<p style="color:#666">Add numbers here → Run <code>bridge-manager.js</code> on your PC → Scan QR from admin panel</p>
+<form method="POST" action="/admin/whatsapp/add">
+    <input type="text" name="label" placeholder="Label (e.g. Main Business)" required>
+    <input type="text" name="team_group" placeholder="Team Group Name">
+    <input type="text" name="orders_group" placeholder="Orders Group Name">
+    <input type="text" name="moderator_group" placeholder="Moderator Group ID" required>
+    <button type="submit" class="btn btn-green">➕ Add Number</button>
+</form>
+<table>
+<tr><th>ID</th><th>Label</th><th>Phone</th><th>Status</th><th>Team Group</th><th>Mod Group</th><th>QR Code</th><th>Action</th></tr>
+{% for n in numbers %}
+<tr>
+    <td>{{ n.id }}</td>
+    <td><b>{{ n.label }}</b></td>
+    <td>{{ n.phone or '-' }}</td>
+    <td class="status-{{ n.status }}">{{ n.status }}</td>
+    <td>{{ n.team_group or '-' }}</td>
+    <td>{{ n.moderator_group or '-' }}</td>
+    <td>{% if n.qr_data %}<div class="qr-box">{{ n.qr_data[:80] }}...</div>{% else %}-{% endif %}</td>
+    <td>
+        <a href="/admin/whatsapp/toggle/{{ n.id }}" class="btn btn-blue">{{ 'Disable' if n.enabled else 'Enable' }}</a>
+        <a href="/admin/whatsapp/delete/{{ n.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a>
+    </td>
+</tr>
+{% endfor %}
+</table>
+<h3 style="margin-top:30px">🖥️ Local Setup Instructions</h3>
+<ol style="line-height:2">
+    <li>Download <code>bridge-manager.js</code> to your PC</li>
+    <li>Install: <code>npm install whatsapp-web.js qrcode-terminal axios</code></li>
+    <li>Set env: <code>set FLASK_URL=https://your-app.onrender.com</code></li>
+    <li>Run: <code>node bridge-manager.js</code></li>
+    <li>Come back here — QR code will appear when ready</li>
+    <li>Scan with WhatsApp → Linked Devices</li>
+</ol>
+</div></body></html>
+""", numbers=numbers)
+
+@app.route("/admin/whatsapp/add", methods=["POST"])
+def admin_whatsapp_add():
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
+    label = request.form.get("label", "").strip()
+    team_group = request.form.get("team_group", "").strip()
+    orders_group = request.form.get("orders_group", "").strip()
+    moderator_group = request.form.get("moderator_group", "").strip()
+    db_query("INSERT INTO bridge_numbers (label, team_group, orders_group, moderator_group, enabled, status) VALUES (?, ?, ?, ?, 1, 'disconnected')",
+             (label, team_group, orders_group, moderator_group), commit=True)
+    flash(f"WhatsApp number '{label}' added! Run bridge-manager.js to connect.")
+    return redirect("/admin/whatsapp")
+
+@app.route("/admin/whatsapp/toggle/<int:num_id>")
+def admin_whatsapp_toggle(num_id):
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("UPDATE bridge_numbers SET enabled = 1 - enabled WHERE id = ?", (num_id,), commit=True)
+    return redirect("/admin/whatsapp")
+
+@app.route("/admin/whatsapp/delete/<int:num_id>")
+def admin_whatsapp_delete(num_id):
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM bridge_numbers WHERE id = ?", (num_id,), commit=True)
+    return redirect("/admin/whatsapp")
 
 
 # =====================================================================
