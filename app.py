@@ -1211,6 +1211,44 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
         logger.error(f"Voice analysis exception: {e}")
         return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
 
+def _generate_team_suggestion(team_query):
+    """Generate helpful reply suggestion for team moderators"""
+    if not GEMINI_API_KEY:
+        return "⚙️ AI সার্ভিস বন্ধ আছে।"
+    
+    try:
+        products = db_query("SELECT name, price, stock, description, category, size, color, material FROM products ORDER BY id DESC LIMIT 20", fetchall=True) or []
+        product_lines = "\n".join([f"- {p['name']}: {p['price']}৳ (Stock: {p['stock']})" for p in products]) if products else "কোনো প্রোডাক্ট নেই"
+        
+        prompt = f"""তুমি Dhaka Exclusive-এর senior sales trainer। 
+তোমার টিম মেম্বার একজন কাস্টমারের সাথে কথা বলছে এবং তোমাকে সাহায্য চাইছে।
+
+আমাদের প্রোডাক্ট লিস্ট:
+{product_lines}
+
+টিম মেম্বারের প্রশ্ন/পরিস্থিতি: "{team_query}"
+
+শুধু বাংলায় উত্তর দাও। সরাসরি টিম মেম্বারকে বলে দাও কীভাবে রিপ্লাই দিবে। 
+Short, professional, friendly tone।
+"""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
+        }
+        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
+        res = r.json()
+        if res.get("candidates"):
+            parts = res["candidates"][0].get("content", {}).get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    return part["text"].strip()
+        return "⚙️ সাজেশন জেনারেট হতে ব্যর্থ হয়েছে।"
+    except Exception as e:
+        logger.error(f"Team suggestion error: {e}")
+        return f"⚙️ Error: {e}"
+
+
 def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
@@ -1596,12 +1634,25 @@ def webhook():
                         if not phone or not content:
                             continue
 
+                        # TEAM MODERATOR MODE: If message starts with "?" or "help" or "সাহায্য" - treat as internal team query
+                        team_keywords = ["?", "help", "সাহায্য", "suggest", "suggestion", "কাস্টমার", "customer boleche", "কাস্টমার বলছে", "কি বলব", "কিভাবে রিপ্লাই"]
+                        is_team_query = any(content.strip().lower().startswith(kw) for kw in team_keywords) or any(kw in content.lower() for kw in ["কাস্টমার বলছে", "customer says", "কি উত্তর দিব", "what to reply"])
+
                         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
                         db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (phone, sender_name), commit=True)
                         db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
 
                         recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
                         recent_msgs.reverse()
+
+                        if is_team_query:
+                            # Generate moderator-friendly reply suggestion
+                            reply = _generate_team_suggestion(content)
+                            if reply:
+                                sent = send_whatsapp_message(phone, reply)
+                                if sent:
+                                    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
+                            continue
 
                         reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, image_path=image_path)
 
@@ -2399,6 +2450,153 @@ def messenger_webhook():
         except Exception as e:
             logger.error(f"Messenger webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
+
+
+# =====================================================================
+# KNOWLEDGE SYNC (Facebook + Website + Products)
+# =====================================================================
+_KNOWLEDGE_CACHE = {"text": "", "last_fetch": 0}
+
+def _build_knowledge_base():
+    """Build comprehensive knowledge from Facebook, Website, Products"""
+    now = time.time()
+    if _KNOWLEDGE_CACHE["text"] and (now - _KNOWLEDGE_CACHE["last_fetch"]) < 300:
+        return _KNOWLEDGE_CACHE["text"]
+    
+    lines = []
+    lines.append("=== DHAKA EXCLUSIVE KNOWLEDGE BASE ===\n")
+    
+    # Products
+    products = db_query("SELECT name, price, stock, description, category, size, color, material FROM products ORDER BY id DESC", fetchall=True) or []
+    lines.append(f"TOTAL PRODUCTS: {len(products)}\n")
+    for p in products:
+        lines.append(f"- {p['name']}: {p['price']}৳ | Stock: {p['stock']} | Cat: {p.get('category','')} | Size: {p.get('size','')} | Color: {p.get('color','')} | Desc: {p.get('description','')}")
+    
+    # Facebook Page Info (if available)
+    try:
+        s = get_all_settings()
+        fb_token = s.get("fb_access_token", "").strip()
+        if fb_token:
+            fb_url = f"https://graph.facebook.com/v18.0/me?access_token={fb_token}&fields=name,about,description,phone,website"
+            r = requests.get(fb_url, timeout=10)
+            fb_data = r.json()
+            lines.append(f"\n=== FACEBOOK PAGE ===")
+            lines.append(f"Name: {fb_data.get('name', '')}")
+            lines.append(f"About: {fb_data.get('about', '')}")
+            lines.append(f"Phone: {fb_data.get('phone', '')}")
+            lines.append(f"Website: {fb_data.get('website', '')}")
+    except Exception as e:
+        logger.debug(f"Facebook knowledge fetch: {e}")
+    
+    # Website info (if WEBSITE_URL set)
+    try:
+        website_url = os.environ.get("WEBSITE_URL", "")
+        if website_url:
+            lines.append(f"\n=== WEBSITE ===")
+            lines.append(f"URL: {website_url}")
+            r = requests.get(website_url, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+            title = re.search(r'<title>(.*?)</title>', r.text, re.I)
+            if title:
+                lines.append(f"Title: {title.group(1).strip()}")
+            desc = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
+            if desc:
+                lines.append(f"Description: {desc.group(1).strip()}")
+    except Exception as e:
+        logger.debug(f"Website knowledge fetch: {e}")
+    
+    result = "\n".join(lines)
+    _KNOWLEDGE_CACHE["text"] = result
+    _KNOWLEDGE_CACHE["last_fetch"] = now
+    return result
+
+
+# =====================================================================
+# WHATSAPP GROUP WEBHOOK (from whatsapp-bridge.js)
+# =====================================================================
+@app.route("/group-webhook", methods=["POST"])
+def group_webhook():
+    """Handle WhatsApp group messages from whatsapp-web.js bridge"""
+    data = request.get_json(force=True, silent=True) or {}
+    logger.info(f"Group webhook: {json.dumps(data, ensure_ascii=False)[:300]}")
+    
+    try:
+        group_id = data.get("group_id", "")
+        group_name = data.get("group_name", "Group")
+        sender_id = data.get("sender_id", "")
+        sender_name = data.get("sender_name", "Member")
+        message = data.get("message", "").strip()
+        
+        if not message:
+            return jsonify({"reply": ""})
+        
+        # Skip bot's own messages
+        if message.startswith("🤖") or message.startswith("✅"):
+            return jsonify({"reply": ""})
+        
+        # Store in DB
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'group')", (sender_id, f"[{group_name}] {sender_name}: {message}"), commit=True)
+        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
+        
+        # Build knowledge
+        knowledge = _build_knowledge_base()
+        products_text = _get_products_text()
+        
+        # Generate AI reply with full knowledge
+        prompt = f"""তুমি Dhaka Exclusive-এর সেলস AI assistant। তুমি একটি WhatsApp গ্রুপে কাজ করছো।
+
+তোমার সম্পূর্ণ জ্ঞান:
+{knowledge[:4000]}
+
+বর্তমান প্রোডাক্ট:
+{products_text}
+
+গ্রুপ: {group_name}
+সদস্য: {sender_name}
+প্রশ্ন/বার্তা: "{message}"
+
+নির্দেশনা:
+- বাংলায় উত্তর দাও, সংক্ষিপ্ত ও প্রফেশনাল
+- প্রতিটি উত্তরে "প্রিয় গ্রাহক" বলার দরকার নেই
+- প্রোডাক্ট সম্পর্কে জানতে চাইলে exact price ও stock বলো
+- Order করতে চাইলে address ও phone নিতে বলো
+- ছবি দেখতে চাইলে বলো "ছবি পাঠাচ্ছি"
+- গ্রুপের অন্য সদস্যদের উদ্দেশ্যে উত্তর দাও (সবাই দেখতে পারবে)
+"""
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
+        }
+        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+        res = r.json()
+        
+        reply = ""
+        if res.get("candidates"):
+            parts = res["candidates"][0].get("content", {}).get("parts", [])
+            for part in parts:
+                if "text" in part:
+                    reply = part["text"].strip()
+        
+        if reply:
+            db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
+            logger.info(f"Group reply: {reply[:100]}")
+            return jsonify({"reply": reply})
+        
+        return jsonify({"reply": ""})
+    
+    except Exception as e:
+        logger.error(f"Group webhook error: {e}")
+        return jsonify({"reply": ""})
+
+
+# =====================================================================
+# API: Products list (for bridge commands)
+# =====================================================================
+@app.route("/api/products", methods=["GET"])
+def api_products():
+    products = db_query("SELECT id, name, price, stock, category, image_url FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    return jsonify({"products": [dict(p) for p in products]})
 
 
 if __name__ == "__main__":
