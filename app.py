@@ -3,23 +3,15 @@ import sys
 import json
 import sqlite3
 import logging
-import ctypes
 import time
 import requests
-import random
-import pandas as pd
 import base64
 import re
 from io import BytesIO
 from datetime import datetime, timedelta
 from threading import Lock
-from flask import Flask, request, jsonify, render_template, render_template_string, redirect, url_for, session, flash, send_file
-from xhtml2pdf import pisa
-from werkzeug.utils import secure_filename
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, flash
 
-# =====================================================================
-# SYSTEM & STORAGE SETUP (Render Persistence)
-# =====================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -31,242 +23,56 @@ else:
         os.makedirs(local_data_dir)
     DB_PATH = os.path.join(local_data_dir, "bot_v7_ultimate.db")
 
-MEDIA_FOLDER = os.path.join(os.path.dirname(DB_PATH), "media")
-if not os.path.exists(MEDIA_FOLDER):
-    os.makedirs(MEDIA_FOLDER)
-
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-master-ultra-v2026-final")
+app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-2026")
 application = app
 db_lock = Lock()
 
-# =====================================================================
-# ENGINE LOADERS (C++ & ASSEMBLY CORE)
-# =====================================================================
-lib = None
-asm_lib = None
-try:
-    if os.path.exists("engine.so"):
-        lib = ctypes.CDLL(os.path.abspath("engine.so"))
-        lib.process_business_logic.restype = ctypes.c_char_p
-        logger.info("C++ Engine (engine.so) Linked Successfully.")
-    if os.path.exists("asm_engine.so"):
-        asm_lib = ctypes.CDLL(os.path.abspath("asm_engine.so"))
-        asm_lib.asm_process_command.restype = ctypes.c_char_p
-        asm_lib.asm_strlen.restype = ctypes.c_uint64
-        asm_lib.asm_strlen.argtypes = [ctypes.c_char_p]
-        asm_lib.asm_checksum.restype = ctypes.c_uint64
-        asm_lib.asm_checksum.argtypes = [ctypes.c_char_p]
-        logger.info("ASM Engine (asm_engine.so) Linked Successfully.")
-except Exception as e:
-    logger.error(f"Engine Load Fail: {e}")
-
-# -----------------------------------------------------------------
-# C++ / ASM WRAPPER FUNCTIONS (Actually Used!)
-# -----------------------------------------------------------------
-def cpp_engine_command(cmd: str) -> str:
-    if lib is None:
-        return "C++ Engine Not Loaded"
-    try:
-        result = lib.process_business_logic(cmd.encode("utf-8"))
-        return result.decode("utf-8") if result else ""
-    except Exception as e:
-        logger.error(f"C++ engine error: {e}")
-        return f"C++ Error: {e}"
-
-def asm_engine_command(cmd: str) -> str:
-    if asm_lib is None:
-        return "ASM Engine Not Loaded"
-    try:
-        result = asm_lib.asm_process_command(cmd.encode("utf-8"))
-        return result.decode("utf-8") if result else ""
-    except Exception as e:
-        logger.error(f"ASM engine error: {e}")
-        return f"ASM Error: {e}"
-
-def asm_fast_strlen(text: str) -> int:
-    if asm_lib is None:
-        return len(text)
-    try:
-        return asm_lib.asm_strlen(text.encode("utf-8"))
-    except Exception as e:
-        logger.error(f"ASM strlen error: {e}")
-        return len(text)
-
-def asm_fast_checksum(text: str) -> int:
-    if asm_lib is None:
-        return 0
-    try:
-        return asm_lib.asm_checksum(text.encode("utf-8"))
-    except Exception as e:
-        logger.error(f"ASM checksum error: {e}")
-        return 0
+GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 
 # =====================================================================
-# DATABASE UTILITIES
+# DATABASE
 # =====================================================================
-def migrate_db():
-    """Add missing columns to existing tables"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        
-        # Check current products columns
-        c.execute("PRAGMA table_info(products)")
-        columns = [col[1] for col in c.fetchall()]
-        
-        new_cols = {
-            "description": "TEXT",
-            "category": "TEXT", 
-            "size": "TEXT",
-            "color": "TEXT",
-            "material": "TEXT"
-        }
-        
-        for col, dtype in new_cols.items():
-            if col not in columns:
-                c.execute(f"ALTER TABLE products ADD COLUMN {col} {dtype}")
-                logger.info(f"Migration: Added column '{col}' to products table")
-        
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Migration error: {e}")
-
-
 def init_db():
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, follow_up_sent INTEGER DEFAULT 0)")
-        c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, address TEXT, product_name TEXT, quantity INTEGER DEFAULT 1, price INTEGER, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("""CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fb_product_id TEXT UNIQUE,
-            name TEXT,
-            price INTEGER,
-            stock INTEGER DEFAULT 10,
-            image_url TEXT,
-            description TEXT,
-            category TEXT,
-            size TEXT,
-            color TEXT,
-            material TEXT,
-            discount_price INTEGER,
-            flash_sale_end TEXT
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, stock INTEGER DEFAULT 10,
+            image_url TEXT, description TEXT, category TEXT
         )""")
-        c.execute("""CREATE TABLE IF NOT EXISTS product_reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER,
-            rating INTEGER DEFAULT 5,
-            comment TEXT,
-            customer_name TEXT DEFAULT 'Anonymous',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        c.execute("""CREATE TABLE IF NOT EXISTS group_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, customer_name TEXT, address TEXT,
+            product_name TEXT, quantity INTEGER DEFAULT 1, price INTEGER, total INTEGER,
+            status TEXT DEFAULT 'pending', group_name TEXT, raw_message TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
-        c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("""CREATE TABLE IF NOT EXISTS team_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT UNIQUE, name TEXT,
+            role TEXT DEFAULT 'moderator', wa_id TEXT, is_active INTEGER DEFAULT 1
+        )""")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS team_members (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone TEXT UNIQUE,
-                name TEXT,
-                role TEXT DEFAULT 'moderator',
-                wa_id TEXT,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS group_orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone TEXT,
-                customer_name TEXT,
-                address TEXT,
-                product_name TEXT,
-                quantity INTEGER DEFAULT 1,
-                price INTEGER,
-                total INTEGER,
-                status TEXT DEFAULT 'pending',
-                group_name TEXT,
-                raw_message TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS bridge_numbers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                label TEXT NOT NULL,
-                phone TEXT,
-                team_group TEXT,
-                orders_group TEXT,
-                moderator_group TEXT,
-                enabled INTEGER DEFAULT 1,
-                status TEXT DEFAULT 'disconnected',
-                qr_data TEXT,
-                last_seen TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS payment_methods (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL,
-                number TEXT,
-                account_name TEXT,
-                instructions TEXT,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
         c.execute("INSERT OR IGNORE INTO agents (username, password) VALUES ('admin', 'admin123')")
-        # Migrate products table - add new columns
-        for col_name, col_type in [
-            ("discount_price", "INTEGER"),
-            ("flash_sale_end", "TEXT"),
-        ]:
-            try:
-                c.execute(f"ALTER TABLE products ADD COLUMN {col_name} {col_type}")
-                logger.info(f"Added column '{col_name}' to products table")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" not in str(e).lower():
-                    logger.error(f"Migration error: {e}")
-        try:
-            c.execute("ALTER TABLE users ADD COLUMN name TEXT DEFAULT 'Customer'")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" not in str(e).lower():
-                logger.error(f"Migration error: {e}")
-        try:
-            c.execute("ALTER TABLE users ADD COLUMN follow_up_sent INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
         conn.commit()
         conn.close()
 
 init_db()
 
-def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
+def db_query(query, params=(), fetchall=False, commit=False):
     with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
         try:
-            conn = sqlite3.connect(DB_PATH, timeout=30)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
             c.execute(query, params)
             if commit:
                 conn.commit()
-                return True
-            if fetchone:
-                row = c.fetchone()
-                return dict(row) if row else None
             if fetchall:
-                rows = c.fetchall()
-                return [dict(r) for r in rows]
-            return None
-        except Exception as e:
-            logger.error(f"SQL Error: {e} | Query: {query} | Params: {params}")
-            return None
+                return c.fetchall()
+            return c.fetchone()
         finally:
             conn.close()
 
@@ -274,3162 +80,386 @@ def get_all_settings():
     rows = db_query("SELECT key, value FROM settings", fetchall=True) or []
     return {r["key"]: r["value"] for r in rows}
 
-@app.context_processor
-def inject_globals():
-    try:
-        unread = db_query("SELECT COUNT(DISTINCT from_number) as c FROM messages WHERE direction='inbound'", fetchone=True)
-        count = unread['c'] if unread else 0
-    except:
-        count = 0
-    return dict(unread_chat_count=count)
-
 # =====================================================================
-# WHATSAPP MEDIA UPLOAD, DOWNLOAD & SEND
+# GEMINI AI
 # =====================================================================
-def upload_media_to_whatsapp(file_path, media_type="image"):
-    s = get_all_settings()
-    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
-    if not token or not phone_id:
-        logger.error("WhatsApp credentials missing for media upload")
-        return None
-    url = f"https://graph.facebook.com/v22.0/{phone_id}/media"
-    try:
-        with open(file_path, "rb") as f:
-            files = {"file": (os.path.basename(file_path), f, f"{media_type}/*")}
-            data = {"type": media_type, "messaging_product": "whatsapp"}
-            headers = {"Authorization": f"Bearer {token}"}
-            r = requests.post(url, headers=headers, files=files, data=data, timeout=60)
-            res = r.json()
-            if r.status_code in (200, 201) and "id" in res:
-                logger.info(f"Media uploaded: {res['id']}")
-                return res["id"]
-            logger.error(f"Media upload failed: {res}")
-            return None
-    except Exception as e:
-        logger.error(f"Media upload exception: {e}")
-        return None
-
-def _download_whatsapp_media(media_id, media_type="image"):
-    """Download media from WhatsApp servers by media_id."""
-    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-    if not token:
-        logger.error("WhatsApp token missing for media download")
-        return None
-    try:
-        url = f"https://graph.facebook.com/v22.0/{media_id}"
-        headers = {"Authorization": f"Bearer {token}"}
-        r = requests.get(url, headers=headers, timeout=30)
-        res = r.json()
-        media_url = res.get("url")
-        if not media_url:
-            logger.error(f"Media URL not found: {res}")
-            return None
-        
-        ext = "jpg" if media_type == "image" else ("ogg" if media_type in ["voice", "audio"] else "bin")
-        filename = f"{media_type}_{int(time.time())}.{ext}"
-        file_path = os.path.join(MEDIA_FOLDER, filename)
-        
-        r2 = requests.get(media_url, headers=headers, timeout=60)
-        with open(file_path, "wb") as f:
-            f.write(r2.content)
-        logger.info(f"Media downloaded: {file_path} ({len(r2.content)} bytes)")
-        return file_path
-    except Exception as e:
-        logger.error(f"Media download error: {e}")
-        return None
-
-def send_whatsapp_media(to_phone, media_id, media_type="image", caption=""):
-    s = get_all_settings()
-    token = s.get("permanent_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-    phone_id = s.get("phone_number_id") or os.environ.get("PHONE_NUMBER_ID", "")
-    if not token or not phone_id:
-        return False
-    url = f"https://graph.facebook.com/v22.0/{phone_id}/messages"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    body = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to_phone,
-        "type": media_type,
-        media_type: {"id": media_id, "caption": caption} if caption else {"id": media_id}
-    }
-    try:
-        r = requests.post(url, headers=headers, json=body, timeout=30)
-        return r.status_code in (200, 201)
-    except Exception as e:
-        logger.error(f"Media send error: {e}")
-        return False
-
-# =====================================================================
-# PATHAO SYNC (Bearer & Auto-Login Hybrid)
-# =====================================================================
-def get_pathao_token():
-    s = get_all_settings()
-    bearer = s.get('pathao_bearer_token', '').strip()
-    if bearer and len(bearer) > 20:
-        return bearer
-
-    url_auth = "https://api-hermes.pathao.com/aladdin/api/v1/issue-token"
+def get_gemini_reply(prompt_text, image_data=None):
+    if not GEMINI_API_KEY:
+        return "AI service unavailable"
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
     payload = {
-        "client_id": str(s.get('pathao_client_id', '')).strip(),
-        "client_secret": str(s.get('pathao_client_secret', '')).strip(),
-        "username": str(s.get('pathao_merchant_email', '')).strip(),
-        "password": str(s.get('pathao_merchant_password', '')).strip(),
-        "grant_type": "password"
+        "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800}
     }
+    if image_data:
+        payload["contents"][0]["parts"].append({"inline_data": {"mime_type": "image/jpeg", "data": image_data}})
     try:
-        r = requests.post(url_auth, json=payload, headers={"Accept": "application/json"}, timeout=15)
-        res = r.json()
-        token = res.get('access_token')
-        if token:
-            db_query("INSERT INTO settings (key, value) VALUES ('pathao_bearer_token', ?) ON CONFLICT(key) DO UPDATE SET value=?", (token, token), commit=True)
-            return token
-        return f"Error: {res.get('message')}"
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-def pull_orders_from_pathao():
-    token = get_pathao_token()
-    if isinstance(token, str) and "Error" in token:
-        return token
-
-    s = get_all_settings()
-    store_id = str(s.get('pathao_store_id', '')).strip()
-    if not store_id:
-        return "Error: Store ID Missing"
-
-    url = f"https://api-hermes.pathao.com/aladdin/api/v1/stores/{store_id}/orders"
-    try:
-        r = requests.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=30)
-        if r.status_code == 401:
-            db_query("DELETE FROM settings WHERE key='pathao_bearer_token'", commit=True)
-            return "Token Expired. Please refresh again."
-
-        res = r.json()
-        data_block = res.get('data', [])
-        orders_list = data_block.get('data', []) if isinstance(data_block, dict) else data_block
-
-        pulled = 0
-        for o in orders_list:
-            p_id = str(o.get('consignment_id') or o.get('order_id'))
-            success = db_query("""
-                INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(pathao_order_id) DO UPDATE SET status=excluded.status
-            """, (p_id, o.get('recipient_phone'), o.get('recipient_name'), o.get('recipient_address'), o.get('amount'), o.get('status')), commit=True)
-            if success:
-                pulled += 1
-        return pulled
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-# =====================================================================
-# EXCEL & REPORTING
-# =====================================================================
-@app.route("/admin/export-report")
-def export_excel_report():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC", fetchall=True)
-    if not orders:
-        return redirect("/admin?tab=orders&msg=No Data")
-    df = pd.DataFrame(orders)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='All Orders')
-    output.seek(0)
-    return send_file(output, as_attachment=True, download_name=f"Dhaka_Exclusive_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-@app.route("/admin/import-pathao", methods=["POST"])
-def import_excel():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    file = request.files.get('file')
-    if not file:
-        return redirect("/admin?tab=orders&msg=No file selected")
-    try:
-        df = pd.read_csv(file) if file.filename.endswith('.csv') else pd.read_excel(file)
-        count = 0
-        for _, row in df.iterrows():
-            p_id = str(row.get('Order con', row.get('consignment_id', '')))
-            phone = str(row.get('Recipient phone', ''))
-            if phone or p_id:
-                db_query("""
-                    INSERT OR IGNORE INTO orders (pathao_order_id, phone, name, address, total, status)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (p_id, phone, str(row.get('Recipient name', 'Unknown')), str(row.get('Recipient address', '')), row.get('Collectable Amount', 0), row.get('Order stat', 'pending')), commit=True)
-                count += 1
-        return redirect(f"/admin?tab=orders&msg=Successfully Imported {count} orders!")
-    except Exception as e:
-        return redirect(f"/admin?tab=orders&msg=Import Error: {str(e)}")
-
-# =====================================================================
-# GLOBAL FRAUD & ANALYTICS
-# =====================================================================
-@app.route("/api/check-fraud")
-def api_check_fraud():
-    phone = request.args.get("phone")
-    if not phone:
-        return jsonify({"error": "No phone"}), 400
-    random.seed(phone)
-    success = random.randint(35, 100)
-    return jsonify({
-        "phone": phone,
-        "return_count": random.randint(0, 10),
-        "success_rate": success,
-        "risk": 100 - success
-    })
-
-def get_chart_data():
-    labels, data = [], []
-    for i in range(6, -1, -1):
-        target = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-        res = db_query("SELECT COUNT(*) as c FROM orders WHERE created_at LIKE ?", (f"{target}%",), fetchone=True)
-        labels.append((datetime.now() - timedelta(days=i)).strftime('%a'))
-        data.append(res['c'] if res else 0)
-    return {"labels": labels, "data": data}
-
-# =====================================================================
-# ADMIN PANEL ROUTES
-# =====================================================================
-@app.route("/")
-def index():
-    return redirect("/admin")
-
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "POST":
-        u, p = request.form.get("username", "").strip(), request.form.get("password", "").strip()
-        auth = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p), fetchone=True)
-        if auth:
-            session["logged_in"], session["username"] = True, auth["username"]
-            return redirect("/admin?tab=dashboard")
-    return render_template_string('''
-    <body style="background:#020617;color:white;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;">
-        <form method="POST" style="background:#1e293b;padding:50px;border-radius:30px;text-align:center;max-width:400px;width:90%;">
-            <h2 style="color:#6366f1;margin-bottom:20px;">DHAKA PRO ACCESS</h2>
-            <input name="username" placeholder="User" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;border:none;"><br>
-            <input name="password" type="password" placeholder="Pass" required style="width:100%;padding:10px;margin:10px 0;border-radius:10px;border:none;"><br>
-            <button style="width:100%;padding:10px;background:#6366f1;color:white;border:none;border-radius:10px;cursor:pointer;margin-top:10px;">ENTER</button>
-        </form>
-    </body>''')
-
-@app.route("/admin")
-def admin_portal():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    tab = request.args.get("tab", "dashboard")
-    msg = request.args.get("msg", "")
-    chat_with = request.args.get("chat_with", "")
-    s = get_all_settings()
-
-    analytics = {
-        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
-        "chart_data": get_chart_data()
-    }
-    
-    team_count = db_query("SELECT COUNT(*) as c FROM team_members WHERE is_active=1", fetchone=True)["c"] or 0
-    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders WHERE status='pending'", fetchone=True)["c"] or 0
-
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
-    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
-    sort_param = request.args.get("sort", "id_desc")
-    sort_map = {
-        "id_desc": "id DESC",
-        "price_low": "price ASC",
-        "price_high": "price DESC",
-        "name_az": "name COLLATE NOCASE ASC",
-        "stock_low": "stock ASC",
-        "stock_high": "stock DESC",
-    }
-    products_order = sort_map.get(sort_param, "id DESC")
-    # Pagination
-    page = int(request.args.get("page", 1))
-    per_page = 20
-    offset = (page - 1) * per_page
-    
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
-    total_pages = (total_products + per_page - 1) // per_page
-    
-    products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
-    
-    # Attach reviews to products
-    for p in products:
-        reviews = db_query("SELECT * FROM product_reviews WHERE product_id=? ORDER BY id DESC", (p["id"],), fetchall=True) or []
-        p["reviews"] = reviews
-        if reviews:
-            avg = sum(r["rating"] for r in reviews) / len(reviews)
-            p["avg_rating"] = round(avg, 1)
-            p["review_count"] = len(reviews)
-        else:
-            p["avg_rating"] = 0
-            p["review_count"] = 0
-
-    # Inventory stats
-    all_prods = db_query("SELECT * FROM products", fetchall=True) or []
-    low_stock_count = sum(1 for p in all_prods if p["stock"] < 5)
-    out_stock_count = sum(1 for p in all_prods if p["stock"] == 0)
-    discount_count = sum(1 for p in all_prods if p.get("discount_price") and p["discount_price"] > 0)
-    total_value = sum(p["price"] * p["stock"] for p in all_prods)
-
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
-    payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
-
-    chat_history = []
-    if chat_with:
-        chat_history = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 50", (chat_with,), fetchall=True) or []
-        chat_history.reverse()
-
-    template_map = {"products": "inventory"}
-    template_name = template_map.get(tab, tab)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value, team_count=team_count, group_orders_count=group_orders_count)
-
-@app.route("/admin/sync-pathao-status")
-def sync_pathao_status():
-    res = pull_orders_from_pathao()
-    return redirect(url_for('admin_portal', tab='orders', msg=f"Sync Result: {res}"))
-
-@app.route("/admin/chat/send", methods=["POST"])
-def admin_send_message():
-    phone, msg = request.form.get("phone"), request.form.get("message")
-    if phone and msg:
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, msg, session.get("username")), commit=True)
-        send_whatsapp_message(phone, msg)
-    return redirect(f"/admin?tab=chat&chat_with={phone}")
-
-@app.route("/admin/chat/send-image", methods=["POST"])
-def admin_send_image():
-    phone = request.form.get("phone")
-    file = request.files.get("image")
-    caption = request.form.get("caption", "")
-    if not phone or not file:
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=No image selected")
-    filename = secure_filename(f"img_{int(time.time())}_{file.filename}")
-    file_path = os.path.join(MEDIA_FOLDER, filename)
-    file.save(file_path)
-    media_id = upload_media_to_whatsapp(file_path, media_type="image")
-    if media_id and send_whatsapp_media(phone, media_id, media_type="image", caption=caption):
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, f"[IMAGE:{file_path}]", session.get("username")), commit=True)
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Image sent!")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Image upload failed")
-
-@app.route("/admin/chat/send-voice", methods=["POST"])
-def admin_send_voice():
-    phone = request.form.get("phone")
-    voice_file = request.files.get("voice")
-    if not phone or not voice_file:
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=No voice message")
-    filename = secure_filename(f"voice_{int(time.time())}.webm")
-    file_path = os.path.join(MEDIA_FOLDER, filename)
-    voice_file.save(file_path)
-    media_id = upload_media_to_whatsapp(file_path, media_type="audio")
-    if media_id and send_whatsapp_media(phone, media_id, media_type="audio"):
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', ?)", (phone, "[VOICE MESSAGE]", session.get("username")), commit=True)
-        return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Voice sent!")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    return redirect(f"/admin?tab=chat&chat_with={phone}&msg=Voice upload failed")
-
-@app.route("/admin/chat/delete/<phone>")
-def delete_chat(phone):
-    db_query("DELETE FROM messages WHERE from_number=?", (phone,), commit=True)
-    return redirect("/admin?tab=chat&msg=Chat Deleted")
-
-@app.route("/admin/agents/add", methods=["POST"])
-def add_agent():
-    u, p = request.form.get("username"), request.form.get("password")
-    if u and p:
-        db_query("INSERT OR IGNORE INTO agents (username, password) VALUES (?, ?)", (u, p), commit=True)
-    return redirect("/admin?tab=agents&msg=Agent Added")
-
-
-@app.route("/admin/payment/add", methods=["POST"])
-def add_payment_method():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        name = request.form.get("name", "").strip()
-        ptype = request.form.get("type", "").strip()
-        number = request.form.get("number", "").strip()
-        account_name = request.form.get("account_name", "").strip()
-        instructions = request.form.get("instructions", "").strip()
-        if name and ptype:
-            db_query(
-                "INSERT INTO payment_methods (name, type, number, account_name, instructions) VALUES (?, ?, ?, ?, ?)",
-                (name, ptype, number, account_name, instructions),
-                commit=True
-            )
-            db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_PAYMENT', ?)",
-                     (session.get("username"), f"Added {name}"), commit=True)
-            return redirect("/admin?tab=settings&msg=Payment Method Added")
-        return redirect("/admin?tab=settings&msg=Name and Type required")
-    except Exception as e:
-        return redirect(f"/admin?tab=settings&msg=Error: {str(e)}")
-
-@app.route("/admin/payment/update/<int:pid>", methods=["POST"])
-def update_payment_method(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        name = request.form.get("name", "").strip()
-        ptype = request.form.get("type", "").strip()
-        number = request.form.get("number", "").strip()
-        account_name = request.form.get("account_name", "").strip()
-        instructions = request.form.get("instructions", "").strip()
-        is_active = 1 if request.form.get("is_active") else 0
-        db_query(
-            "UPDATE payment_methods SET name=?, type=?, number=?, account_name=?, instructions=?, is_active=? WHERE id=?",
-            (name, ptype, number, account_name, instructions, is_active, pid),
-            commit=True
-        )
-        return redirect("/admin?tab=settings&msg=Payment Method Updated")
-    except Exception as e:
-        return redirect(f"/admin?tab=settings&msg=Error: {str(e)}")
-
-@app.route("/admin/payment/delete/<int:pid>")
-def delete_payment_method(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("DELETE FROM payment_methods WHERE id=?", (pid,), commit=True)
-    return redirect("/admin?tab=settings&msg=Payment Method Deleted")
-
-@app.route("/admin/settings/save", methods=["POST"])
-def save_settings():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    for k, v in request.form.items():
-        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
-    db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'UPDATE_SETTINGS', 'Config saved')", (session.get("username"),), commit=True)
-    return redirect("/admin?tab=settings&msg=Updated Successfully")
-
-@app.route("/admin/db-backup")
-def download_db_backup():
-    if not session.get("logged_in"):
-        return "Access Denied"
-    return send_file(DB_PATH, as_attachment=True, download_name=f"Backup_{datetime.now().strftime('%Y-%m-%d')}.db")
-
-@app.route("/invoice/<int:order_id>")
-def download_invoice(order_id):
-    order = db_query("SELECT * FROM orders WHERE id=?", (order_id,), fetchone=True)
-    if not order:
-        return "Not Found"
-    html = f"""
-    <html><body style='padding:50px;font-family:sans-serif;'>
-    <h1 style='color:#6366f1;'>Dhaka Exclusive Invoice</h1>
-    <hr>
-    <p><strong>Customer:</strong> {order['name']}</p>
-    <p><strong>Phone:</strong> {order['phone']}</p>
-    <p><strong>Address:</strong> {order['address']}</p>
-    <p><strong>Amount:</strong> {order['total']} BDT</p>
-    <p><strong>Status:</strong> {order['status']}</p>
-    </body></html>
-    """
-    pdf_out = BytesIO()
-    pisa.CreatePDF(BytesIO(html.encode("UTF-8")), dest=pdf_out)
-    pdf_out.seek(0)
-    return send_file(pdf_out, as_attachment=True, download_name=f"Invoice_{order_id}.pdf", mimetype='application/pdf')
-
-@app.route("/admin/logout")
-def admin_logout():
-    session.clear()
-    return redirect("/admin/login")
-
-# =====================================================================
-# API ROUTES (Including Engine Status)
-# =====================================================================
-@app.route("/api/engine-status")
-def api_engine_status():
-    cpp_result = cpp_engine_command("status")
-    asm_result = asm_engine_command("asm_status")
-    return jsonify({
-        "cpp_engine": cpp_result,
-        "asm_engine": asm_result,
-        "cpp_available": lib is not None,
-        "asm_available": asm_lib is not None
-    })
-
-@app.route("/api/asm-checksum", methods=["POST"])
-def api_asm_checksum():
-    text = request.json.get("text", "") if request.is_json else request.form.get("text", "")
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-    checksum = asm_fast_checksum(text)
-    py_len = len(text)
-    asm_len = asm_fast_strlen(text)
-    return jsonify({
-        "text": text,
-        "asm_checksum": checksum,
-        "asm_strlen": asm_len,
-        "py_strlen": py_len,
-        "match": asm_len == py_len
-    })
-
-# =====================================================================
-# FOLLOW-UP SYSTEM (Cron Endpoint)
-# =====================================================================
-@app.route("/cron/followup")
-def cron_followup():
-    """Call this via cron job every 6-12 hours. Send follow-up to inactive customers."""
-    secret = request.args.get("secret", "")
-    if secret != os.environ.get("CRON_SECRET", "dhaka-followup-2026"):
-        return jsonify({"error": "Unauthorized"}), 403
-    
-    candidates = db_query("""
-        SELECT DISTINCT u.phone, u.name, u.last_active, u.follow_up_sent 
-        FROM users u
-        LEFT JOIN orders o ON u.phone = o.phone
-        WHERE o.id IS NULL 
-        AND u.follow_up_sent = 0
-        AND u.last_active > datetime('now', '-48 hours')
-        LIMIT 50
-    """, fetchall=True) or []
-    
-    sent_count = 0
-    for user in candidates:
-        phone = user.get("phone", "")
-        msg = (
-            "🛍️ প্রিয় গ্রাহক, আপনি কি Dhaka Exclusive-এর প্রোডাক্টগুলো দেখেছেন? "
-            "আমাদের হট কালেকশন শেষ হওয়ার আগেই অর্ডার করুন! "
-            "ক্যাটালগ দেখতে 'লিস্ট' লিখুন। COD + ফ্রি ডেলিভারি! 🚚"
-        )
-        if send_whatsapp_message(phone, msg):
-            db_query("UPDATE users SET follow_up_sent = 1 WHERE phone = ?", (phone,), commit=True)
-            sent_count += 1
-            time.sleep(1)
-    
-    logger.info(f"Follow-up sent to {sent_count} customers")
-    return jsonify({"sent": sent_count, "candidates": len(candidates)})
-
-# =====================================================================
-# GEMINI AI SALES INTELLIGENCE ENGINE
-# =====================================================================
-GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
-WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
-
-# =====================================================================
-# TWILIO SMS SETUP
-# =====================================================================
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")
-
-def send_sms(to_phone, message):
-    """Send SMS via Twilio API"""
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
-        logger.warning("SMS: Twilio credentials missing")
-        return False
-    try:
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-        data = {"From": TWILIO_PHONE_NUMBER, "To": to_phone, "Body": message}
-        r = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), timeout=30)
-        if r.status_code in (200, 201):
-            logger.info(f"SMS sent to {to_phone}")
-            return True
-        logger.error(f"SMS send failed: {r.status_code} {r.text}")
-        return False
-    except Exception as e:
-        logger.error(f"SMS send error: {e}")
-        return False
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN") or "dhaka-exclusive-verify-2026"
-ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "")
-
-# Messenger Config
-MESSENGER_PAGE_ACCESS_TOKEN = os.environ.get("MESSENGER_PAGE_ACCESS_TOKEN", "")
-MESSENGER_VERIFY_TOKEN = os.environ.get("MESSENGER_VERIFY_TOKEN") or VERIFY_TOKEN
-
-_PRIMARY_MODEL = "gemini-2.5-flash"
-_FALLBACK_MODEL = "gemini-2.5-pro"
-_AI_CACHE = {"products": None, "last_fetch": 0}
-
-def _get_products_text():
-    now = time.time()
-    if _AI_CACHE["products"] is None or (now - _AI_CACHE["last_fetch"]) > 120:
-        rows = db_query("SELECT name, price, stock, description, category, size, color, material FROM products ORDER BY id DESC", fetchall=True) or []
-        lines = []
-        for p in rows:
-            stock = "In Stock" if p.get('stock', 0) > 5 else f"Only {p.get('stock', 0)} left!"
-            desc = p.get('description', '') or ''
-            cat = p.get('category', '') or ''
-            size = p.get('size', '') or ''
-            color = p.get('color', '') or ''
-            material = p.get('material', '') or ''
-            extras = []
-            if cat: extras.append(f"Category: {cat}")
-            if size: extras.append(f"Size: {size}")
-            if color: extras.append(f"Color: {color}")
-            if material: extras.append(f"Material: {material}")
-            if desc: extras.append(f"Details: {desc}")
-            extra_str = f" ({'; '.join(extras)})" if extras else ""
-            lines.append(f"- {p['name']} — {p['price']}৳ — {stock}{extra_str}")
-        _AI_CACHE["products"] = "\n".join(lines) if lines else "No products available"
-        _AI_CACHE["last_fetch"] = now
-    return _AI_CACHE["products"]
-
-def _get_hot_products():
-    hot = db_query("""
-        SELECT p.name, p.price, COUNT(*) as sold FROM orders o
-        JOIN products p ON o.phone = p.fb_product_id
-        WHERE o.created_at > datetime('now', '-30 days')
-        GROUP BY p.id ORDER BY sold DESC LIMIT 5
-    """, fetchall=True)
-    if not hot:
-        hot = db_query("SELECT name, price FROM products ORDER BY id DESC LIMIT 5", fetchall=True) or []
-    return hot
-
-def _get_customer_context(phone):
-    if not phone:
-        return ""
-    orders = db_query("SELECT id, total, status FROM orders WHERE phone=? ORDER BY id DESC LIMIT 3", (phone,), fetchall=True) or []
-    if not orders:
-        return "This is a NEW customer."
-    total_spent = sum(o.get('total', 0) for o in orders)
-    last_order = orders[0]
-    return f"""Customer History:
-- Total Orders: {len(orders)}
-- Total Spent: {total_spent}৳
-- Last Order Status: {last_order.get('status', 'N/A')}"""
-
-def _get_payment_methods_text():
-    """Fetch active payment methods from database for AI responses."""
-    methods = db_query(
-        "SELECT name, type, number, account_name, instructions FROM payment_methods WHERE is_active=1 ORDER BY id",
-        fetchall=True
-    ) or []
-    if not methods:
-        return (
-            "💳 *পেমেন্ট পদ্ধতি:*\n\n"
-            "1️⃣ *ক্যাশ অন ডেলিভারি (COD)* - সবচেয়ে জনপ্রিয়\n"
-            "2️⃣ *bKash:* 017XXXXXXXX (Personal)\n"
-            "   - Send Money করুন\n"
-            "   - রেফারেন্সে আপনার ফোন নম্বর লিখুন\n"
-            "3️⃣ *Nagad:* 017XXXXXXXX\n"
-            "   - Cash Out/Send Money\n\n"
-            "✅ অর্ডার কনফার্মের পর পেমেন্ট করুন।"
-        )
-    
-    lines = ["💳 *পেমেন্ট পদ্ধতি:*\n"]
-    for i, m in enumerate(methods, 1):
-        name = m.get('name', '')
-        ptype = m.get('type', '')
-        number = m.get('number', '')
-        acc_name = m.get('account_name', '')
-        instructions = m.get('instructions', '')
-        
-        lines.append(f"{i}. *{name}* ({ptype})")
-        if number:
-            lines.append(f"   📱 {number}")
-        if acc_name:
-            lines.append(f"   👤 {acc_name}")
-        if instructions:
-            lines.append(f"   📝 {instructions}")
-        lines.append("")
-    
-    lines.append("✅ অর্ডার কনফার্মের পর পেমেন্ট করুন।")
-    lines.append("📸 বিকাশ/নগদে পেমেন্ট করলে স্ক্রিনশট পাঠান।")
-    return "\n".join(lines)
-
-def _get_order_status(phone):
-    if not phone:
-        return None
-    orders = db_query("SELECT id, pathao_order_id, total, status, created_at FROM orders WHERE phone=? ORDER BY id DESC LIMIT 3", (phone,), fetchall=True) or []
-    if not orders:
-        return None
-    lines = ["📦 *আপনার অর্ডার স্ট্যাটাস:*\n"]
-    for o in orders:
-        lines.append(f"• অর্ডার #{o.get('pathao_order_id', o['id'])}")
-        lines.append(f"  স্ট্যাটাস: {o['status']}")
-        lines.append(f"  মোট: {o['total']}৳")
-        lines.append(f"  তারিখ: {o.get('created_at', 'N/A')[:10]}")
-        lines.append("")
-    lines.append("❓ আরও তথ্যের জন্য আমাদের সাথে যোগাযোগ করুন।")
-    return "\n".join(lines)
-
-def _notify_admin_new_order(order_data):
-    if not ADMIN_PHONE:
-        return
-    try:
-        msg = (
-            f"🔔 *নতুন অর্ডার!*\n\n"
-            f"👤 {order_data.get('name', 'Unknown')}\n"
-            f"📞 {order_data.get('phone', 'N/A')}\n"
-            f"📦 {order_data.get('product', 'N/A')} x{order_data.get('quantity', 1)}\n"
-            f"📍 {order_data.get('address', 'N/A')}\n"
-            f"💰 {order_data.get('total', 0)}৳\n\n"
-            f"📋 Admin Panel: dhaka-exclusive-sms-bot-wp-msg.onrender.com/admin"
-        )
-        send_whatsapp_message(ADMIN_PHONE, msg)
-        logger.info(f"Admin notified for order from {order_data.get('phone')}")
-    except Exception as e:
-        logger.error(f"Admin notify error: {e}")
-
-def _analyze_image_with_gemini(image_path, customer_phone=""):
-    if not GEMINI_API_KEY:
-        return "📷 ছবি পেয়েছি। দুঃখিত, AI ভিশন সার্ভিস বর্তমানে অনুপলব্ধ।"
-    
-    products = db_query("SELECT name, price, image_url FROM products LIMIT 50", fetchall=True) or []
-    product_list = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products]) if products else "No products in catalog"
-    
-    try:
-        with open(image_path, "rb") as f:
-            image_bytes = f.read()
-        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        
-        ext = os.path.splitext(image_path)[1].lower()
-        mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png" if ext == ".png" else "image/webp"
-        
-        # Use gemini-1.5-flash which supports vision
-        prompt = (
-            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। কাস্টমার একটি প্রোডাক্টের ছবি পাঠিয়েছে।\n"
-            "ছবিটি সাবধানে দেখো এবং বর্ণনা করো কী প্রোডাক্ট।\n"
-            "তারপর নিচের ক্যাটালগের সাথে তুলনা করে সবচেয়ে কাছাকাছি ম্যাচ খুঁজো।\n"
-            f"আমাদের ক্যাটালগ:\n{product_list}\n\n"
-            "নিয়ম:\n"
-            "১. যদি ছবির প্রোডাক্ট ক্যাটালগের কোনো আইটেমের সাথে মিলে, তাহলে বলো: 'এটি আমাদের [Product Name], দাম [Price]৳।'\n"
-            "২. যদি একদম না মিলে, তাহলে বলো: 'দুঃখিত, এই প্রোডাক্টটি আমাদের ক্যাটালগে পাওয়া যাচ্ছে না। আপনি কি অন্য কিছু দেখতে চান?'\n"
-            "৩. যদি মোটামুটি মিলে কিন্তু নিশ্চিত না, তাহলে বলো: 'এটি আমাদের [Closest Product] এর মতো দেখাচ্ছে, দাম [Price]৳। আপনি কি এটি চাইছেন?'\n"
-            "সংক্ষিপ্ত, বন্ধুসুলভ, বাংলায় উত্তর দাও।"
-        )
-        
-        # Vision requires specific model - use flash for speed
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime, "data": image_b64}}
-                ]
-            }],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 600, "topP": 0.9}
-        }
-        headers = {"Content-Type": "application/json"}
-        r = requests.post(url, json=payload, headers=headers, timeout=45)
-        res = r.json()
-        
-        if res.get("candidates"):
-            parts = res["candidates"][0].get("content", {}).get("parts", [])
-            for part in parts:
-                if "text" in part:
-                    return part["text"].strip()
-        
-        # Log the actual error for debugging
-        if "error" in res:
-            logger.error(f"Image analysis API error: {res.get('error')}")
-        else:
-            logger.error(f"Image analysis no candidates: {res}")
-        return "📷 ছবি পেয়েছি। দুঃখিত, ছবিটি এখন বিশ্লেষণ করা সম্ভব হচ্ছে না। অনুগ্রহ করে প্রোডাক্টের নাম লিখে পাঠান।"
-    except Exception as e:
-        logger.error(f"Image analysis exception: {e}")
-        return "📷 ছবি পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
-
-def _detect_intent(msg):
-    msg_lower = msg.lower()
-    intents = {
-        "price_inquiry": ["দাম", "price", "কত", "cost", "tk", "৳", "taka"],
-        "order_status": ["অর্ডার", "order", "কবে", "when", "status", "delivery", "ডেলিভারি", "কোথায়"],
-        "product_inquiry": ["প্রোডাক্ট", "product", "আছে", "available", "stock", "item"],
-        "discount": ["ডিসকাউন্ট", "discount", "offer", "অফার", "ছাড়", "deal", "কম"],
-        "complaint": ["খারাপ", "bad", "problem", "সমস্যা", "complain", "defect"],
-        "return": ["রিটার্ন", "return", "ফেরত", "change", "বদল"],
-        "greeting": ["হাই", "hello", "hi", "আসসালামু", "salam", "কেমন"],
-        "confirm_order": ["কিনব", "buy", "কনফার্ম", "confirm", "নিব", "চাই", "book"],
-        "location": ["ঠিকানা", "address", "লোকেশন", "shop", "দোকান", "where"],
-        "catalog_request": ["লিস্ট", "list", "ক্যাটালগ", "catalog", "সব", "all", "কী আছে", "ki ace", "কি আছে", "প্রোডাক্ট লিস্ট"],
-        "track_order": ["আমার অর্ডার", "my order", "অর্ডার ট্র্যাক", "track", "কোথায় আমার", "অর্ডারের স্ট্যাটাস"],
-        "payment": ["পেমেন্ট", "payment", "বিকাশ", "bkash", "নগদ", "nagad", "টাকা পাঠাব", "send money"],
-        "photo_request": ["ছবি", "photo", "pic", "image", "ফটো", "দেখাও", "look", "দেখতে চাই", "picture"],
-    }
-    for intent, keywords in intents.items():
-        if any(k in msg_lower for k in keywords):
-            return intent
-    return "general"
-
-def _extract_order_from_text(text, phone):
-    """Extract order info from customer message. Uses AI first, falls back to regex."""
-    text_lower = text.lower().strip()
-    
-    # Quick reject - if no order keywords, skip
-    order_keywords = ["অর্ডার", "order", "কিনব", "buy", "নিব", "চাই", "book", "confirm", "কনফার্ম"]
-    has_order_intent = any(kw in text_lower for kw in order_keywords)
-    
-    # Check if message contains product + location info
-    products = db_query("SELECT name, price FROM products LIMIT 50", fetchall=True) or []
-    matched_product = None
-    matched_price = 0
-    for p in products:
-        pname_lower = p["name"].lower()
-        # Match if any significant word (3+ chars) from product name is in text
-        for word in pname_lower.split():
-            if len(word) >= 3 and word in text_lower:
-                matched_product = p["name"]
-                matched_price = p["price"]
-                break
-        if matched_product:
-            break
-    
-    # FALLBACK PARSER (no AI needed) - detect name, address, quantity
-    def _fallback_parse():
-        result = {"is_order": True, "name": "", "address": "", "product": matched_product or "", "quantity": 1, "total": 0, "phone": phone}
-        
-        # Extract quantity (e.g., "2 টি", "x3", "3pcs")
-        qty_match = re.search(r'(\d+)\s*(টি|pcs|piece|x|X)', text)
-        if qty_match:
-            result["quantity"] = int(qty_match.group(1))
-        
-        # Extract name - look for "আমার নাম" or first sentence
-        name_match = re.search(r'(আমার নাম\s+([\w\s]+))|(name[\s:]+([\w\s]+))', text, re.IGNORECASE)
-        if name_match:
-            result["name"] = (name_match.group(2) or name_match.group(4) or "").strip()[:50]
-        else:
-            # Use first 2-3 words as fallback name
-            words = [w for w in text.split() if len(w) > 2 and not any(k in w.lower() for k in ["অর্ডার", "order", "কিনব", "buy"])]
-            if words:
-                result["name"] = words[0][:20]
-        
-        # Extract address - look for locations/areas in Dhaka
-        dhaka_areas = ["মিরপুর", "গুলশান", "বনানী", "ধানমন্ডি", "উত্তরা", "মোহাম্মদপুর", "শ্যামলী", "আজিমপুর", "খিলগাঁও", "রামপুরা", "হাতিরঝিল", "বসুন্ধরা", "বারিধারা", "তেজগাঁও", "মগবাজার", "মালিবাগ", "খিলক্ষেত", "নিকেতন", "কাকরাইল", "পল্টন", "সেগুনবাগিচা", "শাহবাগ", "এলিফ্যান্ট রোড", "নিউমার্কেট", "ফার্মগেট", "কারওয়ান বাজার", "মহাখালী", "গুলিস্তান", "সদরঘাট", "লালবাগ", "কামরাঙ্গীরচর", "শেরেবাংলা নগর", "আদাবর", "কল্যাণপুর", "শ্যামপুর", "জুরাইন", "কদমতলী", "ডেমরা", "সাভার", "আশুলিয়া", "কেরানীগঞ্জ"]
-        for area in dhaka_areas:
-            if area.lower() in text_lower:
-                result["address"] = area
-                break
-        
-        # If no area matched but has numbers/addresses
-        if not result["address"]:
-            addr_match = re.search(r'(ঠিকানা[\s:]+([\w\s,\.]+))|(address[\s:]+([\w\s,\.]+))', text, re.IGNORECASE)
-            if addr_match:
-                result["address"] = (addr_match.group(2) or addr_match.group(4) or "").strip()[:100]
-            else:
-                # Last resort - anything after product name
-                result["address"] = text.strip()[:100]
-        
-        # Calculate total
-        if matched_price and result["quantity"]:
-            result["total"] = matched_price * result["quantity"]
-        
-        return result if matched_product else {"is_order": False}
-    
-    # Try AI extraction first if we have API key and order intent detected
-    if GEMINI_API_KEY and has_order_intent and matched_product:
-        try:
-            product_lines = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products[:20]])
-            extract_prompt = f"""তুমি একটি অর্ডার এক্সট্রাকশন bot। কাস্টমারের মেসেজ থেকে অর্ডারের তথ্য বের করো।
-
-প্রোডাক্ট লিস্ট:
-{product_lines}
-
-কাস্টমারের মেসেজ: "{text}"
-ফোন: {phone}
-
-শুধু নিচের ফরম্যাটে JSON রিটার্ন করো (অন্য কিছু লিখো না):
-{{
-  "is_order": true,
-  "name": "কাস্টমারের নাম",
-  "address": "কাস্টমারের ঠিকানা",
-  "product": "কোন প্রোডাক্ট চেয়েছে",
-  "quantity": 1,
-  "total": 0,
-  "phone": "{phone}"
-}}
-
-যদি অর্ডার না হয়:
-{{
-  "is_order": false
-}}"""
-            
-            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
-                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500, "topP": 0.9}
-            }
-            r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
-            res = r.json()
-            
-            if res.get("candidates"):
-                txt = res["candidates"][0]["content"]["parts"][0]["text"]
-                json_match = re.search(r'\{.*\}', txt, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group())
-                    if data.get("is_order"):
-                        # Fill in missing values
-                        if not data.get("product") and matched_product:
-                            data["product"] = matched_product
-                        if not data.get("total") and matched_price:
-                            data["total"] = matched_price * data.get("quantity", 1)
-                        if not data.get("phone"):
-                            data["phone"] = phone
-                        return data
-        except Exception as e:
-            logger.warning(f"AI order extraction failed, using fallback: {e}")
-    
-    # Use fallback parser
-    return _fallback_parse() if matched_product else {"is_order": False}
-
-def _save_order(order_data):
-    try:
-        name = order_data.get("name", "Unknown") or "Unknown"
-        address = order_data.get("address", "Not provided") or "Not provided"
-        product = order_data.get("product", "")
-        quantity = int(order_data.get("quantity", 1) or 1)
-        total = int(order_data.get("total", 0) or 0)
-        phone = order_data.get("phone", "")
-        
-        # Calculate total from product price if missing
-        if total == 0 and product:
-            prod = db_query("SELECT price FROM products WHERE name LIKE ? LIMIT 1", (f"%{product}%",), fetchone=True)
-            if prod:
-                total = prod["price"] * quantity
-        
-        # Build a clean order note for address field
-        order_note = f"{product} x{quantity}"
-        if address and address != "Not provided":
-            order_note += f" | {address}"
-        
-        # Insert into orders table
-        db_query(
-            "INSERT INTO orders (pathao_order_id, phone, name, address, total, status) VALUES (?, ?, ?, ?, ?, ?)",
-            (f"WA-{int(time.time())}", phone, name, order_note, total, "pending"),
-            commit=True
-        )
-        
-        # Also log to agent_logs for visibility
-        db_query(
-            "INSERT INTO agent_logs (action, details) VALUES (?, ?)",
-            ("new_order", json.dumps({"phone": phone, "name": name, "product": product, "quantity": quantity, "total": total, "address": address})),
-            commit=True
-        )
-        
-        logger.info(f"Order saved for {phone}: {product} x{quantity} = {total}৳")
-        
-        # Notify admin
-        _notify_admin_new_order(order_data)
-        return True
-    except Exception as e:
-        logger.error(f"Save order error: {e}")
-        return False
-
-def _analyze_voice_with_gemini(voice_path, customer_phone=""):
-    if not GEMINI_API_KEY:
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস সার্ভিস বর্তমানে অনুপলব্ধ। অনুগ্রহ করে টাইপ করে জানান।"
-    
-    # Validate file
-    if not os.path.exists(voice_path):
-        logger.error(f"Voice file not found: {voice_path}")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ফাইলটি পাওয়া যায়নি।"
-    
-    file_size = os.path.getsize(voice_path)
-    if file_size == 0:
-        logger.error("Voice file is empty")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ফাইলটি খালি।"
-    if file_size > 20 * 1024 * 1024:  # 20MB limit
-        logger.error(f"Voice file too large: {file_size} bytes")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি খুব বড়। অনুগ্রহ করে ছোট করে পাঠান।"
-    
-    try:
-        with open(voice_path, "rb") as f:
-            voice_bytes = f.read()
-        voice_b64 = base64.b64encode(voice_bytes).decode("utf-8")
-        
-        products = db_query("SELECT name, price, description FROM products LIMIT 15", fetchall=True) or []
-        product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products]) if products else "No products"
-        
-        prompt = (
-            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। এই অডিওটি শোনো। "
-            "কাস্টমার বাংলা বা ইংরেজিতে কথা বলছে। "
-            "শুধু বাংলায় সংক্ষিপ্ত উত্তর দাও। "
-            "প্রতিটি উত্তরে 'প্রিয় গ্রাহক' বলার দরকার নেই। "
-            f"আমাদের প্রোডাক্ট:\n{product_list}\n\n"
-            "অর্ডার করতে চাইলে সাহায্য করো। প্রশ্নের উত্তর দাও।"
-        )
-        
-        # Use gemini-1.5-flash which reliably supports audio
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": "audio/ogg", "data": voice_b64}}
-                ]
-            }],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
-        }
-        headers = {"Content-Type": "application/json"}
-        
-        logger.info(f"Sending voice to Gemini (size: {file_size} bytes)")
-        r = requests.post(url, json=payload, headers=headers, timeout=45)
-        res = r.json()
-        
-        if res.get("candidates"):
-            parts = res["candidates"][0].get("content", {}).get("parts", [])
-            for part in parts:
-                if "text" in part:
-                    reply = part["text"].strip()
-                    logger.info(f"Voice reply: {reply[:100]}")
-                    return reply
-        
-        # Log exact error
-        if "error" in res:
-            err = res["error"]
-            logger.error(f"Voice API error: {err}")
-            return f"🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস পড়তে পারছে না। (Error: {err.get('code', 'unknown')})"
-        
-        logger.error(f"Voice analysis no candidates: {res}")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি স্পষ্টভাবে বোঝা যায়নি। অনুগ্রহ করে টাইপ করে জানান।"
-    except Exception as e:
-        logger.error(f"Voice analysis exception: {e}")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
-
-def _generate_team_suggestion(team_query):
-    """Generate helpful reply suggestion for team moderators"""
-    if not GEMINI_API_KEY:
-        return "⚙️ AI সার্ভিস বন্ধ আছে।"
-    
-    try:
-        products = db_query("SELECT name, price, stock, description, category, size, color, material FROM products ORDER BY id DESC LIMIT 20", fetchall=True) or []
-        product_lines = "\n".join([f"- {p['name']}: {p['price']}৳ (Stock: {p['stock']})" for p in products]) if products else "কোনো প্রোডাক্ট নেই"
-        
-        prompt = f"""তুমি Dhaka Exclusive-এর senior sales trainer। 
-তোমার টিম মেম্বার একজন কাস্টমারের সাথে কথা বলছে এবং তোমাকে সাহায্য চাইছে।
-
-আমাদের প্রোডাক্ট লিস্ট:
-{product_lines}
-
-টিম মেম্বারের প্রশ্ন/পরিস্থিতি: "{team_query}"
-
-শুধু বাংলায় উত্তর দাও। সরাসরি টিম মেম্বারকে বলে দাও কীভাবে রিপ্লাই দিবে। 
-Short, professional, friendly tone।
-"""
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
-        }
-        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
+        r = requests.post(url, json=payload, timeout=30)
         res = r.json()
         if res.get("candidates"):
-            parts = res["candidates"][0].get("content", {}).get("parts", [])
-            for part in parts:
-                if "text" in part:
-                    return part["text"].strip()
-        return "⚙️ সাজেশন জেনারেট হতে ব্যর্থ হয়েছে।"
+            return res["candidates"][0]["content"]["parts"][0].get("text", "")
+        return "Sorry"
     except Exception as e:
-        logger.error(f"Team suggestion error: {e}")
-        return f"⚙️ Error: {e}"
-
-
-def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
-    if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY missing")
-        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
-
-    if voice_path:
-        return _analyze_voice_with_gemini(voice_path, customer_phone)
-
-    if image_path:
-        return _analyze_image_with_gemini(image_path, customer_phone)
-
-    intent = _detect_intent(user_message)
-
-    if intent == "track_order":
-        status = _get_order_status(customer_phone)
-        if status:
-            return status
-        return "📦 আপনার কোনো অর্ডার পাওয়া যায়নি। অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!"
-
-    if intent == "payment":
-        return _get_payment_methods_text()
-
-    if intent == "confirm_order":
-        order_data = _extract_order_from_text(user_message, customer_phone)
-        if order_data and order_data.get("is_order"):
-            _save_order(order_data)
-            return f"✅ অর্ডার কনফার্মড!\n\n📝 অর্ডার ডিটেইলস:\n• নাম: {order_data.get('name')}\n• প্রোডাক্ট: {order_data.get('product')} x{order_data.get('quantity', 1)}\n• ঠিকানা: {order_data.get('address')}\n• মোট: {order_data.get('total', 0)}৳\n\n📦 ডেলিভারি: ঢাকায় ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা। ক্যাশ অন ডেলিভারি। আপনার অর্ডারটি প্রসেসিং এ আছে!"
-
-    if intent == "catalog_request":
-        products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 30", fetchall=True) or []
-        if not products:
-            return "📦 বর্তমানে ক্যাটালগ আপডেট হচ্ছে। আমাদের নতুন কালেকশন শীঘ্রই আসছে! অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।"
-        
-        catalog_lines = ["🛍️ *Dhaka Exclusive - প্রোডাক্ট ক্যাটালগ*\n"]
-        for i, p in enumerate(products, 1):
-            stock_status = "✅ In Stock" if p.get('stock', 0) > 5 else f"⚠️ Only {p.get('stock', 0)} left!"
-            catalog_lines.append(f"{i}. {p['name']}\n   💰 {p['price']}৳ | {stock_status}")
-        
-        catalog_lines.append(f"\n📌 মোট {len(products)}টি প্রোডাক্ট")
-        catalog_lines.append("🚚 ডেলিভারি: ঢাকা ২৪ ঘণ্টা | বাইরে ৪৮-৭২ ঘণ্টা")
-        catalog_lines.append("💳 পেমেন্ট: ক্যাশ অন ডেলিভারি")
-        catalog_lines.append("\n✨ অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!")
-        
-        return "\n".join(catalog_lines)
-
-    products_text = _get_products_text()
-    hot_products = _get_hot_products()
-    customer_ctx = _get_customer_context(customer_phone)
-    hot_text = "\n".join([f"- {p['name']} — {p['price']}৳" for p in hot_products[:5]])
-
-    chat_ctx = ""
-    if chat_history and len(chat_history) > 0:
-        recent = chat_history[-6:]
-        chat_ctx = "Recent conversation:\n" + "\n".join([
-            f"{'Customer' if m.get('direction') == 'inbound' else 'Assistant'}: {m.get('content', '')[:100]}"
-            for m in recent
-        ])
-
-    intent_prompts = {
-        "price_inquiry": "Customer is asking about PRICE. Be transparent. Mention bundle deals. End with order confirmation question.",
-        "order_status": "Customer is asking about ORDER STATUS. Be reassuring. Give estimated delivery time.",
-        "product_inquiry": "Customer wants to know about PRODUCTS. List relevant products enthusiastically. Suggest complementary items.",
-        "discount": "Customer wants DISCOUNT. Mention loyalty program, referral bonus, bulk order discounts. Create scarcity.",
-        "complaint": "Customer has a COMPLAINT. Apologize sincerely. Promise quick resolution. Offer replacement/refund.",
-        "return": "Customer wants to RETURN. Be understanding. Explain return policy. Offer exchange first.",
-        "greeting": "Customer greeted us. Warm welcome. Mention hot deals or new arrivals.",
-        "confirm_order": "Customer wants to BUY! Confirm enthusiastically. Ask for confirmation details. Create urgency - limited stock.",
-        "location": "Customer asking about LOCATION/SHOP. Explain online-based with COD nationwide.",
-        "general": "General inquiry. Be helpful and steer towards placing an order.",
-        "catalog_request": "Customer wants to see the FULL PRODUCT CATALOG. List ALL available products with prices clearly. Mention COD and fast delivery.",
-        "track_order": "Customer wants to TRACK their order. Check order status and reassure them.",
-        "payment": "Customer is asking about PAYMENT METHODS. Explain COD, bKash, Nagad clearly.",
-        "photo_request": "Customer wants to SEE PRODUCT PHOTOS. Say 'ছবি পাঠাচ্ছি' and mention the product name.",
-    }
-
-    # Only include greeting for first 3 messages of conversation
-    greeting_rule = ""
-    if not chat_history or len(chat_history) <= 3:
-        greeting_rule = 'শুরুতে সংক্ষিপ্তভাবে "প্রিয় গ্রাহক" বলে সম্বোধন করুন।'
-    else:
-        greeting_rule = 'প্রতিটি উত্তর সরাসরি শুরু করুন — "প্রিয় গ্রাহক" বলার প্রয়োজন নেই।'
-
-    # Simple greeting only for first message
-    is_first = not chat_history or len(chat_history) <= 1
-    
-    system_instruction = f"""আপনি Dhaka Exclusive-এর সেলস সহায়ক।
-
-বিজনেস তথ্য:
-- ডেলিভারি: Dhaka ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা
-- পেমেন্ট: COD + বিকাশ/নগদ
-- রিটার্ন: ৭ দিন (ড্যামেজ হলে)
-
-চলতি প্রোডাক্ট:
-{products_text}
-
-🔥 হট সেলিং:
-{hot_text}
-
-{customer_ctx}
-
-ইনটেন্ট: {intent}
-{intent_prompts.get(intent, intent_prompts['general'])}
-
-নিয়ম:
-1. সরাসরি উত্তর দিন — "প্রিয় গ্রাহক" শুধু প্রথম মেসেজে
-2. কখনো "আরে ভাই/আপু" বা "ভাই/আপু" বলবেন না
-3. অর্ডার করতে উৎসাহিত করুন
-4. দাম বলার সময় "মাত্র" "শুধু" ব্যবহার করুন
-5. স্টক কম থাকলে "শেষ হওয়ার আগেই অর্ডার করুন"
-6. কখনো কঠোরভাবে না বলবেন না
-7. ছবি চাইলে "ছবি পাঠাচ্ছি" বলুন
-8. একই কথা বারবার বলবেন না
-"""
-
-    # Build conversation history for Gemini
-    contents = []
-    
-    # Add chat history if available
-    if chat_history and len(chat_history) > 0:
-        for msg in chat_history[-10:]:  # Last 10 messages
-            direction = msg.get("direction", "inbound")
-            role = "user" if direction == "inbound" else "model"
-            content_text = msg.get("content", "")
-            if content_text:
-                contents.append({
-                    "role": role,
-                    "parts": [{"text": content_text[:500]}]
-                })
-    
-    # Add current user message
-    contents.append({
-        "role": "user",
-        "parts": [{"text": user_message}]
-    })
-    
-    payload = {
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
-        },
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 1000,
-            "topP": 0.95
-        }
-    }
-    headers = {"Content-Type": "application/json"}
-
-    def _call_gemini(model_name):
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-        resp = requests.post(url, json=payload, headers=headers, timeout=30)
-        return resp.json()
-
-    try:
-        res = _call_gemini(_PRIMARY_MODEL)
-
-        if "error" in res:
-            err_code = res.get("error", {}).get("code", 0)
-            logger.info(f"Primary model failed ({err_code}), trying fallback {_FALLBACK_MODEL}...")
-            res = _call_gemini(_FALLBACK_MODEL)
-
-        candidates = res.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                return parts[0].get("text", "").strip()
-
-        logger.error(f"Gemini unexpected response: {res}")
-        return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
-    except Exception as e:
-        logger.error(f"Gemini API error: {e}")
-        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
-
-def send_whatsapp_message(to_phone, message):
-    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
-        logger.warning("WhatsApp credentials missing")
-        return False
-    try:
-        url = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to_phone,
-            "type": "text",
-            "text": {"body": message}
-        }
-        r = requests.post(url, json=payload, headers=headers, timeout=30)
-        if r.status_code in (200, 201):
-            logger.info(f"WhatsApp message sent to {to_phone}")
-            return True
-        logger.error(f"WhatsApp send failed: {r.status_code} {r.text}")
-        return False
-    except Exception as e:
-        logger.error(f"WhatsApp send error: {e}")
-        return False
-
-def _try_send_product_image(phone, customer_msg, chat_history):
-    """Try to find product from message and send its image"""
-    try:
-        # Extract potential product name from customer message
-        import re
-        # Remove common words
-        clean_msg = re.sub(r"(ছবি|photo|pic|image|দেখাও|দেখতে|চাই|পাঠাও|দাও|লাগবে|কি|কী|এর|টি|the|a|an)", "", customer_msg, flags=re.IGNORECASE).strip()
-        
-        # Search products by name match
-        products = db_query("SELECT id, name, image_url FROM products WHERE image_url IS NOT NULL AND image_url != ''", fetchall=True) or []
-        
-        best_match = None
-        best_score = 0
-        for p in products:
-            pname = p["name"].lower()
-            # Simple word matching
-            score = 0
-            for word in clean_msg.lower().split():
-                if len(word) > 2 and word in pname:
-                    score += 1
-            if score > best_score:
-                best_score = score
-                best_match = p
-        
-        # Also check recent chat history for product mentions
-        if best_score == 0 and chat_history:
-            for msg in reversed(chat_history[-6:]):
-                msg_text = msg.get("content", "").lower()
-                for p in products:
-                    pname = p["name"].lower()
-                    score = 0
-                    for word in msg_text.split():
-                        if len(word) > 2 and word in pname:
-                            score += 1
-                    if score > best_score:
-                        best_score = score
-                        best_match = p
-        
-        if best_match and best_match.get("image_url"):
-            img_url = best_match["image_url"]
-            logger.info(f"Sending product image: {best_match['name']} to {phone}")
-            
-            # If image_url is a direct URL, download and upload to WhatsApp
-            if img_url.startswith("http"):
-                try:
-                    r = requests.get(img_url, timeout=15)
-                    if r.status_code == 200:
-                        ext = os.path.splitext(img_url.split("?")[0])[1] or ".jpg"
-                        tmp_path = os.path.join(MEDIA_FOLDER, f"prod_send_{int(time.time())}{ext}")
-                        with open(tmp_path, "wb") as f:
-                            f.write(r.content)
-                        media_id = upload_media_to_whatsapp(tmp_path, "image")
-                        if media_id:
-                            send_whatsapp_media(phone, media_id, "image", caption=best_match["name"])
-                            logger.info(f"Product image sent: {best_match['name']}")
-                        # Clean up temp file
-                        try:
-                            os.remove(tmp_path)
-                        except:
-                            pass
-                except Exception as e:
-                    logger.error(f"Failed to send product image: {e}")
-            elif img_url.startswith("[MEDIA:"):
-                # Already a WhatsApp media ID
-                media_id = img_url.replace("[MEDIA:", "").replace("]", "")
-                send_whatsapp_media(phone, media_id, "image", caption=best_match["name"])
-    except Exception as e:
-        logger.error(f"Product image send error: {e}")
-
-
-@app.route("/webhook", methods=["GET", "POST"])
-def webhook():
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        if mode == "subscribe" and token == VERIFY_TOKEN:
-            logger.info("Webhook verified successfully.")
-            return challenge, 200
-        return "Verification failed", 403
-
-    if request.method == "POST":
-        data = request.get_json(force=True, silent=True) or {}
-        logger.info(f"Webhook received: {json.dumps(data, ensure_ascii=False)[:500]}")
-        try:
-            # Detect if this is a Messenger message (object: "page")
-            if data.get("object") == "page":
-                for entry in data.get("entry", []):
-                    for event in entry.get("messaging", []):
-                        sender_id = event.get("sender", {}).get("id", "")
-                        if not sender_id:
-                            continue
-                        sender_name = _get_messenger_name(sender_id)
-                        message = event.get("message", {})
-                        if not message:
-                            continue
-
-                        msg_text = message.get("text", "")
-                        attachments = message.get("attachments", [])
-                        content = msg_text or ""
-                        image_path = None
-                        voice_path = None
-
-                        if attachments:
-                            att = attachments[0]
-                            att_type = att.get("type", "")
-                            if att_type == "image":
-                                image_url = att.get("payload", {}).get("url", "")
-                                if image_url:
-                                    image_path = _download_messenger_media(image_url)
-                                content = "[Photo Received]"
-                            elif att_type in ["audio", "voice"]:
-                                audio_url = att.get("payload", {}).get("url", "")
-                                if audio_url:
-                                    voice_path = _download_messenger_media(audio_url)
-                                content = "🎤 [Voice Received]"
-                            else:
-                                content = f"[{att_type.upper()} Received]"
-
-                        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'messenger')", (sender_id, content), commit=True)
-                        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
-                        db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (sender_id,), commit=True)
-
-                        recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (sender_id,), fetchall=True) or []
-                        recent_msgs.reverse()
-
-                        reply = get_optimized_gemini_reply(content, customer_phone=sender_id, chat_history=recent_msgs, image_path=image_path, voice_path=voice_path)
-                        if reply:
-                            sent = send_messenger_message(sender_id, reply)
-                            if sent:
-                                db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (sender_id, reply), commit=True)
-                            if "ছবি" in content or "photo" in content.lower():
-                                _try_send_product_image(sender_id, content, recent_msgs)
-                return "EVENT_RECEIVED", 200
-
-            # WhatsApp message handling
-            entry_list = data.get("entry", [])
-            for entry in entry_list:
-                changes = entry.get("changes", [])
-                for change in changes:
-                    value = change.get("value", {})
-                    if value.get("messaging_product") != "whatsapp":
-                        continue
-
-                    messages = value.get("messages", [])
-                    contacts = value.get("contacts", [])
-                    sender_name = contacts[0].get("profile", {}).get("name", "Customer") if contacts else "Customer"
-
-                    for msg in messages:
-                        phone = msg.get("from", "")
-                        m_type = msg.get("type", "text")
-                        
-                        content = ""
-                        image_path = None
-                        
-                        if m_type == "text":
-                            content = msg.get("text", {}).get("body", "")
-                        elif m_type == "image":
-                            media_id = msg.get("image", {}).get("id", "")
-                            image_path = _download_whatsapp_media(media_id, "image")
-                            content = "[Photo Received]"
-                        elif m_type in ["voice", "audio"]:
-                            media_id = msg.get(m_type, {}).get("id", "")
-                            voice_path = _download_whatsapp_media(media_id, "voice")
-                            content = "🎤 [Voice Received]"
-                            if voice_path:
-                                db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
-                                db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (phone, sender_name), commit=True)
-                                db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
-                                
-                                recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
-                                recent_msgs.reverse()
-                                
-                                reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, voice_path=voice_path)
-                                if reply:
-                                    sent = send_whatsapp_message(phone, reply)
-                                    if sent:
-                                        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
-                                continue
-                        else:
-                            content = f"[{m_type.upper()} Received]"
-
-                        if not phone or not content:
-                            continue
-
-                        # TEAM MODERATOR MODE: If message starts with "?" or "help" or "সাহায্য" - treat as internal team query
-                        team_keywords = ["?", "help", "সাহায্য", "suggest", "suggestion", "কাস্টমার", "customer boleche", "কাস্টমার বলছে", "কি বলব", "কিভাবে রিপ্লাই"]
-                        is_team_query = any(content.strip().lower().startswith(kw) for kw in team_keywords) or any(kw in content.lower() for kw in ["কাস্টমার বলছে", "customer says", "কি উত্তর দিব", "what to reply"])
-
-                        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
-                        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (phone, sender_name), commit=True)
-                        db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (phone,), commit=True)
-
-                        recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
-                        recent_msgs.reverse()
-
-                        if is_team_query:
-                            # Generate moderator-friendly reply suggestion
-                            reply = _generate_team_suggestion(content)
-                            if reply:
-                                sent = send_whatsapp_message(phone, reply)
-                                if sent:
-                                    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
-                            continue
-
-                        reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, image_path=image_path)
-
-                        if reply:
-                            sent = send_whatsapp_message(phone, reply)
-                            if sent:
-                                db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (phone, reply), commit=True)
-                            
-                            # If customer asked for product photo, send actual image
-                            if "ছবি পাঠাচ্ছি" in reply or "ছবি দেখাচ্ছি" in reply or "photo" in content.lower() or "ছবি" in content:
-                                _try_send_product_image(phone, content, recent_msgs)
-        except Exception as e:
-            logger.error(f"Webhook processing error: {e}")
-        return "EVENT_RECEIVED", 200
-
+        logger.error(f"Gemini error: {e}")
+        return "AI error"
 
 # =====================================================================
-# AI AUTO-DESCRIBE PRODUCT
-# =====================================================================
-def _generate_product_details_with_gemini(name, price):
-    """Use Gemini to auto-generate description, category, size, color, material from product name"""
-    if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY missing, cannot auto-describe")
-        return None
-    try:
-        prompt = f"""You are a product catalog manager for Dhaka Exclusive e-commerce. Based on the product name and price below, generate category, description, size, color, and material.
-
-Product Name: {name}
-Price: {price} BDT
-
-Respond ONLY in this exact format:
-Category: [category like Home, Kitchen, Electronics, Fashion, Beauty, Health]
-Description: [2-line attractive description in Bengali/Bangla]
-Size: [size or N/A]
-Color: [color or N/A]
-Material: [material or N/A]
-"""
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300, "topP": 0.95}
-        }
-        headers = {"Content-Type": "application/json"}
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-        resp = requests.post(url, json=payload, headers=headers, timeout=30)
-        res = resp.json()
-        
-        if "error" in res:
-            logger.error(f"Gemini API error for '{name}': {res.get('error')}")
-            return None
-        
-        candidates = res.get("candidates", [])
-        if candidates:
-            text_resp = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            logger.info(f"Gemini raw response for '{name}': {text_resp[:200]}")
-            result = {"category": "", "description": "", "size": "", "color": "", "material": ""}
-            for line in text_resp.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("Category:"):
-                    result["category"] = line.split(":", 1)[1].strip()
-                elif line.startswith("Description:"):
-                    result["description"] = line.split(":", 1)[1].strip()
-                elif line.startswith("Size:"):
-                    result["size"] = line.split(":", 1)[1].strip()
-                elif line.startswith("Color:"):
-                    result["color"] = line.split(":", 1)[1].strip()
-                elif line.startswith("Material:"):
-                    result["material"] = line.split(":", 1)[1].strip()
-            logger.info(f"Auto-describe parsed for '{name}': {result}")
-            return result
-        else:
-            logger.warning(f"No candidates from Gemini for '{name}': {res}")
-    except Exception as e:
-        logger.error(f"Auto-describe error for '{name}': {e}")
-    return None
-
-@app.route("/admin/product/auto-describe/<int:pid>")
-def auto_describe_product(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        p = db_query("SELECT name, price FROM products WHERE id=?", (pid,), fetchone=True)
-        if not p:
-            return redirect("/admin?tab=inventory&msg=Product not found")
-        
-        details = _generate_product_details_with_gemini(p["name"], p["price"])
-        if details:
-            db_query(
-                "UPDATE products SET category=?, description=?, size=?, color=?, material=? WHERE id=?",
-                (details.get("category"), details.get("description"), details.get("size"), details.get("color"), details.get("material"), pid),
-                commit=True
-            )
-            msg = f"Auto-described: {p['name'][:30]}..."
-        else:
-            msg = "Auto-describe failed — check Gemini key"
-        return redirect(f"/admin?tab=inventory&msg={msg}")
-    except Exception as e:
-        return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
-
-import threading
-
-@app.route("/admin/products/auto-describe-all")
-def auto_describe_all_products():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        products = db_query("SELECT id, name, price FROM products WHERE COALESCE(description, '') = '' LIMIT 50", fetchall=True) or []
-        if not products:
-            return redirect("/admin?tab=inventory&msg=All products already have descriptions")
-        
-        def _process_batch():
-            updated = 0
-            for p in products:
-                try:
-                    details = _generate_product_details_with_gemini(p["name"], p["price"])
-                    if details:
-                        db_query(
-                            "UPDATE products SET category=?, description=?, size=?, color=?, material=? WHERE id=?",
-                            (details.get("category"), details.get("description"), details.get("size"), details.get("color"), details.get("material"), p["id"]),
-                            commit=True
-                        )
-                        updated += 1
-                        time.sleep(0.3)
-                except Exception as e:
-                    logger.error(f"Auto-describe error for {p['name']}: {e}")
-            logger.info(f"Background auto-describe completed: {updated}/{len(products)} products")
-        
-        threading.Thread(target=_process_batch, daemon=True).start()
-        return redirect(f"/admin?tab=inventory&msg=Auto-describing {len(products)} products in background... Refresh in 1 minute")
-    except Exception as e:
-        return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
-
-
-# =====================================================================
-# PRODUCT MANAGEMENT ROUTES
-# =====================================================================
-@app.route("/admin/product/edit-page/<int:pid>")
-def edit_product_page(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    p = db_query("SELECT * FROM products WHERE id=?", (pid,), fetchone=True)
-    if not p:
-        return redirect("/admin?tab=inventory&msg=Product not found")
-    return render_template("edit_product.html", product=p)
-
-@app.route("/admin/products/search")
-def search_products():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    q = request.args.get("q", "").strip()
-    if not q:
-        return redirect("/admin?tab=inventory")
-    
-    # Search by name, category, description, or price
-    search_pattern = f"%{q}%"
-    products = db_query(
-        """SELECT * FROM products 
-           WHERE name LIKE ? OR category LIKE ? OR description LIKE ? OR price LIKE ?
-           ORDER BY id DESC""",
-        (search_pattern, search_pattern, search_pattern, search_pattern),
-        fetchall=True
-    ) or []
-    
-    # Stats
-    all_prods = db_query("SELECT * FROM products", fetchall=True) or []
-    low = sum(1 for p in all_prods if p["stock"] < 5)
-    out = sum(1 for p in all_prods if p["stock"] == 0)
-    disc = sum(1 for p in all_prods if p.get("discount_price") and p["discount_price"] > 0)
-    val = sum(p["price"] * p["stock"] for p in all_prods)
-
-    s = get_all_settings()
-    analytics = {
-        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
-        "chart_data": get_chart_data()
-    }
-    orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
-    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
-    agent_logs = db_query("SELECT * FROM agent_logs ORDER BY id DESC LIMIT 50", fetchall=True) or []
-    payment_methods = db_query("SELECT * FROM payment_methods ORDER BY id", fetchall=True) or []
-    
-    msg = f"Found {len(products)} products matching '{q}'"
-    return render_template(
-        "inventory.html",
-        settings=s, analytics=analytics, orders=orders, users=users,
-        products=products, agent_logs=agent_logs, payment_methods=payment_methods,
-        chat_history=[], active_chat="", msg=msg, search_query=q,
-        page=1, total_pages=1, total_products=len(products), per_page=50, sort_by="id_desc",
-        low_stock_count=low, out_stock_count=out, discount_count=disc, total_value=val
-    )
-
-@app.route("/admin/product/add", methods=["POST"])
-def add_product():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        name = request.form.get("name", "").strip()
-        price = int(request.form.get("price", 0))
-        stock = int(request.form.get("stock", 10))
-        fb_id = request.form.get("fb_product_id", "").strip()
-        image_url = request.form.get("image_url", "").strip()
-        
-        # Handle image upload
-        file = request.files.get("image")
-        if file and file.filename:
-            filename = secure_filename(f"prod_{int(time.time())}_{file.filename}")
-            file_path = os.path.join(MEDIA_FOLDER, filename)
-            file.save(file_path)
-            # Upload to WhatsApp media if possible
-            media_id = upload_media_to_whatsapp(file_path, "image")
-            if media_id:
-                image_url = f"[MEDIA:{media_id}]"
-            else:
-                image_url = file_path  # fallback local path
-        
-        description = request.form.get("description", "").strip()
-        category = request.form.get("category", "").strip()
-        size = request.form.get("size", "").strip()
-        color = request.form.get("color", "").strip()
-        material = request.form.get("material", "").strip()
-        
-        db_query(
-            "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (fb_id or None, name, price, stock, image_url or None, description or None, category or None, size or None, color or None, material or None),
-            commit=True
-        )
-        db_query("INSERT INTO agent_logs (username, action, details) VALUES (?, 'ADD_PRODUCT', ?)",
-                 (session.get("username"), f"Added {name}"), commit=True)
-        return redirect("/admin?tab=products&msg=Product Added Successfully")
-    except Exception as e:
-        logger.error(f"Add product error: {e}")
-        return redirect(f"/admin?tab=products&msg=Error: {str(e)}")
-
-@app.route("/admin/product/update/<int:pid>", methods=["POST"])
-def update_product(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        name = request.form.get("name", "").strip()
-        price = int(request.form.get("price", 0))
-        stock = int(request.form.get("stock", 0))
-        fb_id = request.form.get("fb_product_id", "").strip()
-        image_url = request.form.get("image_url", "").strip()
-        
-        file = request.files.get("image")
-        if file and file.filename:
-            filename = secure_filename(f"prod_{int(time.time())}_{file.filename}")
-            file_path = os.path.join(MEDIA_FOLDER, filename)
-            file.save(file_path)
-            media_id = upload_media_to_whatsapp(file_path, "image")
-            if media_id:
-                image_url = f"[MEDIA:{media_id}]"
-            else:
-                image_url = file_path
-        
-        description = request.form.get("description", "").strip()
-        category = request.form.get("category", "").strip()
-        size = request.form.get("size", "").strip()
-        color = request.form.get("color", "").strip()
-        material = request.form.get("material", "").strip()
-        
-        db_query(
-            "UPDATE products SET fb_product_id=?, name=?, price=?, stock=?, image_url=?, description=?, category=?, size=?, color=?, material=? WHERE id=?",
-            (fb_id or None, name, price, stock, image_url or None, description or None, category or None, size or None, color or None, material or None, pid),
-            commit=True
-        )
-        return redirect("/admin?tab=products&msg=Product Updated")
-    except Exception as e:
-        logger.error(f"Update product error: {e}")
-        return redirect(f"/admin?tab=products&msg=Error: {str(e)}")
-
-@app.route("/admin/product/delete/<int:pid>")
-def delete_product(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("DELETE FROM products WHERE id=?", (pid,), commit=True)
-    return redirect("/admin?tab=products&msg=Product Deleted")
-
-@app.route("/admin/products/clear")
-def clear_all_products():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("DELETE FROM products", commit=True)
-    return redirect("/admin?tab=inventory&msg=All Products Cleared — Ready for Re-Sync")
-
-
-# =====================================================================
-# PRODUCT SORTING
-# =====================================================================
-@app.route("/admin/products/sort")
-def sort_products():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    sort_by = request.args.get("sort_by", "id_desc")
-    return redirect(f"/admin?tab=inventory&sort={sort_by}")
-
-# =====================================================================
-# PRODUCT BULK ACTION
-# =====================================================================
-@app.route("/admin/products/bulk-action", methods=["POST"])
-def bulk_action():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    action = request.form.get("bulk_action", "")
-    selected = request.form.getlist("selected_products")
-    if not selected:
-        return redirect("/admin?tab=inventory&msg=No products selected")
-    
-    ids = [int(x) for x in selected]
-    placeholders = ",".join(["?"] * len(ids))
-    
-    if action == "delete":
-        db_query(f"DELETE FROM products WHERE id IN ({placeholders})", tuple(ids), commit=True)
-        msg = f"Deleted {len(ids)} products"
-    elif action == "stock_10":
-        db_query(f"UPDATE products SET stock = 10 WHERE id IN ({placeholders})", tuple(ids), commit=True)
-        msg = f"Set stock to 10 for {len(ids)} products"
-    elif action == "stock_50":
-        db_query(f"UPDATE products SET stock = 50 WHERE id IN ({placeholders})", tuple(ids), commit=True)
-        msg = f"Set stock to 50 for {len(ids)} products"
-    elif action == "discount_10":
-        for pid in ids:
-            p = db_query("SELECT price FROM products WHERE id=?", (pid,), fetchone=True)
-            if p:
-                disc = int(p["price"] * 0.9)
-                db_query("UPDATE products SET discount_price = ? WHERE id = ?", (disc, pid), commit=True)
-        msg = f"Applied 10% discount to {len(ids)} products"
-    elif action == "discount_25":
-        for pid in ids:
-            p = db_query("SELECT price FROM products WHERE id=?", (pid,), fetchone=True)
-            if p:
-                disc = int(p["price"] * 0.75)
-                db_query("UPDATE products SET discount_price = ? WHERE id = ?", (disc, pid), commit=True)
-        msg = f"Applied 25% discount to {len(ids)} products"
-    elif action == "clear_discount":
-        db_query(f"UPDATE products SET discount_price = NULL WHERE id IN ({placeholders})", tuple(ids), commit=True)
-        msg = f"Cleared discount for {len(ids)} products"
-    else:
-        msg = "Unknown action"
-    
-    return redirect(f"/admin?tab=inventory&msg={msg}")
-
-# =====================================================================
-# EXPORT TO EXCEL
-# =====================================================================
-@app.route("/admin/products/export/excel")
-def export_excel():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    sort_param = request.args.get("sort", "id_desc")
-    sort_map = {
-        "id_desc": "id DESC",
-        "price_low": "price ASC",
-        "price_high": "price DESC",
-        "name_az": "name COLLATE NOCASE ASC",
-        "stock_low": "stock ASC",
-        "stock_high": "stock DESC",
-    }
-    products_order = sort_map.get(sort_param, "id DESC")
-    # Pagination
-    page = int(request.args.get("page", 1))
-    per_page = 20
-    offset = (page - 1) * per_page
-    
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
-    total_pages = (total_products + per_page - 1) // per_page
-    
-    products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
-    
-    # Attach reviews to products
-    for p in products:
-        reviews = db_query("SELECT * FROM product_reviews WHERE product_id=? ORDER BY id DESC", (p["id"],), fetchall=True) or []
-        p["reviews"] = reviews
-        if reviews:
-            avg = sum(r["rating"] for r in reviews) / len(reviews)
-            p["avg_rating"] = round(avg, 1)
-            p["review_count"] = len(reviews)
-        else:
-            p["avg_rating"] = 0
-            p["review_count"] = 0
-    
-    from io import BytesIO
-    import openpyxl
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Products"
-    headers = ["ID", "FB ID", "Name", "Price", "Discount", "Stock", "Category", "Size", "Color", "Material", "Description"]
-    ws.append(headers)
-    for p in products:
-        ws.append([
-            p["id"], p.get("fb_product_id", ""), p["name"], p["price"],
-            p.get("discount_price", ""), p["stock"], p.get("category", ""),
-            p.get("size", ""), p.get("color", ""), p.get("material", ""),
-            p.get("description", "")
-        ])
-    
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                     as_attachment=True, download_name="dhaka_exclusive_products.xlsx")
-
-# =====================================================================
-# EXPORT TO PDF
-# =====================================================================
-@app.route("/admin/products/export/pdf")
-def export_pdf():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    sort_param = request.args.get("sort", "id_desc")
-    sort_map = {
-        "id_desc": "id DESC",
-        "price_low": "price ASC",
-        "price_high": "price DESC",
-        "name_az": "name COLLATE NOCASE ASC",
-        "stock_low": "stock ASC",
-        "stock_high": "stock DESC",
-    }
-    products_order = sort_map.get(sort_param, "id DESC")
-    # Pagination
-    page = int(request.args.get("page", 1))
-    per_page = 20
-    offset = (page - 1) * per_page
-    
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
-    total_pages = (total_products + per_page - 1) // per_page
-    
-    products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
-    
-    # Attach reviews to products
-    for p in products:
-        reviews = db_query("SELECT * FROM product_reviews WHERE product_id=? ORDER BY id DESC", (p["id"],), fetchall=True) or []
-        p["reviews"] = reviews
-        if reviews:
-            avg = sum(r["rating"] for r in reviews) / len(reviews)
-            p["avg_rating"] = round(avg, 1)
-            p["review_count"] = len(reviews)
-        else:
-            p["avg_rating"] = 0
-            p["review_count"] = 0
-    
-    from io import BytesIO
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib import colors
-    
-    output = BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=A4)
-    elements = []
-    styles = getSampleStyleSheet()
-    elements.append(Paragraph("<b>Dhaka Exclusive - Product Catalog</b>", styles["Title"]))
-    elements.append(Spacer(1, 12))
-    
-    data = [["#", "Name", "Price", "Stock", "Category"]]
-    for p in products[:100]:
-        data.append([str(p["id"]), p["name"][:30], f"{p['price']}৳", str(p["stock"]), p.get("category", "")])
-    
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR", (0, 1), (-1, -1), colors.whitesmoke),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#334155")),
-    ]))
-    elements.append(table)
-    doc.build(elements)
-    output.seek(0)
-    return send_file(output, mimetype="application/pdf", as_attachment=True, download_name="dhaka_exclusive_products.pdf")
-
-# =====================================================================
-# QR CODE GENERATOR
-# =====================================================================
-@app.route("/admin/product/qr/<int:pid>")
-def generate_qr(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    p = db_query("SELECT * FROM products WHERE id=?", (pid,), fetchone=True)
-    if not p:
-        return "Product not found", 404
-    
-    import qrcode
-    from io import BytesIO
-    
-    data = f"Product: {p['name']}\nPrice: {p['price']}৳\nStock: {p['stock']}"
-    img = qrcode.make(data)
-    output = BytesIO()
-    img.save(output, "PNG")
-    output.seek(0)
-    return send_file(output, mimetype="image/png")
-
-# =====================================================================
-# ADD REVIEW
-# =====================================================================
-@app.route("/admin/product/review/<int:pid>", methods=["POST"])
-def add_review(pid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    rating = int(request.form.get("rating", 5))
-    comment = request.form.get("comment", "").strip()
-    customer_name = request.form.get("customer_name", "Anonymous").strip()
-    
-    db_query(
-        "INSERT INTO product_reviews (product_id, rating, comment, customer_name) VALUES (?, ?, ?, ?)",
-        (pid, rating, comment, customer_name), commit=True
-    )
-    return redirect(f"/admin?tab=inventory&msg=Review added")
-
-
-@app.route("/admin/sync-facebook-trigger")
-def sync_facebook_trigger():
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    try:
-        s = get_all_settings()
-        catalog_id = s.get("fb_catalogue_id", "").strip()
-        token = s.get("fb_access_token", "").strip()
-        if not catalog_id or not token:
-            return redirect("/admin?tab=inventory&msg=Facebook Catalog ID or Token Missing")
-        
-        # Auto-add missing columns to products table
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("PRAGMA table_info(products)")
-            existing_cols = [col[1] for col in c.fetchall()]
-            for col_name in ["description", "category", "size", "color", "material"]:
-                if col_name not in existing_cols:
-                    c.execute(f"ALTER TABLE products ADD COLUMN {col_name} TEXT")
-                    logger.info(f"Added column '{col_name}' to products table")
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.warning(f"Column migration error: {e}")
-        
-        added = 0
-        updated = 0
-        total_fetched = 0
-        next_url = f"https://graph.facebook.com/v18.0/{catalog_id}/products"
-        params = {
-            "access_token": token,
-            "fields": "id,name,price,availability,image_url",
-            "limit": 100
-        }
-        
-        # Pagination loop — fetch ALL products
-        while next_url and total_fetched < 5000:
-            r = requests.get(next_url, params=params if next_url == f"https://graph.facebook.com/v18.0/{catalog_id}/products" else None, timeout=30)
-            res = r.json()
-            
-            if "error" in res:
-                err_msg = res.get("error", {}).get("message", "Unknown error")
-                return redirect(f"/admin?tab=inventory&msg=Facebook Error: {err_msg}")
-            
-            items = res.get("data", [])
-            if not items:
-                break
-            
-            for item in items:
-                fb_id = item.get("id", "")
-                name = item.get("name", "")
-                
-                # Try multiple price fields from Facebook Catalog
-                price = 0
-                price_found = False
-                for price_key in ["price", "sale_price", "price_range", "unit_price"]:
-                    price_raw = item.get(price_key)
-                    if price_raw:
-                        try:
-                            if isinstance(price_raw, dict):
-                                price = int(float(price_raw.get("amount", 0)))
-                                price_found = True
-                                break
-                            elif isinstance(price_raw, str):
-                                # Handle "BDT590.00", "BDT1,050.00", "1000 BDT", "1000.00"
-                                import re
-                                # Remove currency text and commas, extract number
-                                cleaned = re.sub(r'[^\d.]', '', price_raw.replace(',', ''))
-                                if cleaned:
-                                    price = int(float(cleaned))
-                                    price_found = True
-                                    break
-                            elif isinstance(price_raw, (int, float)):
-                                price = int(price_raw)
-                                price_found = True
-                                break
-                        except Exception as e:
-                            logger.debug(f"Price key '{price_key}' failed for {fb_id}: {e}")
-                            continue
-                
-                if not price_found:
-                    # Try nested in product_data
-                    pdata = item.get("product_data", {})
-                    if pdata and "price" in pdata:
-                        try:
-                            pdata_price = pdata["price"]
-                            if isinstance(pdata_price, dict):
-                                price = int(float(pdata_price.get("amount", 0)))
-                            elif isinstance(pdata_price, str):
-                                import re
-                                cleaned = re.sub(r'[^\d.]', '', pdata_price.replace(',', ''))
-                                if cleaned:
-                                    price = int(float(cleaned))
-                        except:
-                            pass
-                
-                if price == 0:
-                    logger.warning(f"Could not parse price for {fb_id}, name='{name}', raw_price_data={item.get('price')}")
-                availability = item.get("availability", "")
-                image = item.get("image_url", "")
-                stock = 10 if availability == "in stock" else 0
-                
-                existing = db_query("SELECT id FROM products WHERE fb_product_id=?", (fb_id,), fetchone=True)
-                if existing:
-                    db_query(
-                        "UPDATE products SET name=?, price=?, stock=?, image_url=? WHERE fb_product_id=?",
-                        (name, price, stock, image, fb_id), commit=True
-                    )
-                    updated += 1
-                else:
-                    db_query(
-                        "INSERT INTO products (fb_product_id, name, price, stock, image_url, description, category, size, color, material) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)",
-                        (fb_id, name, price, stock, image), commit=True
-                    )
-                    added += 1
-            
-            total_fetched += len(items)
-            logger.info(f"Fetched {len(items)} products, total: {total_fetched}")
-            
-            # Get next page URL
-            paging = res.get("paging", {})
-            next_url = paging.get("next")
-            params = None  # next URL already contains all params
-        
-        msg = f"Facebook Sync: {added} added, {updated} updated (Total: {total_fetched})"
-        logger.info(msg)
-        return redirect(f"/admin?tab=inventory&msg={msg}")
-    except Exception as e:
-        logger.error(f"Facebook sync error: {e}")
-        return redirect(f"/admin?tab=inventory&msg=Sync Error: {str(e)}")
-
-
-# =====================================================================
-# MESSENGER BOT FUNCTIONS
-# =====================================================================
-def _download_messenger_media(url):
-    """Download Messenger media from URL (images/videos come as URLs)"""
-    try:
-        r = requests.get(url, timeout=30)
-        if r.status_code == 200:
-            ext = ".jpg" if "image" in r.headers.get("Content-Type", "") else ".mp4"
-            filename = f"msgr_{int(time.time())}{ext}"
-            filepath = os.path.join(MEDIA_FOLDER, filename)
-            with open(filepath, "wb") as f:
-                f.write(r.content)
-            return filepath
-    except Exception as e:
-        logger.error(f"Messenger media download error: {e}")
-    return None
-
-def send_messenger_message(recipient_id, message_text):
-    """Send text reply via Messenger Send API"""
-    if not MESSENGER_PAGE_ACCESS_TOKEN:
-        logger.error("MESSENGER_PAGE_ACCESS_TOKEN not set")
-        return False
-    try:
-        url = f"https://graph.facebook.com/v18.0/me/messages?access_token={MESSENGER_PAGE_ACCESS_TOKEN}"
-        payload = {
-            "recipient": {"id": recipient_id},
-            "message": {"text": message_text[:2000]}
-        }
-        r = requests.post(url, json=payload, timeout=20)
-        res = r.json()
-        if res.get("message_id"):
-            return True
-        logger.error(f"Messenger send error: {res}")
-        return False
-    except Exception as e:
-        logger.error(f"Messenger send exception: {e}")
-        return False
-
-def _get_messenger_name(sender_id):
-    """Get user name from Messenger profile API"""
-    if not MESSENGER_PAGE_ACCESS_TOKEN:
-        return "Messenger User"
-    try:
-        url = f"https://graph.facebook.com/v18.0/{sender_id}?access_token={MESSENGER_PAGE_ACCESS_TOKEN}&fields=first_name,last_name"
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        fname = data.get("first_name", "")
-        lname = data.get("last_name", "")
-        return f"{fname} {lname}".strip() or "Messenger User"
-    except Exception:
-        return "Messenger User"
-
-@app.route("/messenger-webhook", methods=["GET", "POST"])
-def messenger_webhook():
-    """Handle Messenger Platform webhooks"""
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        logger.info(f"Messenger verify: mode={mode}, token={token}, challenge={challenge}")
-        if mode == "subscribe" and token == MESSENGER_VERIFY_TOKEN:
-            if challenge is not None:
-                # Facebook needs the exact challenge echoed back as plain text
-                logger.info("Messenger webhook verified successfully.")
-                return str(challenge), 200
-            logger.warning("Messenger verify: challenge was None")
-            return "Challenge missing", 400
-        logger.warning(f"Messenger verify failed: mode={mode}, token_match={token == MESSENGER_VERIFY_TOKEN}")
-        return "Verification failed", 403
-
-    if request.method == "POST":
-        data = request.get_json(force=True, silent=True) or {}
-        logger.info(f"Messenger webhook received: {json.dumps(data, ensure_ascii=False)[:500]}")
-        try:
-            entry_list = data.get("entry", [])
-            for entry in entry_list:
-                messaging_events = entry.get("messaging", [])
-                for event in messaging_events:
-                    sender_id = event.get("sender", {}).get("id", "")
-                    if not sender_id:
-                        continue
-
-                    # Get sender name
-                    sender_name = _get_messenger_name(sender_id)
-
-                    # Handle message
-                    message = event.get("message", {})
-                    if not message:
-                        continue
-
-                    msg_text = message.get("text", "")
-                    attachments = message.get("attachments", [])
-                    msg_type = "text"
-
-                    image_path = None
-                    voice_path = None
-                    content = msg_text or ""
-
-                    # Handle attachments (image, audio, video)
-                    if attachments:
-                        att = attachments[0]
-                        att_type = att.get("type", "")
-                        if att_type == "image":
-                            msg_type = "image"
-                            image_url = att.get("payload", {}).get("url", "")
-                            if image_url:
-                                image_path = _download_messenger_media(image_url)
-                            content = "[Photo Received]"
-                        elif att_type in ["audio", "voice"]:
-                            msg_type = "voice"
-                            audio_url = att.get("payload", {}).get("url", "")
-                            if audio_url:
-                                voice_path = _download_messenger_media(audio_url)
-                            content = "🎤 [Voice Received]"
-                        elif att_type == "video":
-                            msg_type = "video"
-                            content = "[Video Received]"
-                        else:
-                            content = f"[{att_type.upper()} Received]"
-
-                    # Store in DB (use sender_id as 'phone' for Messenger)
-                    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'messenger')", (sender_id, content), commit=True)
-                    db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
-                    db_query("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE phone = ?", (sender_id,), commit=True)
-
-                    # Get recent chat history
-                    recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (sender_id,), fetchall=True) or []
-                    recent_msgs.reverse()
-
-                    # Generate AI reply
-                    reply = get_optimized_gemini_reply(
-                        content,
-                        customer_phone=sender_id,
-                        chat_history=recent_msgs,
-                        image_path=image_path,
-                        voice_path=voice_path
-                    )
-
-                    if reply:
-                        sent = send_messenger_message(sender_id, reply)
-                        if sent:
-                            db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (sender_id, reply), commit=True)
-
-                        # Try send product image if mentioned
-                        if msg_type == "text" and ("ছবি" in content or "photo" in content.lower()):
-                            _try_send_product_image(sender_id, content, recent_msgs)
-
-        except Exception as e:
-            logger.error(f"Messenger webhook processing error: {e}")
-        return "EVENT_RECEIVED", 200
-
-
-# =====================================================================
-# KNOWLEDGE SYNC (Facebook + Website + Products)
-# =====================================================================
-_KNOWLEDGE_CACHE = {"text": "", "last_fetch": 0}
-
-def _build_knowledge_base():
-    """Build comprehensive knowledge from Facebook, Website, Products"""
-    now = time.time()
-    if _KNOWLEDGE_CACHE["text"] and (now - _KNOWLEDGE_CACHE["last_fetch"]) < 300:
-        return _KNOWLEDGE_CACHE["text"]
-    
-    lines = []
-    lines.append("=== DHAKA EXCLUSIVE KNOWLEDGE BASE ===\n")
-    
-    # Products
-    products = db_query("SELECT name, price, stock, description, category, size, color, material FROM products ORDER BY id DESC", fetchall=True) or []
-    lines.append(f"TOTAL PRODUCTS: {len(products)}\n")
-    for p in products:
-        lines.append(f"- {p['name']}: {p['price']}৳ | Stock: {p['stock']} | Cat: {p.get('category','')} | Size: {p.get('size','')} | Color: {p.get('color','')} | Desc: {p.get('description','')}")
-    
-    # Facebook Page Info (if available)
-    try:
-        s = get_all_settings()
-        fb_token = s.get("fb_access_token", "").strip()
-        if fb_token:
-            fb_url = f"https://graph.facebook.com/v18.0/me?access_token={fb_token}&fields=name,about,description,phone,website"
-            r = requests.get(fb_url, timeout=10)
-            fb_data = r.json()
-            lines.append(f"\n=== FACEBOOK PAGE ===")
-            lines.append(f"Name: {fb_data.get('name', '')}")
-            lines.append(f"About: {fb_data.get('about', '')}")
-            lines.append(f"Phone: {fb_data.get('phone', '')}")
-            lines.append(f"Website: {fb_data.get('website', '')}")
-    except Exception as e:
-        logger.debug(f"Facebook knowledge fetch: {e}")
-    
-    # Website info (if WEBSITE_URL set)
-    try:
-        website_url = os.environ.get("WEBSITE_URL", "")
-        if website_url:
-            lines.append(f"\n=== WEBSITE ===")
-            lines.append(f"URL: {website_url}")
-            r = requests.get(website_url, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-            title = re.search(r'<title>(.*?)</title>', r.text, re.I)
-            if title:
-                lines.append(f"Title: {title.group(1).strip()}")
-            desc = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
-            if desc:
-                lines.append(f"Description: {desc.group(1).strip()}")
-    except Exception as e:
-        logger.debug(f"Website knowledge fetch: {e}")
-    
-    result = "\n".join(lines)
-    _KNOWLEDGE_CACHE["text"] = result
-    _KNOWLEDGE_CACHE["last_fetch"] = now
-    return result
-
-
-# =====================================================================
-# BUSINESS WHATSAPP: Silent Monitor + Moderator Alerts
-# =====================================================================
-@app.route("/business-webhook", methods=["POST"])
-def business_webhook():
-    """Customer messages to Business WhatsApp → AI analyzes → Alert moderators"""
-    data = request.get_json(force=True, silent=True) or {}
-    
-    try:
-        customer_phone = data.get("customer_phone", "")
-        customer_name = data.get("customer_name", "Customer")
-        message = data.get("message", "").strip()
-        media_type = data.get("media_type", "")
-        media_data = data.get("media_data", "")
-        
-        if not message and not media_data:
-            return jsonify({"status": "ignored", "reason": "empty"})
-        
-        logger.info(f"[BUSINESS] Customer {customer_name} ({customer_phone}): {message[:60]}")
-        
-        # Save to DB (silent record)
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'business_customer')", (customer_phone, message), commit=True)
-        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (customer_phone, customer_name), commit=True)
-        
-        # Handle image
-        image_path = None
-        if media_data and media_type and media_type.startswith("image"):
-            try:
-                ext = media_type.split("/")[1] if "/" in media_type else "jpg"
-                image_path = f"/tmp/biz_img_{int(time.time())}.{ext}"
-                with open(image_path, "wb") as f:
-                    f.write(base64.b64decode(media_data))
-                logger.info(f"[BUSINESS] Image saved: {image_path}")
-            except Exception as e:
-                logger.error(f"[BUSINESS] Image save error: {e}")
-        
-        # AI Analysis: What does customer want?
-        if not GEMINI_API_KEY:
-            return jsonify({"status": "no_key"})
-        
-        # Get products for context
-        products = db_query("SELECT name, price, stock, image_url FROM products ORDER BY id DESC LIMIT 100", fetchall=True) or []
-        product_list = "\n".join([f"- {p['name']}: {p['price']}৳ (stock: {p['stock']})" for p in products[:30]])
-        
-        # Build analysis prompt
-        image_note = "\n[Customer sent a product photo - please analyze]" if image_path else ""
-        
-        prompt = f"""তুমি Dhaka Exclusive-এর সেলস অ্যানালিস্ট। একজন কাস্টমারের মেসেজ বিশ্লেষণ করো।
-
-কাস্টমার: {customer_name}
-ফোন: {customer_phone}
-মেসেজ: "{message}"{image_note}
-
-আমাদের টপ প্রোডাক্ট:
-{product_list}
-
-তোমার কাজ:
-১. কাস্টমার কী চাইছে তা সারাংশে বলো (1 লাইন)
-২. কোন প্রোডাক্ট সম্পর্কে জিজ্ঞেস করেছে তা চিহ্নিত করো
-৩. কাস্টমারের জন্য একটি পারফেক্ট রিপ্লাই তৈরি করো (বাংলায়, বন্ধুসুলভ)
-৪. Urgency লেভেল বলো (low/medium/high - অর্ডারের সম্ভাবনা অনুযায়ী)
-
-Output format (strictly):
-SUMMARY: <কাস্টমার কী চায়>
-PRODUCT: <ম্যাচ হওয়া প্রোডাক্ট নাম বা "unknown">
-PRICE: <দাম বা "N/A">
-REPLY: <কাস্টমারকে পাঠানোর রিপ্লাই>
-URGENCY: <low/medium/high>
-"""
-
-        # Call Gemini
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800, "topP": 0.9}
-        }
-        
-        # If image present, use vision
-        if image_path and os.path.exists(image_path):
-            with open(image_path, "rb") as f:
-                image_b64 = base64.b64encode(f.read()).decode("utf-8")
-            ext = os.path.splitext(image_path)[1].lower()
-            mime = "image/jpeg" if ext in [".jpg",".jpeg"] else "image/png" if ext==".png" else "image/webp"
-            payload["contents"][0]["parts"].append({"inline_data": {"mime_type": mime, "data": image_b64}})
-        
-        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=45)
-        res = r.json()
-        
-        ai_reply = ""
-        summary = ""
-        product = ""
-        price = ""
-        urgency = "medium"
-        
-        if res.get("candidates"):
-            parts = res["candidates"][0].get("content", {}).get("parts", [])
-            for part in parts:
-                if "text" in part:
-                    ai_reply = part["text"].strip()
-                    break
-            
-            # Parse structured output
-            for line in ai_reply.split("\n"):
-                if line.startswith("SUMMARY:"): summary = line.replace("SUMMARY:", "").strip()
-                if line.startswith("PRODUCT:"): product = line.replace("PRODUCT:", "").strip()
-                if line.startswith("PRICE:"): price = line.replace("PRICE:", "").strip()
-                if line.startswith("REPLY:"): 
-                    reply_text = line.replace("REPLY:", "").strip()
-                if line.startswith("URGENCY:"): urgency = line.replace("URGENCY:", "").strip().lower()
-        
-        if not summary:
-            summary = message[:100]
-        
-        # Build moderator alert
-        urgency_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(urgency, "🟡")
-        
-        alert = f"""{urgency_emoji} *নতুন কাস্টমার ইনকোয়ারি*
-
-👤 *নাম:* {customer_name}
-📱 *নাম্বার:* {customer_phone}
-💬 *মেসেজ:* {message[:200]}{' [📷 Photo]' if image_path else ''}
-
-📋 *AI সারাংশ:*
-{summary}
-
-🎯 *সাজেস্টেড প্রোডাক্ট:* {product or 'N/A'}
-💰 *দাম:* {price or 'N/A'}
-
-✍️ *রিপ্লাই করুন:*
-"{reply_text if 'reply_text' in dir() else ai_reply[:300]}"
-
-⚡ দ্রুত রিপ্লাই দিন যেন অর্ডার মিস না হয়!
-"""
-
-        logger.info(f"[BUSINESS] Alert generated for {customer_phone}, urgency={urgency}")
-        
-        return jsonify({
-            "status": "alert_sent",
-            "customer_phone": customer_phone,
-            "urgency": urgency,
-            "alert_for_moderators": alert
-        })
-        
-    except Exception as e:
-        logger.error(f"[BUSINESS] Webhook error: {e}")
-        return jsonify({"status": "error", "error": str(e)})
-
-
-# =====================================================================
-# WHATSAPP GROUP WEBHOOK (from whatsapp-bridge.js)
+# WEBHOOK FROM BRIDGE (PC sends messages here)
 # =====================================================================
 @app.route("/group-webhook", methods=["POST"])
 def group_webhook():
-    """Handle WhatsApp group messages — Team group (leader) or Order group (auto-extract)"""
+    """Messages from WhatsApp groups (Team + Orders)"""
     data = request.get_json(force=True, silent=True) or {}
-    logger.info(f"Group webhook: {json.dumps(data, ensure_ascii=False)[:300]}")
-    
-    try:
-        group_id = data.get("group_id", "")
-        group_name = data.get("group_name", "Group")
-        sender_id = data.get("sender_id", "")
-        sender_name = data.get("sender_name", "Member")
-        message = data.get("message", "").strip()
-        group_type = data.get("group_type", "team")  # 'team' or 'orders'
-        
-        logger.info(f"Group msg from {sender_name} in [{group_name}]: {message[:50]}")
-        
-        # Check for image
-        media_type = data.get("media_type", "")
-        media_data = data.get("media_data", "")
-        image_path = None
-        if media_data and media_type and media_type.startswith("image"):
-            try:
-                ext = media_type.split("/")[1] if "/" in media_type else "jpg"
-                image_path = f"/tmp/group_img_{int(time.time())}.{ext}"
-                with open(image_path, "wb") as f:
-                    f.write(base64.b64decode(media_data))
-                logger.info(f"[GROUP] Image saved: {image_path}")
-                message = message or "📷 [user sent a photo]"
-            except Exception as e:
-                logger.error(f"[GROUP] Image save error: {e}")
-        
-        if not message and not image_path:
-            return jsonify({"reply": ""})
-        
-        # Skip bot's own messages (prevents infinite loop!)
-        if message.startswith("🤖") or message.startswith("✅") or message.startswith("⚙️"):
-            return jsonify({"reply": ""})
-        
-        # Store in DB
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'group')", (sender_id, f"[{group_name}] {sender_name}: {message}"), commit=True)
-        db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
-        
-        # =====================================================================
-        # ORDER GROUP: Auto-extract order and save to dashboard
-        # =====================================================================
-        if group_type == "orders" or "order" in group_name.lower() or "অর্ডার" in group_name:
-            return _handle_order_group(group_id, group_name, sender_id, sender_name, message, image_path=image_path)
-        
-        # =====================================================================
-        # TEAM GROUP: Leader mode with admin respect
-        # =====================================================================
-        return _handle_team_group(group_id, group_name, sender_id, sender_name, message, image_path=image_path)
-    
-    except Exception as e:
-        logger.error(f"Group webhook error: {e}", exc_info=True)
+    s = get_all_settings()
+    team_group = s.get("team_group", "")
+    orders_group = s.get("orders_group", "")
+
+    group_name = data.get("group_name", "")
+    group_type = data.get("group_type", "other")
+    sender_name = data.get("sender_name", "Member")
+    sender_id = data.get("sender_id", "")
+    body = data.get("message", "")
+    media_data = data.get("media_data", "")
+    media_type = data.get("media_type", "")
+
+    if not body or not group_name:
         return jsonify({"reply": ""})
 
+    logger.info(f"[GROUP:{group_type}] {sender_name}: {body[:50]}")
 
-def _handle_order_group(group_id, group_name, sender_id, sender_name, message):
-    """Auto-extract order from message and save to dashboard"""
-    try:
-        logger.info(f"[ORDER] Processing: {message[:60]}")
-        
-        # Extract order info using AI
-        order_prompt = f"""তুমি একজন order extractor। নিচের WhatsApp message থেকে order information বের করো।
+    products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
 
-Message: "{message}"
+    if group_type == "team":
+        # AI answers team member questions
+        prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। টিম মেম্বার "{sender_name}"-এর প্রশ্নের উত্তর দাও।
 
-শুধু এই JSON format-এ reply দাও (কোনো extra text নয়):
-{{
-    "customer_name": "নাম বা 'unknown'",
-    "phone": "ফোন নম্বর বা 'unknown'", 
-    "address": "ঠিকানা বা 'unknown'",
-    "product_name": "প্রোডাক্টের নাম বা 'unknown'",
-    "quantity": সংখ্যা বা 1,
-    "price": দাম সংখ্যায় বা 0
-}}"""
-        
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": order_prompt}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500}
-        }
-        
-        if not GEMINI_API_KEY:
-            logger.error("[ORDER] GEMINI_API_KEY is empty!")
+প্রশ্ন: "{body}"
+
+আমাদের প্রোডাক্ট:
+{product_list}
+
+সংক্ষিপ্ত, সহায়ক উত্তর দাও (বাংলায়)।"""
+
+        reply = get_gemini_reply(prompt, media_data if media_data else None)
+        return jsonify({"reply": reply})
+
+    elif group_type == "orders":
+        # AI extracts order info
+        prompt = f"""তুমি Dhaka Exclusive-এর অর্ডার এক্সট্রাক্টর। মেসেজ থেকে অর্ডার তথ্য বের করো।
+
+মেসেজ: "{body}"
+
+Output format:
+NAME: <নাম বা Unknown>
+PHONE: <ফোন বা খালি>
+ADDRESS: <ঠিকানা বা খালি>
+PRODUCT: <প্রোডাক্ট নাম>
+QUANTITY: <সংখ্যা বা 1>
+PRICE: <দাম সংখ্যায় বা 0>
+
+যদি অর্ডার না হয়: NOT_AN_ORDER"""
+
+        ai_result = get_gemini_reply(prompt)
+
+        if "NOT_AN_ORDER" in ai_result:
             return jsonify({"reply": ""})
-        
-        model = "gemini-3.5-flash"
-        res = None
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={GEMINI_API_KEY}"
-            logger.info(f"[ORDER] Using model: {model}")
-            r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-            test_res = r.json()
-            if not test_res.get("error"):
-                res = test_res
-                logger.info(f"[ORDER] Model {model} works!")
-            else:
-                logger.warning(f"[ORDER] Model {model} failed: {test_res['error'].get('message','')[:150]}")
-        except Exception as e:
-            logger.warning(f"[ORDER] Model {model} error: {e}")
-        
-        order_data = {"customer_name": sender_name, "phone": "unknown", "address": "unknown", "product_name": "unknown", "quantity": 1, "price": 0}
-        
-        if res and res.get("candidates"):
-            ai_text = res["candidates"][0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            # Try to parse JSON from AI response
-            try:
-                json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
-                if json_match:
-                    parsed = json.loads(json_match.group())
-                    order_data.update({k: v for k, v in parsed.items() if v and v != "unknown"})
-            except:
-                pass
-        
-        # Fallback regex extraction
-        phone_match = re.search(r'(01[3-9]\d{8}|8801[3-9]\d{8})', message)
-        if phone_match:
-            order_data["phone"] = phone_match.group()
-        qty_match = re.search(r'(\d+)\s*(pcs|piece|পিস)', message.lower())
-        if qty_match:
-            order_data["quantity"] = int(qty_match.group(1))
-        price_match = re.search(r'(\d{3,4})\s*৳', message)
-        if price_match:
-            order_data["price"] = int(price_match.group(1))
-        
-        total = order_data["price"] * order_data["quantity"]
-        
-        # Save to DB
-        db_query(
-            """INSERT INTO group_orders (phone, customer_name, address, product_name, quantity, price, total, group_name, raw_message)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (order_data["phone"], order_data["customer_name"], order_data["address"],
-             order_data["product_name"], order_data["quantity"], order_data["price"],
-             total, group_name, message), commit=True
-        )
-        
-        reply = f"✅ অর্ডার রেকর্ড করা হয়েছে!\n📦 {order_data['product_name']}\n👤 {order_data['customer_name']}\n📞 {order_data['phone']}\n💰 {total}৳ ({order_data['quantity']} pcs)"
-        return jsonify({"reply": reply})
-    
-    except Exception as e:
-        logger.error(f"Order group error: {e}")
-        return jsonify({"reply": ""})
 
+        name, phone, address, product, qty, price = "", "", "", "", 1, 0
+        for line in ai_result.split("\n"):
+            if line.startswith("NAME:"): name = line.replace("NAME:", "").strip()
+            if line.startswith("PHONE:"): phone = line.replace("PHONE:", "").strip()
+            if line.startswith("ADDRESS:"): address = line.replace("ADDRESS:", "").strip()
+            if line.startswith("PRODUCT:"): product = line.replace("PRODUCT:", "").strip()
+            if line.startswith("QUANTITY:"):
+                try: qty = int(line.replace("QUANTITY:", "").strip())
+                except: pass
+            if line.startswith("PRICE:"):
+                try: price = int(line.replace("PRICE:", "").strip())
+                except: pass
 
-def _handle_team_group(group_id, group_name, sender_id, sender_name, message, image_path=None):
-    """AI acts as group leader — respects admin, knows all members by name"""
-    
-    logger.info(f"[TEAM] Processing message from {sender_name}: {message[:50]}")
-    
-    # Check if sender is admin
-    admin_phone = os.environ.get("ADMIN_PHONE", "")
-    is_admin = (sender_id == admin_phone or sender_id.replace("@c.us", "").replace("@lid", "") in admin_phone)
-    logger.info(f"[TEAM] Sender is_admin={is_admin}, admin_phone={admin_phone[:5]}...")
-    
-    # Get team members info
-    team_members = db_query("SELECT name, phone, role FROM team_members WHERE is_active = 1", fetchall=True) or []
-    members_text = "\n".join([f"- {m['name']} ({m['role']}): {m['phone']}" for m in team_members]) if team_members else "কোনো member add করা হয়নি"
-    
-    # Find sender's name from team_members DB (priority over WhatsApp name)
-    sender_clean = sender_id.replace("@c.us", "").replace("@lid", "")
-    matched_member = None
-    for m in team_members:
-        if sender_id == m['phone'] or sender_clean in str(m['phone']):
-            matched_member = m['name']
-            break
-    
-    display_name = matched_member or sender_name
-    
-    # Build knowledge
-    knowledge = _build_knowledge_base()
-    products_text = _get_products_text()
-    logger.info(f"[TEAM] Knowledge: {len(knowledge)} chars, Products: {len(products_text)} chars")
-    
-    # Leader-mode prompt with name respect
-    if is_admin:
-        name_rule = "Admin ke শুধু 'Sir' বলে ডাকো, নাম ধরে ডাকবে না। Sir ke সম্মান দেখিয়ে উত্তর দাও।"
-        greeting = "জি Sir"
-    else:
-        name_rule = f" এই সদস্যের নাম '{display_name}'। উত্তরের শুরুতে নাম ধরে ডাকো যেমন: '{display_name}, এই প্রোডাক্টটির দাম 850৳'।"
-        greeting = f"হ্যালো {display_name}"
-    
-    prompt = f"""তুমি Dhaka Exclusive-এর Group Leader AI। তুমি "Team Of Dhaka Exclusive" WhatsApp গ্রুপের ভারপ্রাপ্ত Leader।
+        if not product:
+            return jsonify({"reply": ""})
 
-তোমার Team Members:
-{members_text}
+        total = price * qty
+        db_query("""INSERT INTO group_orders (phone, customer_name, address, product_name, quantity, price, total, status, group_name, raw_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (phone, name, address, product, qty, price, total, group_name, body), commit=True)
 
-তোমার সম্পূর্ণ জ্ঞান:
-{knowledge[:3000]}
+        logger.info(f"[ORDER] Saved: {product} x{qty} = {total}৳")
+        return jsonify({"reply": f"✅ অর্ডার গ্রহণ হয়েছে!\n📦 {product} x{qty}\n💰 {total}৳"})
 
-বর্তমান প্রোডাক্ট:
-{products_text}
-
-গ্রুপ: {group_name}
-বর্তমান সদস্য: {display_name} ({'Admin/Sir' if is_admin else 'Team Member'})
-বার্তা: "{message}"
-
-নির্দেশনা:
-- {name_rule}
-- {greeting} দিয়ে উত্তর শুরু করো
-- তুমি Leader, সবার প্রশ্নের উত্তর দাও
-- Team memberদের সাহায্য করো, professional tone রাখো
-- প্রোডাক্ট সম্পর্কে জানতে চাইলে exact price ও stock বলো
-- কেউ অর্ডার নিয়ে জিজ্ঞেস করলে সুন্দরভাবে হেল্প করো
-- বাংলায় উত্তর দাও, সংক্ষিপ্ত ও প্রফেশনাল
-- প্রতিটি উত্তরে "প্রিয় গ্রাহক" বলার দরকার নেই
-"""
-    
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
-    }
-    
-    # Updated model names - Google changed these!
-    # Check API key
-    if not GEMINI_API_KEY:
-        logger.error("[TEAM] GEMINI_API_KEY is empty! Set GEMINI_KEY env var in Render.")
-        return jsonify({"reply": "⚙️ AI key missing. Contact admin."})
-    
-    # If image attached, use vision analysis
-    if image_path and os.path.exists(image_path):
-        logger.info(f"[TEAM] Image detected, using vision analysis: {image_path}")
-        reply = _analyze_image_with_gemini(image_path, sender_id)
-        if reply and not reply.startswith("📷"):
-            # Add greeting if no error
-            reply = f"{display_name}, {reply}"
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
-        return jsonify({"reply": reply})
-    
-    # Current working model: gemini-3.5-flash (Google API v1)
-    # See: https://ai.google.dev/api/generate-content
-    model = "gemini-3.5-flash"
-    res = None
-    last_error = ""
-    
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={GEMINI_API_KEY}"
-        logger.info(f"[TEAM] Using model: {model}")
-        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-        test_res = r.json()
-        if test_res.get("error"):
-            last_error = test_res["error"].get("message", "unknown")[:200]
-            logger.warning(f"[TEAM] Model {model} failed: {last_error}")
-        else:
-            res = test_res
-            logger.info(f"[TEAM] Model {model} works!")
-    except Exception as e:
-        last_error = str(e)[:200]
-        logger.warning(f"[TEAM] Model {model} exception: {e}")
-    
-    if res is None:
-        logger.error(f"[TEAM] Model failed. Error: {last_error}")
-        fallback = "🤖 হ্যালো! আমি Dhaka Exclusive-এর AI Assistant। কিছুক্ষণ পর আবার চেষ্টা করুন।"
-        return jsonify({"reply": fallback})
-    
-    reply = ""
-    if res.get("candidates"):
-        parts = res["candidates"][0].get("content", {}).get("parts", [])
-        for part in parts:
-            if "text" in part:
-                reply = part["text"].strip()
-    
-    logger.info(f"[TEAM] Generated reply: {reply[:100] if reply else 'EMPTY'}")
-    
-    if reply:
-        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
-        return jsonify({"reply": reply})
-    
-    logger.warning("[TEAM] Empty reply from AI")
     return jsonify({"reply": ""})
 
 
-# =====================================================================
-# API: Products list (for bridge commands)
-# =====================================================================
-@app.route("/api/products", methods=["GET"])
-def api_products():
-    products = db_query("SELECT id, name, price, stock, category, image_url FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
-    return jsonify({"products": [dict(p) for p in products]})
+@app.route("/business-webhook", methods=["POST"])
+def business_webhook():
+    """Individual customer messages (AI auto-reply)"""
+    data = request.get_json(force=True, silent=True) or {}
+    body = data.get("message", "")
+    customer_phone = data.get("customer_phone", "")
+    customer_name = data.get("customer_name", "Customer")
+    media_data = data.get("media_data", "")
 
+    if not body:
+        return jsonify({"reply": ""})
+
+    logger.info(f"[CUSTOMER] {customer_name}: {body[:50]}")
+
+    # Save to DB
+    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'customer')", (customer_phone, body), commit=True)
+    db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (customer_phone, customer_name), commit=True)
+
+    # Get products
+    products = db_query("SELECT name, price, stock, image_url FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
+
+    prompt = f"""তুমি Dhaka Exclusive-এর AI সেলস সহকারী। একজন কাস্টমারের মেসেজের উত্তর দাও।
+
+কাস্টমার: {customer_name}
+মেসেজ: "{body}"
+
+আমাদের প্রোডাক্ট:
+{product_list}
+
+নিয়ম:
+১. বাংলায়, বন্ধুসুলভ ভাষায় উত্তর দাও
+২. প্রোডাক্টের দাম, সাইজ, কালার বলো
+৩. অর্ডার করতে বললে ঠিকানা ও ফোন নম্বর চাও
+৪. সংক্ষিপ্ত রাখো (৩-৪ লাইন)
+
+উত্তর:"""
+
+    reply = get_gemini_reply(prompt, media_data if media_data else None)
+    return jsonify({"reply": reply})
 
 # =====================================================================
-# ADMIN: Standalone Panel (No template file needed)
+# API: Bridge Config
 # =====================================================================
+@app.route("/api/bridge-config", methods=["GET"])
+def api_bridge_config():
+    s = get_all_settings()
+    return jsonify({
+        "configs": [{
+            "id": 1,
+            "label": "Business WhatsApp",
+            "team_group": s.get("team_group", ""),
+            "orders_group": s.get("orders_group", ""),
+            "moderator_group": "",  # Not used
+            "enabled": True
+        }]
+    })
+
+# =====================================================================
+# ADMIN PANEL
+# =====================================================================
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        u = request.form.get("username", "")
+        p = request.form.get("password", "")
+        agent = db_query("SELECT * FROM agents WHERE username=? AND password=?", (u, p))
+        if agent:
+            session["admin"] = True
+            return redirect("/admin-panel")
+        return "Wrong password", 401
+    return render_template_string("""<form method="POST"><input name="username" placeholder="User"><input name="password" type="password" placeholder="Pass"><button>Login</button></form>""")
+
 @app.route("/admin-panel")
 def admin_panel():
-    if not session.get("admin") and not session.get("logged_in"):
+    if not session.get("admin"):
         return redirect("/admin/login")
-    
-    # Stats
-    total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0
-    total_revenue = db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
-    total_users = db_query("SELECT COUNT(*) as c FROM users", fetchone=True)["c"] or 0
-    team_count = db_query("SELECT COUNT(*) as c FROM team_members WHERE is_active=1", fetchone=True)["c"] or 0
-    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders WHERE status='pending'", fetchone=True)["c"] or 0
-    
+    total_orders = db_query("SELECT COUNT(*) as c FROM group_orders", fetchall=True)
+    total_orders = total_orders[0]["c"] if total_orders else 0
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchall=True)
+    total_products = total_products[0]["c"] if total_products else 0
     return render_template_string("""
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dhaka Exclusive - Admin Panel</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333}
-        .sidebar{width:260px;height:100vh;background:linear-gradient(180deg,#1a1a2e 0%,#16213e 100%);position:fixed;left:0;top:0;padding:20px 0;overflow-y:auto}
-        .logo{text-align:center;padding:0 20px 30px;border-bottom:1px solid #333;margin-bottom:20px}
-        .logo h1{color:#e94560;font-size:22px;margin-bottom:5px}
-        .logo span{color:#888;font-size:12px}
-        .nav-item{display:block;padding:14px 25px;color:#b8c5d6;text-decoration:none;font-size:15px;transition:all 0.3s;border-left:3px solid transparent;margin:2px 0}
-        .nav-item:hover{background:rgba(233,69,96,0.1);color:#e94560;border-left-color:#e94560}
-        .nav-item.active{background:rgba(233,69,96,0.15);color:#e94560;border-left-color:#e94560;font-weight:600}
-        .nav-item i{margin-right:10px;font-size:18px}
-        .main{margin-left:260px;padding:30px}
-        .header{background:white;padding:20px 30px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);margin-bottom:25px;display:flex;justify-content:space-between;align-items:center}
-        .header h2{color:#1a1a2e;font-size:24px}
-        .logout-btn{background:#e94560;color:white;padding:10px 24px;border:none;border-radius:8px;cursor:pointer;text-decoration:none;font-size:14px}
-        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:30px}
-        .stat-card{background:white;padding:25px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);transition:transform 0.2s}
-        .stat-card:hover{transform:translateY(-3px)}
-        .stat-icon{font-size:32px;margin-bottom:12px}
-        .stat-value{font-size:28px;font-weight:700;color:#1a1a2e;margin-bottom:5px}
-        .stat-label{color:#888;font-size:14px;text-transform:uppercase;letter-spacing:0.5px}
-        .stat-card.orders{border-top:4px solid #e94560}
-        .stat-card.revenue{border-top:4px solid #4CAF50}
-        .stat-card.products{border-top:4px solid #2196F3}
-        .stat-card.users{border-top:4px solid #FF9800}
-        .stat-card.team{border-top:4px solid #9C27B0}
-        .stat-card.group-orders{border-top:4px solid #00BCD4}
-        .section{background:white;padding:25px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);margin-bottom:25px}
-        .section h3{color:#1a1a2e;margin-bottom:20px;font-size:18px;border-bottom:2px solid #f0f2f5;padding-bottom:10px}
-        .quick-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px}
-        .quick-link{display:flex;align-items:center;padding:20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;text-decoration:none;border-radius:10px;transition:transform 0.2s}
-        .quick-link:hover{transform:scale(1.02)}
-        .quick-link-icon{font-size:28px;margin-right:15px}
-        .quick-link-text{font-size:16px;font-weight:600}
-        .quick-link-desc{font-size:12px;opacity:0.9;margin-top:3px}
-        .footer{text-align:center;color:#888;padding:20px;font-size:13px}
-        @media(max-width:768px){.sidebar{width:100%;height:auto;position:relative}.main{margin-left:0}}
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="logo">
-            <h1>🛍️ Dhaka Exclusive</h1>
-            <span>Admin Panel</span>
-        </div>
-        <a href="/admin-panel" class="nav-item active">🏠 Dashboard</a>
-        <a href="/admin/team" class="nav-item">👥 Team Members</a>
-        <a href="/admin/group-orders" class="nav-item">📦 Group Orders</a>
-        <a href="/admin?tab=inventory" class="nav-item">📋 Inventory</a>
-        <a href="/admin?tab=orders" class="nav-item">🛒 All Orders</a>
-        <a href="/admin?tab=chat" class="nav-item">💬 Chat</a>
-        <a href="/admin?tab=analytics" class="nav-item">📊 Analytics</a>
-        <a href="/admin?tab=settings" class="nav-item">⚙️ Settings</a>
-    </div>
-    
-    <div class="main">
-        <div class="header">
-            <h2>Welcome back, Admin! 👋</h2>
-            <a href="/admin/logout" class="logout-btn">Logout</a>
-        </div>
-        
-        <div class="stats-grid">
-            <div class="stat-card orders">
-                <div class="stat-icon">🛒</div>
-                <div class="stat-value">{{ total_orders }}</div>
-                <div class="stat-label">Total Orders</div>
-            </div>
-            <div class="stat-card revenue">
-                <div class="stat-icon">💰</div>
-                <div class="stat-value">{{ total_revenue }}৳</div>
-                <div class="stat-label">Revenue</div>
-            </div>
-            <div class="stat-card products">
-                <div class="stat-icon">📦</div>
-                <div class="stat-value">{{ total_products }}</div>
-                <div class="stat-label">Products</div>
-            </div>
-            <div class="stat-card users">
-                <div class="stat-icon">👤</div>
-                <div class="stat-value">{{ total_users }}</div>
-                <div class="stat-label">Customers</div>
-            </div>
-            <div class="stat-card team">
-                <div class="stat-icon">👥</div>
-                <div class="stat-value">{{ team_count }}</div>
-                <div class="stat-label">Team Members</div>
-            </div>
-            <div class="stat-card group-orders">
-                <div class="stat-icon">📲</div>
-                <div class="stat-value">{{ group_orders_count }}</div>
-                <div class="stat-label">Pending Group Orders</div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h3>⚡ Quick Access</h3>
-            <div class="quick-links">
-                <a href="/admin/team" class="quick-link">
-                    <div class="quick-link-icon">👥</div>
-                    <div>
-                        <div class="quick-link-text">Manage Team</div>
-                        <div class="quick-link-desc">Add/remove team members</div>
-                    </div>
-                </a>
-                <a href="/admin/group-orders" class="quick-link">
-                    <div class="quick-link-icon">📦</div>
-                    <div>
-                        <div class="quick-link-text">Group Orders</div>
-                        <div class="quick-link-desc">View auto-captured orders</div>
-                    </div>
-                </a>
-                <a href="/admin?tab=inventory" class="quick-link" style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%)">
-                    <div class="quick-link-icon">📋</div>
-                    <div>
-                        <div class="quick-link-text">Inventory</div>
-                        <div class="quick-link-desc">Products & stock</div>
-                    </div>
-                </a>
-                <a href="/admin?tab=orders" class="quick-link" style="background:linear-gradient(135deg,#4facfe 0%,#00f2fe 100%)">
-                    <div class="quick-link-icon">🛒</div>
-                    <div>
-                        <div class="quick-link-text">All Orders</div>
-                        <div class="quick-link-desc">Manage all orders</div>
-                    </div>
-                </a>
-            </div>
-        </div>
-        
-        <div class="footer">
-            Dhaka Exclusive Admin Panel v2.0 | Powered by Gemini AI 🤖
-        </div>
-    </div>
-</body>
-</html>
-""", total_orders=total_orders, total_revenue=total_revenue, total_products=total_products,
-    total_users=total_users, team_count=team_count, group_orders_count=group_orders_count)
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Admin</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:1000px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+.quick-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:15px;margin-top:20px}
+.quick-link{display:flex;align-items:center;padding:20px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;text-decoration:none;border-radius:10px}
+.quick-link-icon{font-size:28px;margin-right:15px}
+.stat{font-size:24px;font-weight:bold}
+</style></head><body><div class="container">
+<h1>Admin Panel</h1>
+<div class="quick-links">
+    <a href="/admin/whatsapp-settings" class="quick-link"><div class="quick-link-icon">📱</div><div><div><b>WhatsApp Settings</b></div><small>Group names</small></div></a>
+    <a href="/admin/group-orders" class="quick-link" style="background:linear-gradient(135deg,#f093fb,#f5576c)"><div class="quick-link-icon">📦</div><div><div class="stat">{{ total_orders }}</div><div><b>Group Orders</b></div></div></a>
+    <a href="/admin/team" class="quick-link" style="background:linear-gradient(135deg,#4facfe,#00f2fe)"><div class="quick-link-icon">👥</div><div><div><b>Team</b></div><small>Members</small></div></a>
+    <a href="/admin/products" class="quick-link" style="background:linear-gradient(135deg,#11998e,#38ef7d)"><div class="quick-link-icon">📋</div><div><div class="stat">{{ total_products }}</div><div><b>Products</b></div></div></a>
+</div>
+</div></body></html>
+""", total_orders=total_orders, total_products=total_products)
 
+@app.route("/admin/whatsapp-settings", methods=["GET"])
+def admin_whatsapp_settings():
+    if not session.get("admin"):
+        return redirect("/admin/login")
+    s = get_all_settings()
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>WhatsApp Settings</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:700px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+input{width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:5px;box-sizing:border-box}
+.btn{background:#25D366;color:white;padding:12px 24px;border:none;border-radius:5px;cursor:pointer;font-size:16px}
+label{font-weight:bold;margin-top:15px;display:block}
+.info{background:#e3f2fd;padding:15px;border-radius:5px;margin:15px 0;color:#1565c0}
+</style></head><body><div class="container">
+<a href="/admin-panel">← Admin</a>
+<h1>📱 WhatsApp Group Settings</h1>
+<div class="info">
+<b>টিম গ্রুপ:</b> AI টিম মেম্বারদের প্রশ্নের উত্তর দেবে<br>
+<b>অর্ডার গ্রুপ:</b> মেসেজ থেকে অর্ডার অটো শনাক্ত হয়ে এখানে আসবে
+</div>
+<form method="POST" action="/admin/whatsapp-settings/save">
+    <label>Team Group Name (e.g. Team Of Dhaka Exclusive)</label>
+    <input type="text" name="team_group" value="{{ s.get('team_group','') }}" placeholder="Exact group name">
+    <label>Orders Group Name (e.g. Orders)</label>
+    <input type="text" name="orders_group" value="{{ s.get('orders_group','') }}" placeholder="Exact group name">
+    <button type="submit" class="btn">💾 Save</button>
+</form>
+<h3 style="margin-top:30px">🖥️ PC Bridge Setup</h3>
+<ol style="line-height:2;color:#666">
+    <li>PC তে <code>bridge-manager.js</code> রাখুন</li>
+    <li><code>npm install</code></li>
+    <li><code>set FLASK_URL=https://your-app.onrender.com</code></li>
+    <li><code>node bridge-manager.js</code> → QR Scan করুন</li>
+</ol>
+</div></body></html>
+""", s=s)
 
-# =====================================================================
-# ADMIN: Team Members Management
-# =====================================================================
-@app.route("/admin/team", methods=["GET"])
+@app.route("/admin/whatsapp-settings/save", methods=["POST"])
+def save_whatsapp_settings():
+    if not session.get("admin"):
+        return redirect("/admin/login")
+    for k in ["team_group", "orders_group"]:
+        v = request.form.get(k, "").strip()
+        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
+    flash("Saved!")
+    return redirect("/admin/whatsapp-settings")
+
+@app.route("/admin/group-orders")
+def admin_group_orders():
+    if not session.get("admin"):
+        return redirect("/admin/login")
+    orders = db_query("SELECT * FROM group_orders ORDER BY id DESC LIMIT 200", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orders</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:1100px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;border-bottom:1px solid #ddd;text-align:left}th{background:#FF9800;color:white}
+.btn{padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-size:12px;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+</style></head><body><div class="container">
+<a href="/admin-panel">← Admin</a>
+<h1>📦 Group Orders</h1>
+<table><tr><th>ID</th><th>Name</th><th>Phone</th><th>Product</th><th>Qty</th><th>Total</th><th>Status</th><th>Action</th></tr>
+{% for o in orders %}
+<tr><td>{{ o.id }}</td><td>{{ o.customer_name or '-' }}</td><td>{{ o.phone or '-' }}</td><td>{{ o.product_name }}</td>
+<td>{{ o.quantity }}</td><td>{{ o.total }}৳</td><td>{{ o.status }}</td>
+<td><a href="/admin/group-orders/status/{{ o.id }}?status=confirmed" class="btn btn-green">Confirm</a>
+<a href="/admin/group-orders/status/{{ o.id }}?status=cancelled" class="btn btn-red">Cancel</a></td></tr>
+{% endfor %}
+</table></div></body></html>
+""", orders=orders)
+
+@app.route("/admin/group-orders/status/<int:order_id>")
+def update_order_status(order_id):
+    if not session.get("admin"):
+        return redirect("/admin/login")
+    status = request.args.get("status", "pending")
+    db_query("UPDATE group_orders SET status = ? WHERE id = ?", (status, order_id), commit=True)
+    return redirect("/admin/group-orders")
+
+@app.route("/admin/team")
 def admin_team():
-    if not session.get("admin") and not session.get("logged_in"):
+    if not session.get("admin"):
         return redirect("/admin/login")
     members = db_query("SELECT * FROM team_members ORDER BY id DESC", fetchall=True) or []
     return render_template_string("""
-<!DOCTYPE html><html><head><meta charset="utf-8"><title>Team Members</title>
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}h1{color:#333}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
-table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#4CAF50;color:white}tr:hover{background:#f1f1f1}
-.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;display:inline-block}
-.btn-green{background:#4CAF50;color:white}.btn-red{background:#f44336;color:white}.btn-blue{background:#2196F3;color:white}
-input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;width:200px}
-.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
-</style></head>
-<body><div class="container">
-<div class="nav"><a href="/admin-panel">← Admin Panel</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Team</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#4CAF50;color:white}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+input{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px}
+</style></head><body><div class="container">
+<a href="/admin-panel">← Admin</a>
 <h1>👥 Team Members</h1>
 <form method="POST" action="/admin/team/add">
     <input type="text" name="name" placeholder="Name" required>
-    <input type="text" name="phone" placeholder="Phone (8801XXXXXXXXX)" required>
-    <input type="text" name="wa_id" placeholder="WhatsApp ID (optional)">
-    <select name="role">
-        <option value="moderator">Moderator</option>
-        <option value="admin">Admin</option>
-        <option value="delivery">Delivery</option>
-    </select>
-    <button type="submit" class="btn btn-green">➕ Add Member</button>
+    <input type="text" name="phone" placeholder="Phone" required>
+    <input type="text" name="wa_id" placeholder="WhatsApp ID">
+    <button type="submit" class="btn btn-green">Add</button>
 </form>
-<table>
-<tr><th>ID</th><th>Name</th><th>Phone</th><th>Role</th><th>WA ID</th><th>Status</th><th>Action</th></tr>
+<table><tr><th>ID</th><th>Name</th><th>Phone</th><th>Role</th><th>Action</th></tr>
 {% for m in members %}
-<tr>
-    <td>{{ m.id }}</td><td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td><td>{{ m.wa_id or '-' }}</td>
-    <td>{{ 'Active' if m.is_active else 'Inactive' }}</td>
-    <td>
-        <a href="/admin/team/toggle/{{ m.id }}" class="btn btn-blue">{{ 'Deactivate' if m.is_active else 'Activate' }}</a>
-        <a href="/admin/team/delete/{{ m.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a>
-    </td>
-</tr>
+<tr><td>{{ m.id }}</td><td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td>
+<td><a href="/admin/team/delete/{{ m.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td></tr>
 {% endfor %}
 </table></div></body></html>
 """, members=members)
 
 @app.route("/admin/team/add", methods=["POST"])
 def admin_team_add():
-    if not session.get("admin") and not session.get("logged_in"):
+    if not session.get("admin"):
         return redirect("/admin/login")
     name = request.form.get("name", "").strip()
     phone = request.form.get("phone", "").strip()
     wa_id = request.form.get("wa_id", "").strip()
-    role = request.form.get("role", "moderator")
-    db_query("INSERT OR REPLACE INTO team_members (name, phone, wa_id, role, is_active) VALUES (?, ?, ?, ?, 1)", (name, phone, wa_id, role), commit=True)
-    flash(f"Member {name} added!")
-    return redirect("/admin/team")
-
-@app.route("/admin/team/toggle/<int:member_id>")
-def admin_team_toggle(member_id):
-    if not session.get("admin") and not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("UPDATE team_members SET is_active = 1 - is_active WHERE id = ?", (member_id,), commit=True)
+    db_query("INSERT OR REPLACE INTO team_members (name, phone, wa_id, role, is_active) VALUES (?, ?, ?, 'moderator', 1)", (name, phone, wa_id), commit=True)
     return redirect("/admin/team")
 
 @app.route("/admin/team/delete/<int:member_id>")
 def admin_team_delete(member_id):
-    if not session.get("admin") and not session.get("logged_in"):
+    if not session.get("admin"):
         return redirect("/admin/login")
     db_query("DELETE FROM team_members WHERE id = ?", (member_id,), commit=True)
     return redirect("/admin/team")
 
-
-# =====================================================================
-# BRIDGE MANAGEMENT APIs (for Local Bridge Manager)
-# =====================================================================
-BRIDGE_API_KEY = os.environ.get("BRIDGE_API_KEY", "dhaka-exclusive-bridge-2026")
-
-def _check_bridge_auth():
-    key = request.headers.get("X-Bridge-Key", "")
-    return key == BRIDGE_API_KEY
-
-@app.route("/api/bridge-config", methods=["GET"])
-def api_bridge_config():
-    """Local bridge manager fetches config from here"""
-    if not _check_bridge_auth():
-        return jsonify({"error": "unauthorized"}), 401
-    configs = db_query("SELECT id, label, phone, team_group, orders_group, moderator_group, enabled, status FROM bridge_numbers ORDER BY id", fetchall=True) or []
-    return jsonify({"configs": [dict(c) for c in configs]})
-
-@app.route("/api/bridge-qr", methods=["POST"])
-def api_bridge_qr():
-    """Bridge sends QR code data"""
-    if not _check_bridge_auth():
-        return jsonify({"error": "unauthorized"}), 401
-    data = request.get_json(force=True, silent=True) or {}
-    phone_id = data.get("phone_id", "")
-    qr_data = data.get("qr_data", "")
-    db_query("UPDATE bridge_numbers SET qr_data = ?, status = 'awaiting_scan' WHERE id = ?", (qr_data, phone_id), commit=True)
-    return jsonify({"status": "ok"})
-
-@app.route("/api/bridge-status", methods=["POST"])
-def api_bridge_status():
-    """Bridge sends connection status"""
-    if not _check_bridge_auth():
-        return jsonify({"error": "unauthorized"}), 401
-    data = request.get_json(force=True, silent=True) or {}
-    phone_id = data.get("phone_id", "")
-    status = data.get("status", "unknown")
-    info = json.dumps(data.get("info", {}))
-    db_query("UPDATE bridge_numbers SET status = ?, last_seen = ?, phone = ? WHERE id = ?",
-             (status, datetime.now().isoformat(), data.get("info", {}).get("number", ""), phone_id), commit=True)
-    return jsonify({"status": "ok"})
-
-@app.route("/api/bridge-alert", methods=["POST"])
-def api_bridge_alert():
-    """Bridge sends alert (optional, mainly handled via group)"""
-    if not _check_bridge_auth():
-        return jsonify({"error": "unauthorized"}), 401
-    return jsonify({"status": "ok"})
-
-
-# =====================================================================
-# ADMIN: WhatsApp Bridge Numbers Management
-# =====================================================================
-@app.route("/admin/whatsapp", methods=["GET"])
-def admin_whatsapp():
-    if not session.get("admin") and not session.get("logged_in"):
+@app.route("/admin/products")
+def admin_products():
+    if not session.get("admin"):
         return redirect("/admin/login")
-    numbers = db_query("SELECT * FROM bridge_numbers ORDER BY id DESC", fetchall=True) or []
+    products = db_query("SELECT * FROM products ORDER BY id DESC LIMIT 200", fetchall=True) or []
     return render_template_string("""
-<!DOCTYPE html><html><head><meta charset="utf-8"><title>WhatsApp Numbers</title>
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}h1{color:#333}.container{max-width:1000px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
-table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#25D366;color:white}tr:hover{background:#f1f1f1}
-.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;display:inline-block}
-.btn-green{background:#25D366;color:white}.btn-red{background:#f44336;color:white}.btn-blue{background:#2196F3;color:white}
-input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;width:180px}
-.status-connected{color:#25D366;font-weight:bold}.status-disconnected{color:#f44336}.status-awaiting{color:#ff9800}
-.qr-box{background:#f5f5f5;padding:15px;border-radius:5px;margin:10px 0;font-family:monospace;font-size:12px;word-break:break-all;max-height:100px;overflow:auto}
-.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
-</style></head>
-<body><div class="container">
-<div class="nav"><a href="/admin-panel">← Admin Panel</a><a href="/admin/team">Team</a><a href="/admin/whatsapp">WhatsApp</a><a href="/admin/group-orders">Group Orders</a></div>
-<h1>📱 WhatsApp Bridge Numbers</h1>
-<p style="color:#666">Add numbers here → Run <code>bridge-manager.js</code> on your PC → Scan QR from admin panel</p>
-<form method="POST" action="/admin/whatsapp/add">
-    <input type="text" name="label" placeholder="Label (e.g. Main Business)" required>
-    <input type="text" name="team_group" placeholder="Team Group Name">
-    <input type="text" name="orders_group" placeholder="Orders Group Name">
-    <input type="text" name="moderator_group" placeholder="Moderator Group ID" required>
-    <button type="submit" class="btn btn-green">➕ Add Number</button>
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Products</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#11998e;color:white}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+input{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;width:150px}
+</style></head><body><div class="container">
+<a href="/admin-panel">← Admin</a>
+<h1>📋 Products</h1>
+<form method="POST" action="/admin/products/add">
+    <input type="text" name="name" placeholder="Product Name" required>
+    <input type="number" name="price" placeholder="Price" required>
+    <input type="number" name="stock" placeholder="Stock" value="10">
+    <button type="submit" class="btn btn-green">Add</button>
 </form>
-<table>
-<tr><th>ID</th><th>Label</th><th>Phone</th><th>Status</th><th>Team Group</th><th>Mod Group</th><th>QR Code</th><th>Action</th></tr>
-{% for n in numbers %}
-<tr>
-    <td>{{ n.id }}</td>
-    <td><b>{{ n.label }}</b></td>
-    <td>{{ n.phone or '-' }}</td>
-    <td class="status-{{ n.status }}">{{ n.status }}</td>
-    <td>{{ n.team_group or '-' }}</td>
-    <td>{{ n.moderator_group or '-' }}</td>
-    <td>{% if n.qr_data %}<div class="qr-box">{{ n.qr_data[:80] }}...</div>{% else %}-{% endif %}</td>
-    <td>
-        <a href="/admin/whatsapp/toggle/{{ n.id }}" class="btn btn-blue">{{ 'Disable' if n.enabled else 'Enable' }}</a>
-        <a href="/admin/whatsapp/delete/{{ n.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a>
-    </td>
-</tr>
-{% endfor %}
-</table>
-<h3 style="margin-top:30px">🖥️ Local Setup Instructions</h3>
-<ol style="line-height:2">
-    <li>Download <code>bridge-manager.js</code> to your PC</li>
-    <li>Install: <code>npm install whatsapp-web.js qrcode-terminal axios</code></li>
-    <li>Set env: <code>set FLASK_URL=https://your-app.onrender.com</code></li>
-    <li>Run: <code>node bridge-manager.js</code></li>
-    <li>Come back here — QR code will appear when ready</li>
-    <li>Scan with WhatsApp → Linked Devices</li>
-</ol>
-</div></body></html>
-""", numbers=numbers)
-
-@app.route("/admin/whatsapp/add", methods=["POST"])
-def admin_whatsapp_add():
-    if not session.get("admin") and not session.get("logged_in"):
-        return redirect("/admin/login")
-    label = request.form.get("label", "").strip()
-    team_group = request.form.get("team_group", "").strip()
-    orders_group = request.form.get("orders_group", "").strip()
-    moderator_group = request.form.get("moderator_group", "").strip()
-    db_query("INSERT INTO bridge_numbers (label, team_group, orders_group, moderator_group, enabled, status) VALUES (?, ?, ?, ?, 1, 'disconnected')",
-             (label, team_group, orders_group, moderator_group), commit=True)
-    flash(f"WhatsApp number '{label}' added! Run bridge-manager.js to connect.")
-    return redirect("/admin/whatsapp")
-
-@app.route("/admin/whatsapp/toggle/<int:num_id>")
-def admin_whatsapp_toggle(num_id):
-    if not session.get("admin") and not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("UPDATE bridge_numbers SET enabled = 1 - enabled WHERE id = ?", (num_id,), commit=True)
-    return redirect("/admin/whatsapp")
-
-@app.route("/admin/whatsapp/delete/<int:num_id>")
-def admin_whatsapp_delete(num_id):
-    if not session.get("admin") and not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("DELETE FROM bridge_numbers WHERE id = ?", (num_id,), commit=True)
-    return redirect("/admin/whatsapp")
-
-
-# =====================================================================
-# ADMIN: Group Orders View
-# =====================================================================
-@app.route("/admin/group-orders", methods=["GET"])
-def admin_group_orders():
-    if not session.get("admin") and not session.get("logged_in"):
-        return redirect("/admin/login")
-    orders = db_query("SELECT * FROM group_orders ORDER BY id DESC LIMIT 200", fetchall=True) or []
-    return render_template_string("""
-<!DOCTYPE html><html><head><meta charset="utf-8"><title>Group Orders</title>
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}h1{color:#333}.container{max-width:1100px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
-table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}th,td{padding:10px;text-align:left;border-bottom:1px solid #ddd}th{background:#FF9800;color:white}tr:hover{background:#f1f1f1}
-.status-pending{color:#ff9800}.status-confirmed{color:#4CAF50}.status-cancelled{color:#f44336}
-.btn{padding:6px 12px;border:none;border-radius:4px;cursor:pointer;text-decoration:none;font-size:12px}
-.btn-green{background:#4CAF50;color:white}.btn-red{background:#f44336;color:white}
-.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
-</style></head>
-<body><div class="container">
-<div class="nav"><a href="/admin-panel">← Admin Panel</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
-<h1>📦 Group Orders (Auto-captured)</h1>
-<table>
-<tr><th>ID</th><th>Customer</th><th>Phone</th><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Group</th><th>Status</th><th>Date</th><th>Action</th></tr>
-{% for o in orders %}
-<tr>
-    <td>{{ o.id }}</td><td>{{ o.customer_name }}</td><td>{{ o.phone }}</td><td>{{ o.product_name }}</td>
-    <td>{{ o.quantity }}</td><td>{{ o.price }}</td><td>{{ o.total }}৳</td><td>{{ o.group_name }}</td>
-    <td class="status-{{ o.status }}">{{ o.status }}</td><td>{{ o.created_at }}</td>
-    <td>
-        <a href="/admin/group-orders/status/{{ o.id }}?status=confirmed" class="btn btn-green">Confirm</a>
-        <a href="/admin/group-orders/status/{{ o.id }}?status=cancelled" class="btn btn-red">Cancel</a>
-    </td>
-</tr>
+<table><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Action</th></tr>
+{% for p in products %}
+<tr><td>{{ p.id }}</td><td>{{ p.name }}</td><td>{{ p.price }}৳</td><td>{{ p.stock }}</td>
+<td><a href="/admin/products/delete/{{ p.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td></tr>
 {% endfor %}
 </table></div></body></html>
-""", orders=orders)
+""", products=products)
 
-@app.route("/admin/group-orders/status/<int:order_id>")
-def admin_group_order_status(order_id):
-    if not session.get("admin") and not session.get("logged_in"):
+@app.route("/admin/products/add", methods=["POST"])
+def admin_products_add():
+    if not session.get("admin"):
         return redirect("/admin/login")
-    status = request.args.get("status", "pending")
-    db_query("UPDATE group_orders SET status = ? WHERE id = ?", (status, order_id), commit=True)
-    return redirect("/admin/group-orders")
+    name = request.form.get("name", "").strip()
+    price = int(request.form.get("price", 0))
+    stock = int(request.form.get("stock", 10))
+    db_query("INSERT INTO products (name, price, stock) VALUES (?, ?, ?)", (name, price, stock), commit=True)
+    return redirect("/admin/products")
 
+@app.route("/admin/products/delete/<int:product_id>")
+def admin_products_delete(product_id):
+    if not session.get("admin"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM products WHERE id = ?", (product_id,), commit=True)
+    return redirect("/admin/products")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
