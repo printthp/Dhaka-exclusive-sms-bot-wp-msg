@@ -2532,8 +2532,8 @@ def group_webhook():
             logger.info("Empty message, skipping")
             return jsonify({"reply": ""})
         
-        # Skip bot's own messages
-        if message.startswith("🤖") or message.startswith("✅"):
+        # Skip bot's own messages and error messages (prevents infinite loop!)
+        if message.startswith("🤖") or message.startswith("✅") or message.startswith("⚙️"):
             return jsonify({"reply": ""})
         
         # Store in DB
@@ -2569,13 +2569,32 @@ def group_webhook():
 """
         
         logger.info("Calling Gemini API...")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
         }
-        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-        res = r.json()
+        
+        # Try multiple models in case one fails
+        models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"]
+        res = None
+        for model in models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+                r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+                test_res = r.json()
+                if not test_res.get("error"):
+                    res = test_res
+                    logger.info(f"Model {model} works!")
+                    break
+                else:
+                    logger.warning(f"Model {model} failed: {test_res['error'].get('message', '')[:50]}")
+            except Exception as e:
+                logger.warning(f"Model {model} error: {e}")
+        
+        if res is None:
+            logger.error("All Gemini models failed")
+            return jsonify({"reply": "⚙️ AI সার্ভিসে সমস্যা হচ্ছে। পরে আবার চেষ্টা করুন।"})
+        
         logger.info(f"Gemini response: {json.dumps(res, ensure_ascii=False)[:200]}")
         
         reply = ""
@@ -2600,7 +2619,7 @@ def group_webhook():
     
     except Exception as e:
         logger.error(f"Group webhook error: {e}", exc_info=True)
-        return jsonify({"reply": f"⚙️ Error: {str(e)}"})
+        return jsonify({"reply": ""})
 
 
 # =====================================================================
