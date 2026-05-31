@@ -2526,7 +2526,10 @@ def group_webhook():
         sender_name = data.get("sender_name", "Member")
         message = data.get("message", "").strip()
         
+        logger.info(f"Group msg from {sender_name}: {message}")
+        
         if not message:
+            logger.info("Empty message, skipping")
             return jsonify({"reply": ""})
         
         # Skip bot's own messages
@@ -2538,8 +2541,10 @@ def group_webhook():
         db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
         
         # Build knowledge
+        logger.info("Building knowledge base...")
         knowledge = _build_knowledge_base()
         products_text = _get_products_text()
+        logger.info(f"Knowledge: {len(knowledge)} chars, Products: {len(products_text)} chars")
         
         # Generate AI reply with full knowledge
         prompt = f"""তুমি Dhaka Exclusive-এর সেলস AI assistant। তুমি একটি WhatsApp গ্রুপে কাজ করছো।
@@ -2563,6 +2568,7 @@ def group_webhook():
 - গ্রুপের অন্য সদস্যদের উদ্দেশ্যে উত্তর দাও (সবাই দেখতে পারবে)
 """
         
+        logger.info("Calling Gemini API...")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -2570,6 +2576,7 @@ def group_webhook():
         }
         r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
         res = r.json()
+        logger.info(f"Gemini response: {json.dumps(res, ensure_ascii=False)[:200]}")
         
         reply = ""
         if res.get("candidates"):
@@ -2577,17 +2584,23 @@ def group_webhook():
             for part in parts:
                 if "text" in part:
                     reply = part["text"].strip()
+        elif res.get("error"):
+            logger.error(f"Gemini error: {res['error']}")
+            reply = "⚙️ AI সার্ভিসে সমস্যা হচ্ছে।"
+        
+        logger.info(f"Generated reply: {reply[:100] if reply else 'EMPTY'}")
         
         if reply:
             db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
-            logger.info(f"Group reply: {reply[:100]}")
+            logger.info(f"Group reply sent: {reply[:100]}")
             return jsonify({"reply": reply})
         
+        logger.warning("No reply generated")
         return jsonify({"reply": ""})
     
     except Exception as e:
-        logger.error(f"Group webhook error: {e}")
-        return jsonify({"reply": ""})
+        logger.error(f"Group webhook error: {e}", exc_info=True)
+        return jsonify({"reply": f"⚙️ Error: {str(e)}"})
 
 
 # =====================================================================
