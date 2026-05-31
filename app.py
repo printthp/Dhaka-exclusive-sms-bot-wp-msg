@@ -2589,6 +2589,8 @@ def group_webhook():
 def _handle_order_group(group_id, group_name, sender_id, sender_name, message):
     """Auto-extract order from message and save to dashboard"""
     try:
+        logger.info(f"[ORDER] Processing: {message[:60]}")
+        
         # Extract order info using AI
         order_prompt = f"""তুমি একজন order extractor। নিচের WhatsApp message থেকে order information বের করো।
 
@@ -2609,7 +2611,11 @@ Message: "{message}"
             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500}
         }
         
-        models = ["gemini-1.5-flash", "gemini-pro"]
+        if not GEMINI_API_KEY:
+            logger.error("[ORDER] GEMINI_API_KEY is empty!")
+            return jsonify({"reply": ""})
+        
+        models = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
         res = None
         for model in models:
             try:
@@ -2618,8 +2624,12 @@ Message: "{message}"
                 test_res = r.json()
                 if not test_res.get("error"):
                     res = test_res
+                    logger.info(f"[ORDER] Model {model} works!")
                     break
-            except:
+                else:
+                    logger.warning(f"[ORDER] Model {model} failed: {test_res['error'].get('message','')[:80]}")
+            except Exception as e:
+                logger.warning(f"[ORDER] Model {model} error: {e}")
                 continue
         
         order_data = {"customer_name": sender_name, "phone": "unknown", "address": "unknown", "product_name": "unknown", "quantity": 1, "price": 0}
@@ -2668,9 +2678,12 @@ Message: "{message}"
 def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
     """AI acts as group leader — respects admin, knows all members"""
     
+    logger.info(f"[TEAM] Processing message from {sender_name}: {message[:50]}")
+    
     # Check if sender is admin
     admin_phone = os.environ.get("ADMIN_PHONE", "")
     is_admin = (sender_id == admin_phone or sender_id.replace("@c.us", "").replace("@lid", "") in admin_phone)
+    logger.info(f"[TEAM] Sender is_admin={is_admin}, admin_phone={admin_phone[:5]}...")
     
     # Get team members info
     team_members = db_query("SELECT name, phone, role FROM team_members WHERE is_active = 1", fetchall=True) or []
@@ -2679,6 +2692,7 @@ def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
     # Build knowledge
     knowledge = _build_knowledge_base()
     products_text = _get_products_text()
+    logger.info(f"[TEAM] Knowledge: {len(knowledge)} chars, Products: {len(products_text)} chars")
     
     # Leader-mode prompt
     admin_respect = """
@@ -2719,21 +2733,39 @@ Team memberদের জন্য সবসময় helpful এবং professio
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
     }
     
-    models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"]
+    # Updated model names - Google changed these!
+    # Check API key
+    if not GEMINI_API_KEY:
+        logger.error("[TEAM] GEMINI_API_KEY is empty! Set GEMINI_KEY env var in Render.")
+        return jsonify({"reply": "⚙️ AI key missing. Contact admin."})
+    
+    # Latest working models (Google keeps changing names!)
+    models = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
     res = None
+    last_error = ""
+    
     for model in models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+            logger.info(f"[TEAM] Trying model: {model}")
             r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
             test_res = r.json()
-            if not test_res.get("error"):
+            if test_res.get("error"):
+                last_error = test_res["error"].get("message", "unknown")[:100]
+                logger.warning(f"[TEAM] Model {model} failed: {last_error}")
+            else:
                 res = test_res
+                logger.info(f"[TEAM] Model {model} works!")
                 break
-        except:
+        except Exception as e:
+            last_error = str(e)[:100]
+            logger.warning(f"[TEAM] Model {model} exception: {e}")
             continue
     
     if res is None:
-        return jsonify({"reply": ""})
+        logger.error(f"[TEAM] All models failed. Last error: {last_error}")
+        fallback = "🤖 হ্যালো! আমি Dhaka Exclusive-এর AI Assistant। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+        return jsonify({"reply": fallback})
     
     reply = ""
     if res.get("candidates"):
@@ -2742,10 +2774,13 @@ Team memberদের জন্য সবসময় helpful এবং professio
             if "text" in part:
                 reply = part["text"].strip()
     
+    logger.info(f"[TEAM] Generated reply: {reply[:100] if reply else 'EMPTY'}")
+    
     if reply:
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
         return jsonify({"reply": reply})
     
+    logger.warning("[TEAM] Empty reply from AI")
     return jsonify({"reply": ""})
 
 
