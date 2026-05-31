@@ -2587,7 +2587,22 @@ def group_webhook():
         
         logger.info(f"Group msg from {sender_name} in [{group_name}]: {message[:50]}")
         
-        if not message:
+        # Check for image
+        media_type = data.get("media_type", "")
+        media_data = data.get("media_data", "")
+        image_path = None
+        if media_data and media_type and media_type.startswith("image"):
+            try:
+                ext = media_type.split("/")[1] if "/" in media_type else "jpg"
+                image_path = f"/tmp/group_img_{int(time.time())}.{ext}"
+                with open(image_path, "wb") as f:
+                    f.write(base64.b64decode(media_data))
+                logger.info(f"[GROUP] Image saved: {image_path}")
+                message = message or "📷 [user sent a photo]"
+            except Exception as e:
+                logger.error(f"[GROUP] Image save error: {e}")
+        
+        if not message and not image_path:
             return jsonify({"reply": ""})
         
         # Skip bot's own messages (prevents infinite loop!)
@@ -2602,12 +2617,12 @@ def group_webhook():
         # ORDER GROUP: Auto-extract order and save to dashboard
         # =====================================================================
         if group_type == "orders" or "order" in group_name.lower() or "অর্ডার" in group_name:
-            return _handle_order_group(group_id, group_name, sender_id, sender_name, message)
+            return _handle_order_group(group_id, group_name, sender_id, sender_name, message, image_path=image_path)
         
         # =====================================================================
         # TEAM GROUP: Leader mode with admin respect
         # =====================================================================
-        return _handle_team_group(group_id, group_name, sender_id, sender_name, message)
+        return _handle_team_group(group_id, group_name, sender_id, sender_name, message, image_path=image_path)
     
     except Exception as e:
         logger.error(f"Group webhook error: {e}", exc_info=True)
@@ -2701,7 +2716,7 @@ Message: "{message}"
         return jsonify({"reply": ""})
 
 
-def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
+def _handle_team_group(group_id, group_name, sender_id, sender_name, message, image_path=None):
     """AI acts as group leader — respects admin, knows all members by name"""
     
     logger.info(f"[TEAM] Processing message from {sender_name}: {message[:50]}")
@@ -2774,6 +2789,16 @@ def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
     if not GEMINI_API_KEY:
         logger.error("[TEAM] GEMINI_API_KEY is empty! Set GEMINI_KEY env var in Render.")
         return jsonify({"reply": "⚙️ AI key missing. Contact admin."})
+    
+    # If image attached, use vision analysis
+    if image_path and os.path.exists(image_path):
+        logger.info(f"[TEAM] Image detected, using vision analysis: {image_path}")
+        reply = _analyze_image_with_gemini(image_path, sender_id)
+        if reply and not reply.startswith("📷"):
+            # Add greeting if no error
+            reply = f"{display_name}, {reply}"
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
+        return jsonify({"reply": reply})
     
     # Current working model: gemini-3.5-flash (Google API v1)
     # See: https://ai.google.dev/api/generate-content
