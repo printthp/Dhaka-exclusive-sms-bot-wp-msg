@@ -795,6 +795,31 @@ def cron_followup():
 GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
 WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
+
+# =====================================================================
+# TWILIO SMS SETUP
+# =====================================================================
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")
+
+def send_sms(to_phone, message):
+    """Send SMS via Twilio API"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+        logger.warning("SMS: Twilio credentials missing")
+        return False
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        data = {"From": TWILIO_PHONE_NUMBER, "To": to_phone, "Body": message}
+        r = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), timeout=30)
+        if r.status_code in (200, 201):
+            logger.info(f"SMS sent to {to_phone}")
+            return True
+        logger.error(f"SMS send failed: {r.status_code} {r.text}")
+        return False
+    except Exception as e:
+        logger.error(f"SMS send error: {e}")
+        return False
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN") or "dhaka-exclusive-verify-2026"
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "")
 
@@ -944,12 +969,15 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
         
         # Use gemini-1.5-flash which supports vision
         prompt = (
-            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। এই ছবিটি দেখো।\n"
-            "যদি এটি কোনো প্রোডাক্টের ছবি হয়, তাহলে চিনতে চেষ্টা করো।\n"
-            "কাস্টমার যদি কোনো প্রোডাক্টের ছবি পাঠিয়ে থাকে, তাহলে সেটি কিনতে সাহায্য করো।\n"
-            "যদি স্ক্রিনশট/ছবিতে কোনো প্রোডাক্ট আমাদের ক্যাটালগের মতো দেখায়, তাহলে দাম বলো।\n"
+            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। কাস্টমার একটি প্রোডাক্টের ছবি পাঠিয়েছে।\n"
+            "ছবিটি সাবধানে দেখো এবং বর্ণনা করো কী প্রোডাক্ট।\n"
+            "তারপর নিচের ক্যাটালগের সাথে তুলনা করে সবচেয়ে কাছাকাছি ম্যাচ খুঁজো।\n"
             f"আমাদের ক্যাটালগ:\n{product_list}\n\n"
-            "সংক্ষিপ্ত ও বন্ধুসুলভ ভাবে বাংলায় উত্তর দাও।"
+            "নিয়ম:\n"
+            "১. যদি ছবির প্রোডাক্ট ক্যাটালগের কোনো আইটেমের সাথে মিলে, তাহলে বলো: 'এটি আমাদের [Product Name], দাম [Price]৳।'\n"
+            "২. যদি একদম না মিলে, তাহলে বলো: 'দুঃখিত, এই প্রোডাক্টটি আমাদের ক্যাটালগে পাওয়া যাচ্ছে না। আপনি কি অন্য কিছু দেখতে চান?'\n"
+            "৩. যদি মোটামুটি মিলে কিন্তু নিশ্চিত না, তাহলে বলো: 'এটি আমাদের [Closest Product] এর মতো দেখাচ্ছে, দাম [Price]৳। আপনি কি এটি চাইছেন?'\n"
+            "সংক্ষিপ্ত, বন্ধুসুলভ, বাংলায় উত্তর দাও।"
         )
         
         # Vision requires specific model - use flash for speed
