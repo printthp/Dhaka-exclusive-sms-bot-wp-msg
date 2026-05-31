@@ -953,7 +953,7 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
         )
         
         # Vision requires specific model - use flash for speed
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "role": "user",
@@ -1098,7 +1098,7 @@ def _extract_order_from_text(text, phone):
   "is_order": false
 }}"""
             
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
             payload = {
                 "contents": [{"role": "user", "parts": [{"text": extract_prompt}]}],
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500, "topP": 0.9}
@@ -1204,7 +1204,7 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
         )
         
         # Use gemini-1.5-flash which reliably supports audio
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "role": "user",
@@ -1261,7 +1261,7 @@ def _generate_team_suggestion(team_query):
 শুধু বাংলায় উত্তর দাও। সরাসরি টিম মেম্বারকে বলে দাও কীভাবে রিপ্লাই দিবে। 
 Short, professional, friendly tone।
 """
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
@@ -1428,7 +1428,7 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
     headers = {"Content-Type": "application/json"}
 
     def _call_gemini(model_name):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         return resp.json()
 
@@ -1725,7 +1725,7 @@ Material: [material or N/A]
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300, "topP": 0.95}
         }
         headers = {"Content-Type": "application/json"}
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_PRIMARY_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         res = resp.json()
         
@@ -2615,22 +2615,20 @@ Message: "{message}"
             logger.error("[ORDER] GEMINI_API_KEY is empty!")
             return jsonify({"reply": ""})
         
-        models = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+        model = "gemini-3.5-flash"
         res = None
-        for model in models:
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-                r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-                test_res = r.json()
-                if not test_res.get("error"):
-                    res = test_res
-                    logger.info(f"[ORDER] Model {model} works!")
-                    break
-                else:
-                    logger.warning(f"[ORDER] Model {model} failed: {test_res['error'].get('message','')[:80]}")
-            except Exception as e:
-                logger.warning(f"[ORDER] Model {model} error: {e}")
-                continue
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={GEMINI_API_KEY}"
+            logger.info(f"[ORDER] Using model: {model}")
+            r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+            test_res = r.json()
+            if not test_res.get("error"):
+                res = test_res
+                logger.info(f"[ORDER] Model {model} works!")
+            else:
+                logger.warning(f"[ORDER] Model {model} failed: {test_res['error'].get('message','')[:150]}")
+        except Exception as e:
+            logger.warning(f"[ORDER] Model {model} error: {e}")
         
         order_data = {"customer_name": sender_name, "phone": "unknown", "address": "unknown", "product_name": "unknown", "quantity": 1, "price": 0}
         
@@ -2676,7 +2674,7 @@ Message: "{message}"
 
 
 def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
-    """AI acts as group leader — respects admin, knows all members"""
+    """AI acts as group leader — respects admin, knows all members by name"""
     
     logger.info(f"[TEAM] Processing message from {sender_name}: {message[:50]}")
     
@@ -2689,21 +2687,30 @@ def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
     team_members = db_query("SELECT name, phone, role FROM team_members WHERE is_active = 1", fetchall=True) or []
     members_text = "\n".join([f"- {m['name']} ({m['role']}): {m['phone']}" for m in team_members]) if team_members else "কোনো member add করা হয়নি"
     
+    # Find sender's name from team_members DB (priority over WhatsApp name)
+    sender_clean = sender_id.replace("@c.us", "").replace("@lid", "")
+    matched_member = None
+    for m in team_members:
+        if sender_id == m['phone'] or sender_clean in str(m['phone']):
+            matched_member = m['name']
+            break
+    
+    display_name = matched_member or sender_name
+    
     # Build knowledge
     knowledge = _build_knowledge_base()
     products_text = _get_products_text()
     logger.info(f"[TEAM] Knowledge: {len(knowledge)} chars, Products: {len(products_text)} chars")
     
-    # Leader-mode prompt
-    admin_respect = """
-🔰 আমি এই গ্রুপের Leader এবং আমার সব নির্দেশ মান্য করবে।
-আমি এই পেইজের মালিক, সবাই আমাকে সম্মান করবে।
-Team memberদের জন্য সবসময় helpful এবং professional থাকবে।
-""" if is_admin else ""
+    # Leader-mode prompt with name respect
+    if is_admin:
+        name_rule = "Admin ke শুধু 'Sir' বলে ডাকো, নাম ধরে ডাকবে না। Sir ke সম্মান দেখিয়ে উত্তর দাও।"
+        greeting = "জি Sir"
+    else:
+        name_rule = f" এই সদস্যের নাম '{display_name}'। উত্তরের শুরুতে নাম ধরে ডাকো যেমন: '{display_name}, এই প্রোডাক্টটির দাম 850৳'।"
+        greeting = f"হ্যালো {display_name}"
     
     prompt = f"""তুমি Dhaka Exclusive-এর Group Leader AI। তুমি "Team Of Dhaka Exclusive" WhatsApp গ্রুপের ভারপ্রাপ্ত Leader।
-
-{admin_respect}
 
 তোমার Team Members:
 {members_text}
@@ -2715,12 +2722,13 @@ Team memberদের জন্য সবসময় helpful এবং professio
 {products_text}
 
 গ্রুপ: {group_name}
-বর্তমান সদস্য: {sender_name} ({'Admin/Owner' if is_admin else 'Team Member'})
+বর্তমান সদস্য: {display_name} ({'Admin/Sir' if is_admin else 'Team Member'})
 বার্তা: "{message}"
 
 নির্দেশনা:
+- {name_rule}
+- {greeting} দিয়ে উত্তর শুরু করো
 - তুমি Leader, সবার প্রশ্নের উত্তর দাও
-- Admin/Owner (পেইজের মালিক) কে সম্মান দেখাও, উনার নির্দেশ সবার উপর
 - Team memberদের সাহায্য করো, professional tone রাখো
 - প্রোডাক্ট সম্পর্কে জানতে চাইলে exact price ও stock বলো
 - কেউ অর্ডার নিয়ে জিজ্ঞেস করলে সুন্দরভাবে হেল্প করো
@@ -2739,31 +2747,29 @@ Team memberদের জন্য সবসময় helpful এবং professio
         logger.error("[TEAM] GEMINI_API_KEY is empty! Set GEMINI_KEY env var in Render.")
         return jsonify({"reply": "⚙️ AI key missing. Contact admin."})
     
-    # Latest working models (Google keeps changing names!)
-    models = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+    # Current working model: gemini-3.5-flash (Google API v1)
+    # See: https://ai.google.dev/api/generate-content
+    model = "gemini-3.5-flash"
     res = None
     last_error = ""
     
-    for model in models:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-            logger.info(f"[TEAM] Trying model: {model}")
-            r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
-            test_res = r.json()
-            if test_res.get("error"):
-                last_error = test_res["error"].get("message", "unknown")[:100]
-                logger.warning(f"[TEAM] Model {model} failed: {last_error}")
-            else:
-                res = test_res
-                logger.info(f"[TEAM] Model {model} works!")
-                break
-        except Exception as e:
-            last_error = str(e)[:100]
-            logger.warning(f"[TEAM] Model {model} exception: {e}")
-            continue
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        logger.info(f"[TEAM] Using model: {model}")
+        r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+        test_res = r.json()
+        if test_res.get("error"):
+            last_error = test_res["error"].get("message", "unknown")[:200]
+            logger.warning(f"[TEAM] Model {model} failed: {last_error}")
+        else:
+            res = test_res
+            logger.info(f"[TEAM] Model {model} works!")
+    except Exception as e:
+        last_error = str(e)[:200]
+        logger.warning(f"[TEAM] Model {model} exception: {e}")
     
     if res is None:
-        logger.error(f"[TEAM] All models failed. Last error: {last_error}")
+        logger.error(f"[TEAM] Model failed. Error: {last_error}")
         fallback = "🤖 হ্যালো! আমি Dhaka Exclusive-এর AI Assistant। কিছুক্ষণ পর আবার চেষ্টা করুন।"
         return jsonify({"reply": fallback})
     
