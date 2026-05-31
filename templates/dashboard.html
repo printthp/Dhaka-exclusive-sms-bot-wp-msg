@@ -15,43 +15,82 @@
     </div>
 </div>
 
-<!-- ২. স্ট্যাটাস কার্ডস -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+<!-- স্ট্যাটাস কার্ডস (6 cards) -->
+<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-5 mb-10">
     <!-- Revenue Card -->
-    <div class="glass p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-emerald-500/30 transition-all duration-500">
-        <div class="absolute -right-4 -top-4 w-28 h-28 bg-emerald-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
-        <p class="text-[10px] text-slate-500 uppercase font-black tracking-widest leading-none">মোট রাজস্ব</p>
-        <h2 class="text-4xl font-black mt-3 text-emerald-400 tracking-tighter">{{ "{:,.0f}".format(analytics.total_revenue) }}৳</h2>
-        <div class="mt-4 flex items-center gap-2">
-            <span class="bg-emerald-500/20 text-emerald-400 text-[9px] font-bold px-2 py-0.5 rounded-full">+12% Up</span>
-            <span class="text-[9px] text-slate-600 font-bold uppercase">Real-time Data</span>
-        </div>
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-emerald-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-emerald-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">মোট রাজস্ব</p>
+        <h2 class="text-2xl font-black mt-2 text-emerald-400 tracking-tighter">{{ "{:,.0f}".format(analytics.total_revenue) }}৳</h2>
     </div>
 
     <!-- Orders Card -->
-    <div class="glass p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-indigo-500/30 transition-all duration-500">
-        <div class="absolute -right-4 -top-4 w-28 h-28 bg-indigo-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
-        <p class="text-[10px] text-slate-500 uppercase font-black tracking-widest leading-none">মোট অর্ডার</p>
-        <h2 class="text-4xl font-black mt-3 text-white tracking-tighter">{{ analytics.total_orders }}</h2>
-        <div class="mt-4 flex items-center gap-2">
-            <span class="bg-indigo-500/20 text-indigo-400 text-[9px] font-bold px-2 py-0.5 rounded-full">Active</span>
-            <span class="text-[9px] text-slate-600 font-bold uppercase">Enterprise Node</span>
-        </div>
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-indigo-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-indigo-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">মোট অর্ডার</p>
+        <h2 class="text-2xl font-black mt-2 text-white tracking-tighter">{{ analytics.total_orders }}</h2>
     </div>
 
-    <!-- Health Card -->
-    <div class="glass p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-purple-500/30 transition-all duration-500">
-        <div class="absolute -right-4 -top-4 w-28 h-28 bg-purple-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
-        <p class="text-[10px] text-slate-500 uppercase font-black tracking-widest leading-none">ইঞ্জিন স্ট্যাটাস</p>
-        <div class="flex items-center mt-3 gap-3">
-             <div class="w-3 h-3 bg-emerald-500 rounded-full animate-ping"></div>
-             <h2 class="text-xl font-black text-indigo-400 tracking-widest uppercase">Engine V7</h2>
-        </div>
-        <p class="text-[9px] text-slate-500 font-bold mt-4 uppercase"><i class="fa-solid fa-microchip mr-1"></i> Pathao & Meta API Linked</p>
+    <!-- Products Card -->
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-blue-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-blue-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">প্রোডাক্ট</p>
+        <h2 class="text-2xl font-black mt-2 text-blue-400 tracking-tighter">{{ total_products }}</h2>
+    </div>
+
+    <!-- Customers Card -->
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-orange-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-orange-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">কাস্টমার</p>
+        <h2 class="text-2xl font-black mt-2 text-orange-400 tracking-tighter">{{ users|length }}</h2>
+    </div>
+
+    <!-- Team Members Card (NEW) -->
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-purple-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-purple-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">টিম মেম্বার</p>
+        <h2 class="text-2xl font-black mt-2 text-purple-400 tracking-tighter">{{ team_count }}</h2>
+    </div>
+
+    <!-- Group Orders Card (NEW) -->
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-cyan-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-cyan-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">গ্রুপ অর্ডার</p>
+        <h2 class="text-2xl font-black mt-2 text-cyan-400 tracking-tighter">{{ group_orders_count }}</h2>
     </div>
 </div>
 
-<!-- ৩. ডাইনামিক গ্রাফ ও টেবিল -->
+<!-- Quick Access Cards -->
+<div class="glass p-6 rounded-[2.5rem] shadow-2xl border border-slate-800 mb-10">
+    <div class="flex items-center gap-2 mb-5 px-2">
+        <span class="text-xl">⚡</span>
+        <h3 class="font-black text-sm uppercase tracking-widest text-slate-400">Quick Access</h3>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <a href="/admin/team" class="group p-5 rounded-2xl bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-500 hover:to-indigo-500 transition-all duration-300 border border-purple-500/20 hover:scale-[1.02]">
+            <div class="text-3xl mb-2">👥</div>
+            <div class="font-bold text-white text-sm">Manage Team</div>
+            <div class="text-[10px] text-purple-200 mt-1">Add/remove team members</div>
+        </a>
+        <a href="/admin/group-orders" class="group p-5 rounded-2xl bg-gradient-to-r from-orange-600/80 to-amber-600/80 hover:from-orange-500 hover:to-amber-500 transition-all duration-300 border border-orange-500/20 hover:scale-[1.02]">
+            <div class="text-3xl mb-2">📦</div>
+            <div class="font-bold text-white text-sm">Group Orders</div>
+            <div class="text-[10px] text-orange-200 mt-1">View auto-captured orders</div>
+        </a>
+        <a href="/admin?tab=inventory" class="group p-5 rounded-2xl bg-gradient-to-r from-pink-600/80 to-rose-600/80 hover:from-pink-500 hover:to-rose-500 transition-all duration-300 border border-pink-500/20 hover:scale-[1.02]">
+            <div class="text-3xl mb-2">📋</div>
+            <div class="font-bold text-white text-sm">Inventory</div>
+            <div class="text-[10px] text-pink-200 mt-1">Products & stock</div>
+        </a>
+        <a href="/admin?tab=orders" class="group p-5 rounded-2xl bg-gradient-to-r from-cyan-600/80 to-blue-600/80 hover:from-cyan-500 hover:to-blue-500 transition-all duration-300 border border-cyan-500/20 hover:scale-[1.02]">
+            <div class="text-3xl mb-2">🛒</div>
+            <div class="font-bold text-white text-sm">All Orders</div>
+            <div class="text-[10px] text-cyan-200 mt-1">Manage all orders</div>
+        </a>
+    </div>
+</div>
+
+<!-- ডাইনামিক গ্রাফ ও টেবিল -->
 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
     <!-- Sales Graph -->
     <div class="glass p-8 rounded-[2.5rem] shadow-2xl border border-slate-800">
