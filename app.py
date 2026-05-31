@@ -514,6 +514,9 @@ def admin_portal():
         "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
         "chart_data": get_chart_data()
     }
+    
+    team_count = db_query("SELECT COUNT(*) as c FROM team_members WHERE is_active=1", fetchone=True)["c"] or 0
+    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders WHERE status='pending'", fetchone=True)["c"] or 0
 
     orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
     users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 30", fetchall=True) or []
@@ -566,7 +569,7 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value)
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value, team_count=team_count, group_orders_count=group_orders_count)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
@@ -2921,8 +2924,8 @@ def admin_panel():
 # =====================================================================
 @app.route("/admin/team", methods=["GET"])
 def admin_team():
-    if not session.get("admin"):
-        return redirect("/admin")
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
     members = db_query("SELECT * FROM team_members ORDER BY id DESC", fetchall=True) or []
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>Team Members</title>
@@ -2934,7 +2937,7 @@ input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;wid
 .nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
 </style></head>
 <body><div class="container">
-<div class="nav"><a href="/admin">← Dashboard</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
+<div class="nav"><a href="/admin-panel">← Admin Panel</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
 <h1>👥 Team Members</h1>
 <form method="POST" action="/admin/team/add">
     <input type="text" name="name" placeholder="Name" required>
@@ -2964,8 +2967,8 @@ input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;wid
 
 @app.route("/admin/team/add", methods=["POST"])
 def admin_team_add():
-    if not session.get("admin"):
-        return redirect("/admin")
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
     name = request.form.get("name", "").strip()
     phone = request.form.get("phone", "").strip()
     wa_id = request.form.get("wa_id", "").strip()
@@ -2976,15 +2979,15 @@ def admin_team_add():
 
 @app.route("/admin/team/toggle/<int:member_id>")
 def admin_team_toggle(member_id):
-    if not session.get("admin"):
-        return redirect("/admin")
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
     db_query("UPDATE team_members SET is_active = 1 - is_active WHERE id = ?", (member_id,), commit=True)
     return redirect("/admin/team")
 
 @app.route("/admin/team/delete/<int:member_id>")
 def admin_team_delete(member_id):
-    if not session.get("admin"):
-        return redirect("/admin")
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
     db_query("DELETE FROM team_members WHERE id = ?", (member_id,), commit=True)
     return redirect("/admin/team")
 
@@ -2994,8 +2997,8 @@ def admin_team_delete(member_id):
 # =====================================================================
 @app.route("/admin/group-orders", methods=["GET"])
 def admin_group_orders():
-    if not session.get("admin"):
-        return redirect("/admin")
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
     orders = db_query("SELECT * FROM group_orders ORDER BY id DESC LIMIT 200", fetchall=True) or []
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>Group Orders</title>
@@ -3007,7 +3010,7 @@ table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}th,td{p
 .nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
 </style></head>
 <body><div class="container">
-<div class="nav"><a href="/admin">← Dashboard</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
+<div class="nav"><a href="/admin-panel">← Admin Panel</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
 <h1>📦 Group Orders (Auto-captured)</h1>
 <table>
 <tr><th>ID</th><th>Customer</th><th>Phone</th><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Group</th><th>Status</th><th>Date</th><th>Action</th></tr>
@@ -3027,8 +3030,8 @@ table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}th,td{p
 
 @app.route("/admin/group-orders/status/<int:order_id>")
 def admin_group_order_status(order_id):
-    if not session.get("admin"):
-        return redirect("/admin")
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
     status = request.args.get("status", "pending")
     db_query("UPDATE group_orders SET status = ? WHERE id = ?", (status, order_id), commit=True)
     return redirect("/admin/group-orders")
