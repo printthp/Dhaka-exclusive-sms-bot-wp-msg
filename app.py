@@ -168,6 +168,33 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS agent_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT, details TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
         c.execute("""
+            CREATE TABLE IF NOT EXISTS team_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT UNIQUE,
+                name TEXT,
+                role TEXT DEFAULT 'moderator',
+                wa_id TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS group_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT,
+                customer_name TEXT,
+                address TEXT,
+                product_name TEXT,
+                quantity INTEGER DEFAULT 1,
+                price INTEGER,
+                total INTEGER,
+                status TEXT DEFAULT 'pending',
+                group_name TEXT,
+                raw_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS payment_methods (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -2515,7 +2542,7 @@ def _build_knowledge_base():
 # =====================================================================
 @app.route("/group-webhook", methods=["POST"])
 def group_webhook():
-    """Handle WhatsApp group messages from whatsapp-web.js bridge"""
+    """Handle WhatsApp group messages — Team group (leader) or Order group (auto-extract)"""
     data = request.get_json(force=True, silent=True) or {}
     logger.info(f"Group webhook: {json.dumps(data, ensure_ascii=False)[:300]}")
     
@@ -2525,14 +2552,14 @@ def group_webhook():
         sender_id = data.get("sender_id", "")
         sender_name = data.get("sender_name", "Member")
         message = data.get("message", "").strip()
+        group_type = data.get("group_type", "team")  # 'team' or 'orders'
         
-        logger.info(f"Group msg from {sender_name}: {message}")
+        logger.info(f"Group msg from {sender_name} in [{group_name}]: {message[:50]}")
         
         if not message:
-            logger.info("Empty message, skipping")
             return jsonify({"reply": ""})
         
-        # Skip bot's own messages and error messages (prevents infinite loop!)
+        # Skip bot's own messages (prevents infinite loop!)
         if message.startswith("🤖") or message.startswith("✅") or message.startswith("⚙️"):
             return jsonify({"reply": ""})
         
@@ -2540,42 +2567,46 @@ def group_webhook():
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'group')", (sender_id, f"[{group_name}] {sender_name}: {message}"), commit=True)
         db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (sender_id, sender_name), commit=True)
         
-        # Build knowledge
-        logger.info("Building knowledge base...")
-        knowledge = _build_knowledge_base()
-        products_text = _get_products_text()
-        logger.info(f"Knowledge: {len(knowledge)} chars, Products: {len(products_text)} chars")
+        # =====================================================================
+        # ORDER GROUP: Auto-extract order and save to dashboard
+        # =====================================================================
+        if group_type == "orders" or "order" in group_name.lower() or "অর্ডার" in group_name:
+            return _handle_order_group(group_id, group_name, sender_id, sender_name, message)
         
-        # Generate AI reply with full knowledge
-        prompt = f"""তুমি Dhaka Exclusive-এর সেলস AI assistant। তুমি একটি WhatsApp গ্রুপে কাজ করছো।
+        # =====================================================================
+        # TEAM GROUP: Leader mode with admin respect
+        # =====================================================================
+        return _handle_team_group(group_id, group_name, sender_id, sender_name, message)
+    
+    except Exception as e:
+        logger.error(f"Group webhook error: {e}", exc_info=True)
+        return jsonify({"reply": ""})
 
-তোমার সম্পূর্ণ জ্ঞান:
-{knowledge[:4000]}
 
-বর্তমান প্রোডাক্ট:
-{products_text}
+def _handle_order_group(group_id, group_name, sender_id, sender_name, message):
+    """Auto-extract order from message and save to dashboard"""
+    try:
+        # Extract order info using AI
+        order_prompt = f"""তুমি একজন order extractor। নিচের WhatsApp message থেকে order information বের করো।
 
-গ্রুপ: {group_name}
-সদস্য: {sender_name}
-প্রশ্ন/বার্তা: "{message}"
+Message: "{message}"
 
-নির্দেশনা:
-- বাংলায় উত্তর দাও, সংক্ষিপ্ত ও প্রফেশনাল
-- প্রতিটি উত্তরে "প্রিয় গ্রাহক" বলার দরকার নেই
-- প্রোডাক্ট সম্পর্কে জানতে চাইলে exact price ও stock বলো
-- Order করতে চাইলে address ও phone নিতে বলো
-- ছবি দেখতে চাইলে বলো "ছবি পাঠাচ্ছি"
-- গ্রুপের অন্য সদস্যদের উদ্দেশ্যে উত্তর দাও (সবাই দেখতে পারবে)
-"""
+শুধু এই JSON format-এ reply দাও (কোনো extra text নয়):
+{{
+    "customer_name": "নাম বা 'unknown'",
+    "phone": "ফোন নম্বর বা 'unknown'", 
+    "address": "ঠিকানা বা 'unknown'",
+    "product_name": "প্রোডাক্টের নাম বা 'unknown'",
+    "quantity": সংখ্যা বা 1,
+    "price": দাম সংখ্যায় বা 0
+}}"""
         
-        logger.info("Calling Gemini API...")
         payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
+            "contents": [{"role": "user", "parts": [{"text": order_prompt}]}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500}
         }
         
-        # Try multiple models in case one fails
-        models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"]
+        models = ["gemini-1.5-flash", "gemini-pro"]
         res = None
         for model in models:
             try:
@@ -2584,42 +2615,135 @@ def group_webhook():
                 test_res = r.json()
                 if not test_res.get("error"):
                     res = test_res
-                    logger.info(f"Model {model} works!")
                     break
-                else:
-                    logger.warning(f"Model {model} failed: {test_res['error'].get('message', '')[:50]}")
-            except Exception as e:
-                logger.warning(f"Model {model} error: {e}")
+            except:
+                continue
         
-        if res is None:
-            logger.error("All Gemini models failed")
-            return jsonify({"reply": "⚙️ AI সার্ভিসে সমস্যা হচ্ছে। পরে আবার চেষ্টা করুন।"})
+        order_data = {"customer_name": sender_name, "phone": "unknown", "address": "unknown", "product_name": "unknown", "quantity": 1, "price": 0}
         
-        logger.info(f"Gemini response: {json.dumps(res, ensure_ascii=False)[:200]}")
+        if res and res.get("candidates"):
+            ai_text = res["candidates"][0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            # Try to parse JSON from AI response
+            try:
+                json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+                    order_data.update({k: v for k, v in parsed.items() if v and v != "unknown"})
+            except:
+                pass
         
-        reply = ""
-        if res.get("candidates"):
-            parts = res["candidates"][0].get("content", {}).get("parts", [])
-            for part in parts:
-                if "text" in part:
-                    reply = part["text"].strip()
-        elif res.get("error"):
-            logger.error(f"Gemini error: {res['error']}")
-            reply = "⚙️ AI সার্ভিসে সমস্যা হচ্ছে।"
+        # Fallback regex extraction
+        phone_match = re.search(r'(01[3-9]\d{8}|8801[3-9]\d{8})', message)
+        if phone_match:
+            order_data["phone"] = phone_match.group()
+        qty_match = re.search(r'(\d+)\s*(pcs|piece|পিস)', message.lower())
+        if qty_match:
+            order_data["quantity"] = int(qty_match.group(1))
+        price_match = re.search(r'(\d{3,4})\s*৳', message)
+        if price_match:
+            order_data["price"] = int(price_match.group(1))
         
-        logger.info(f"Generated reply: {reply[:100] if reply else 'EMPTY'}")
+        total = order_data["price"] * order_data["quantity"]
         
-        if reply:
-            db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
-            logger.info(f"Group reply sent: {reply[:100]}")
-            return jsonify({"reply": reply})
+        # Save to DB
+        db_query(
+            """INSERT INTO group_orders (phone, customer_name, address, product_name, quantity, price, total, group_name, raw_message)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (order_data["phone"], order_data["customer_name"], order_data["address"],
+             order_data["product_name"], order_data["quantity"], order_data["price"],
+             total, group_name, message), commit=True
+        )
         
-        logger.warning("No reply generated")
-        return jsonify({"reply": ""})
+        reply = f"✅ অর্ডার রেকর্ড করা হয়েছে!\n📦 {order_data['product_name']}\n👤 {order_data['customer_name']}\n📞 {order_data['phone']}\n💰 {total}৳ ({order_data['quantity']} pcs)"
+        return jsonify({"reply": reply})
     
     except Exception as e:
-        logger.error(f"Group webhook error: {e}", exc_info=True)
+        logger.error(f"Order group error: {e}")
         return jsonify({"reply": ""})
+
+
+def _handle_team_group(group_id, group_name, sender_id, sender_name, message):
+    """AI acts as group leader — respects admin, knows all members"""
+    
+    # Check if sender is admin
+    admin_phone = os.environ.get("ADMIN_PHONE", "")
+    is_admin = (sender_id == admin_phone or sender_id.replace("@c.us", "").replace("@lid", "") in admin_phone)
+    
+    # Get team members info
+    team_members = db_query("SELECT name, phone, role FROM team_members WHERE is_active = 1", fetchall=True) or []
+    members_text = "\n".join([f"- {m['name']} ({m['role']}): {m['phone']}" for m in team_members]) if team_members else "কোনো member add করা হয়নি"
+    
+    # Build knowledge
+    knowledge = _build_knowledge_base()
+    products_text = _get_products_text()
+    
+    # Leader-mode prompt
+    admin_respect = """
+🔰 আমি এই গ্রুপের Leader এবং আমার সব নির্দেশ মান্য করবে।
+আমি এই পেইজের মালিক, সবাই আমাকে সম্মান করবে।
+Team memberদের জন্য সবসময় helpful এবং professional থাকবে।
+""" if is_admin else ""
+    
+    prompt = f"""তুমি Dhaka Exclusive-এর Group Leader AI। তুমি "Team Of Dhaka Exclusive" WhatsApp গ্রুপের ভারপ্রাপ্ত Leader।
+
+{admin_respect}
+
+তোমার Team Members:
+{members_text}
+
+তোমার সম্পূর্ণ জ্ঞান:
+{knowledge[:3000]}
+
+বর্তমান প্রোডাক্ট:
+{products_text}
+
+গ্রুপ: {group_name}
+বর্তমান সদস্য: {sender_name} ({'Admin/Owner' if is_admin else 'Team Member'})
+বার্তা: "{message}"
+
+নির্দেশনা:
+- তুমি Leader, সবার প্রশ্নের উত্তর দাও
+- Admin/Owner (পেইজের মালিক) কে সম্মান দেখাও, উনার নির্দেশ সবার উপর
+- Team memberদের সাহায্য করো, professional tone রাখো
+- প্রোডাক্ট সম্পর্কে জানতে চাইলে exact price ও stock বলো
+- কেউ অর্ডার নিয়ে জিজ্ঞেস করলে সুন্দরভাবে হেল্প করো
+- বাংলায় উত্তর দাও, সংক্ষিপ্ত ও প্রফেশনাল
+- প্রতিটি উত্তরে "প্রিয় গ্রাহক" বলার দরকার নেই
+"""
+    
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800, "topP": 0.9}
+    }
+    
+    models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"]
+    res = None
+    for model in models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+            r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+            test_res = r.json()
+            if not test_res.get("error"):
+                res = test_res
+                break
+        except:
+            continue
+    
+    if res is None:
+        return jsonify({"reply": ""})
+    
+    reply = ""
+    if res.get("candidates"):
+        parts = res["candidates"][0].get("content", {}).get("parts", [])
+        for part in parts:
+            if "text" in part:
+                reply = part["text"].strip()
+    
+    if reply:
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_ai')", (group_id, reply), commit=True)
+        return jsonify({"reply": reply})
+    
+    return jsonify({"reply": ""})
 
 
 # =====================================================================
@@ -2629,6 +2753,124 @@ def group_webhook():
 def api_products():
     products = db_query("SELECT id, name, price, stock, category, image_url FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
     return jsonify({"products": [dict(p) for p in products]})
+
+
+# =====================================================================
+# ADMIN: Team Members Management
+# =====================================================================
+@app.route("/admin/team", methods=["GET"])
+def admin_team():
+    if not session.get("admin"):
+        return redirect("/admin")
+    members = db_query("SELECT * FROM team_members ORDER BY id DESC", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Team Members</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}h1{color:#333}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#4CAF50;color:white}tr:hover{background:#f1f1f1}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;display:inline-block}
+.btn-green{background:#4CAF50;color:white}.btn-red{background:#f44336;color:white}.btn-blue{background:#2196F3;color:white}
+input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;width:200px}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head>
+<body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
+<h1>👥 Team Members</h1>
+<form method="POST" action="/admin/team/add">
+    <input type="text" name="name" placeholder="Name" required>
+    <input type="text" name="phone" placeholder="Phone (8801XXXXXXXXX)" required>
+    <input type="text" name="wa_id" placeholder="WhatsApp ID (optional)">
+    <select name="role">
+        <option value="moderator">Moderator</option>
+        <option value="admin">Admin</option>
+        <option value="delivery">Delivery</option>
+    </select>
+    <button type="submit" class="btn btn-green">➕ Add Member</button>
+</form>
+<table>
+<tr><th>ID</th><th>Name</th><th>Phone</th><th>Role</th><th>WA ID</th><th>Status</th><th>Action</th></tr>
+{% for m in members %}
+<tr>
+    <td>{{ m.id }}</td><td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td><td>{{ m.wa_id or '-' }}</td>
+    <td>{{ 'Active' if m.is_active else 'Inactive' }}</td>
+    <td>
+        <a href="/admin/team/toggle/{{ m.id }}" class="btn btn-blue">{{ 'Deactivate' if m.is_active else 'Activate' }}</a>
+        <a href="/admin/team/delete/{{ m.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a>
+    </td>
+</tr>
+{% endfor %}
+</table></div></body></html>
+""", members=members)
+
+@app.route("/admin/team/add", methods=["POST"])
+def admin_team_add():
+    if not session.get("admin"):
+        return redirect("/admin")
+    name = request.form.get("name", "").strip()
+    phone = request.form.get("phone", "").strip()
+    wa_id = request.form.get("wa_id", "").strip()
+    role = request.form.get("role", "moderator")
+    db_query("INSERT OR REPLACE INTO team_members (name, phone, wa_id, role, is_active) VALUES (?, ?, ?, ?, 1)", (name, phone, wa_id, role), commit=True)
+    flash(f"Member {name} added!")
+    return redirect("/admin/team")
+
+@app.route("/admin/team/toggle/<int:member_id>")
+def admin_team_toggle(member_id):
+    if not session.get("admin"):
+        return redirect("/admin")
+    db_query("UPDATE team_members SET is_active = 1 - is_active WHERE id = ?", (member_id,), commit=True)
+    return redirect("/admin/team")
+
+@app.route("/admin/team/delete/<int:member_id>")
+def admin_team_delete(member_id):
+    if not session.get("admin"):
+        return redirect("/admin")
+    db_query("DELETE FROM team_members WHERE id = ?", (member_id,), commit=True)
+    return redirect("/admin/team")
+
+
+# =====================================================================
+# ADMIN: Group Orders View
+# =====================================================================
+@app.route("/admin/group-orders", methods=["GET"])
+def admin_group_orders():
+    if not session.get("admin"):
+        return redirect("/admin")
+    orders = db_query("SELECT * FROM group_orders ORDER BY id DESC LIMIT 200", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Group Orders</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}h1{color:#333}.container{max-width:1100px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}th,td{padding:10px;text-align:left;border-bottom:1px solid #ddd}th{background:#FF9800;color:white}tr:hover{background:#f1f1f1}
+.status-pending{color:#ff9800}.status-confirmed{color:#4CAF50}.status-cancelled{color:#f44336}
+.btn{padding:6px 12px;border:none;border-radius:4px;cursor:pointer;text-decoration:none;font-size:12px}
+.btn-green{background:#4CAF50;color:white}.btn-red{background:#f44336;color:white}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head>
+<body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a><a href="/admin/team">Team</a><a href="/admin/group-orders">Group Orders</a></div>
+<h1>📦 Group Orders (Auto-captured)</h1>
+<table>
+<tr><th>ID</th><th>Customer</th><th>Phone</th><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Group</th><th>Status</th><th>Date</th><th>Action</th></tr>
+{% for o in orders %}
+<tr>
+    <td>{{ o.id }}</td><td>{{ o.customer_name }}</td><td>{{ o.phone }}</td><td>{{ o.product_name }}</td>
+    <td>{{ o.quantity }}</td><td>{{ o.price }}</td><td>{{ o.total }}৳</td><td>{{ o.group_name }}</td>
+    <td class="status-{{ o.status }}">{{ o.status }}</td><td>{{ o.created_at }}</td>
+    <td>
+        <a href="/admin/group-orders/status/{{ o.id }}?status=confirmed" class="btn btn-green">Confirm</a>
+        <a href="/admin/group-orders/status/{{ o.id }}?status=cancelled" class="btn btn-red">Cancel</a>
+    </td>
+</tr>
+{% endfor %}
+</table></div></body></html>
+""", orders=orders)
+
+@app.route("/admin/group-orders/status/<int:order_id>")
+def admin_group_order_status(order_id):
+    if not session.get("admin"):
+        return redirect("/admin")
+    status = request.args.get("status", "pending")
+    db_query("UPDATE group_orders SET status = ? WHERE id = ?", (status, order_id), commit=True)
+    return redirect("/admin/group-orders")
 
 
 if __name__ == "__main__":
