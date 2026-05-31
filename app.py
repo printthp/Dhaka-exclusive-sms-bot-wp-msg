@@ -5,6 +5,7 @@ import sqlite3
 import logging
 import time
 import requests
+import random
 import base64
 import re
 from io import BytesIO
@@ -29,6 +30,8 @@ application = app
 db_lock = Lock()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_KEY", "")
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
 
 # =====================================================================
 # DATABASE
@@ -40,7 +43,7 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, from_number TEXT, content TEXT, direction TEXT, agent_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, name TEXT DEFAULT 'Customer', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, phone TEXT, name TEXT, address TEXT, product_name TEXT, quantity INTEGER DEFAULT 1, price INTEGER, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, pathao_order_id TEXT UNIQUE, phone TEXT, name TEXT, address TEXT, total INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         c.execute("""CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price INTEGER, stock INTEGER DEFAULT 10,
             image_url TEXT, description TEXT, category TEXT
@@ -81,6 +84,21 @@ def get_all_settings():
     return {r["key"]: r["value"] for r in rows}
 
 # =====================================================================
+# WHATSAPP API
+# =====================================================================
+def send_whatsapp_message(to, text):
+    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
+        return False
+    url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    payload = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": to, "type": "text", "text": {"body": text}}
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        return r.status_code == 200
+    except:
+        return False
+
+# =====================================================================
 # GEMINI AI
 # =====================================================================
 def get_gemini_reply(prompt_text, image_data=None):
@@ -104,25 +122,64 @@ def get_gemini_reply(prompt_text, image_data=None):
         return "AI error"
 
 # =====================================================================
-# WEBHOOK FROM BRIDGE (PC sends messages here)
+# WEBHOOKS
 # =====================================================================
-@app.route("/group-webhook", methods=["POST"])
-def group_webhook():
-    """Messages from WhatsApp groups (Team + Orders)"""
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    if request.method == "GET":
+        if request.args.get("hub.verify_token", "") == "dhakaexclusive2026":
+            return request.args.get("hub.challenge", "")
+        return "OK", 200
+
     data = request.get_json(force=True, silent=True) or {}
+    entries = data.get("entry", [])
     s = get_all_settings()
     team_group = s.get("team_group", "")
     orders_group = s.get("orders_group", "")
 
+    for entry in entries:
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            for msg in value.get("messages", []):
+                process_incoming_message(msg, team_group, orders_group)
+    return jsonify({"status": "ok"})
+
+def process_incoming_message(msg, team_group, orders_group):
+    msg_type = msg.get("type", "")
+    from_num = msg.get("from", "")
+    body = msg.get("text", {}).get("body", "") if msg_type == "text" else "[Media]"
+    if not body or not from_num:
+        return
+
+    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'webhook')", (from_num, body), commit=True)
+    db_query("INSERT OR IGNORE INTO users (phone) VALUES (?)", (from_num,), commit=True)
+
+    products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
+
+    prompt = f"""তুমি Dhaka Exclusive-এর AI সেলস সহকারী। কাস্টমারের মেসেজের উত্তর দাও।
+
+কাস্টমার: {from_num}
+মেসেজ: "{body}"
+
+প্রোডাক্ট:
+{product_list}
+
+বাংলায়, বন্ধুসুলভ উত্তর দাও।"""
+
+    reply = get_gemini_reply(prompt)
+    send_whatsapp_message(from_num, reply)
+
+@app.route("/group-webhook", methods=["POST"])
+def group_webhook():
+    data = request.get_json(force=True, silent=True) or {}
     group_name = data.get("group_name", "")
     group_type = data.get("group_type", "other")
     sender_name = data.get("sender_name", "Member")
-    sender_id = data.get("sender_id", "")
     body = data.get("message", "")
     media_data = data.get("media_data", "")
-    media_type = data.get("media_type", "")
 
-    if not body or not group_name:
+    if not body:
         return jsonify({"reply": ""})
 
     logger.info(f"[GROUP:{group_type}] {sender_name}: {body[:50]}")
@@ -131,12 +188,11 @@ def group_webhook():
     product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
 
     if group_type == "team":
-        # AI answers team member questions
         prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। টিম মেম্বার "{sender_name}"-এর প্রশ্নের উত্তর দাও।
 
 প্রশ্ন: "{body}"
 
-আমাদের প্রোডাক্ট:
+প্রোডাক্ট:
 {product_list}
 
 সংক্ষিপ্ত, সহায়ক উত্তর দাও (বাংলায়)।"""
@@ -145,18 +201,17 @@ def group_webhook():
         return jsonify({"reply": reply})
 
     elif group_type == "orders":
-        # AI extracts order info
         prompt = f"""তুমি Dhaka Exclusive-এর অর্ডার এক্সট্রাক্টর। মেসেজ থেকে অর্ডার তথ্য বের করো।
 
 মেসেজ: "{body}"
 
-Output format:
+Output:
 NAME: <নাম বা Unknown>
 PHONE: <ফোন বা খালি>
 ADDRESS: <ঠিকানা বা খালি>
 PRODUCT: <প্রোডাক্ট নাম>
 QUANTITY: <সংখ্যা বা 1>
-PRICE: <দাম সংখ্যায় বা 0>
+PRICE: <দাম বা 0>
 
 যদি অর্ডার না হয়: NOT_AN_ORDER"""
 
@@ -187,14 +242,12 @@ PRICE: <দাম সংখ্যায় বা 0>
             (phone, name, address, product, qty, price, total, group_name, body), commit=True)
 
         logger.info(f"[ORDER] Saved: {product} x{qty} = {total}৳")
-        return jsonify({"reply": f"✅ অর্ডার গ্রহণ হয়েছে!\n📦 {product} x{qty}\n💰 {total}৳"})
+        return jsonify({"reply": f"✅ অর্ডার গ্রহণ!\n📦 {product} x{qty}\n💰 {total}৳"})
 
     return jsonify({"reply": ""})
 
-
 @app.route("/business-webhook", methods=["POST"])
 def business_webhook():
-    """Individual customer messages (AI auto-reply)"""
     data = request.get_json(force=True, silent=True) or {}
     body = data.get("message", "")
     customer_phone = data.get("customer_phone", "")
@@ -204,38 +257,22 @@ def business_webhook():
     if not body:
         return jsonify({"reply": ""})
 
-    logger.info(f"[CUSTOMER] {customer_name}: {body[:50]}")
-
-    # Save to DB
-    db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'customer')", (customer_phone, body), commit=True)
-    db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (customer_phone, customer_name), commit=True)
-
-    # Get products
-    products = db_query("SELECT name, price, stock, image_url FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
     product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
 
-    prompt = f"""তুমি Dhaka Exclusive-এর AI সেলস সহকারী। একজন কাস্টমারের মেসেজের উত্তর দাও।
+    prompt = f"""তুমি Dhaka Exclusive-এর AI সেলস সহকারী।
 
 কাস্টমার: {customer_name}
 মেসেজ: "{body}"
 
-আমাদের প্রোডাক্ট:
+প্রোডাক্ট:
 {product_list}
 
-নিয়ম:
-১. বাংলায়, বন্ধুসুলভ ভাষায় উত্তর দাও
-২. প্রোডাক্টের দাম, সাইজ, কালার বলো
-৩. অর্ডার করতে বললে ঠিকানা ও ফোন নম্বর চাও
-৪. সংক্ষিপ্ত রাখো (৩-৪ লাইন)
-
-উত্তর:"""
+বাংলায়, বন্ধুসুলভ উত্তর দাও।"""
 
     reply = get_gemini_reply(prompt, media_data if media_data else None)
     return jsonify({"reply": reply})
 
-# =====================================================================
-# API: Bridge Config
-# =====================================================================
 @app.route("/api/bridge-config", methods=["GET"])
 def api_bridge_config():
     s = get_all_settings()
@@ -245,7 +282,6 @@ def api_bridge_config():
             "label": "Business WhatsApp",
             "team_group": s.get("team_group", ""),
             "orders_group": s.get("orders_group", ""),
-            "moderator_group": "",  # Not used
             "enabled": True
         }]
     })
@@ -262,7 +298,7 @@ def admin_login():
         if agent:
             session["admin"] = True
             return redirect("/admin-panel")
-        return "Wrong password", 401
+        return "Invalid", 401
     return render_template_string("""<form method="POST"><input name="username" placeholder="User"><input name="password" type="password" placeholder="Pass"><button>Login</button></form>""")
 
 @app.route("/admin-panel")
@@ -273,6 +309,8 @@ def admin_panel():
     total_orders = total_orders[0]["c"] if total_orders else 0
     total_products = db_query("SELECT COUNT(*) as c FROM products", fetchall=True)
     total_products = total_products[0]["c"] if total_products else 0
+    total_users = db_query("SELECT COUNT(*) as c FROM users", fetchall=True)
+    total_users = total_users[0]["c"] if total_users else 0
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>Admin</title>
 <style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:1000px;margin:0 auto;background:white;padding:30px;border-radius:10px}
@@ -283,13 +321,14 @@ def admin_panel():
 </style></head><body><div class="container">
 <h1>Admin Panel</h1>
 <div class="quick-links">
-    <a href="/admin/whatsapp-settings" class="quick-link"><div class="quick-link-icon">📱</div><div><div><b>WhatsApp Settings</b></div><small>Group names</small></div></a>
+    <a href="/admin/whatsapp-settings" class="quick-link"><div class="quick-link-icon">📱</div><div><div><b>WhatsApp Settings</b></div><small>Group config</small></div></a>
     <a href="/admin/group-orders" class="quick-link" style="background:linear-gradient(135deg,#f093fb,#f5576c)"><div class="quick-link-icon">📦</div><div><div class="stat">{{ total_orders }}</div><div><b>Group Orders</b></div></div></a>
-    <a href="/admin/team" class="quick-link" style="background:linear-gradient(135deg,#4facfe,#00f2fe)"><div class="quick-link-icon">👥</div><div><div><b>Team</b></div><small>Members</small></div></a>
+    <a href="/admin/team" class="quick-link" style="background:linear-gradient(135deg,#4facfe,#00f2fe)"><div class="quick-link-icon">👥</div><div><div><b>Team</b></div></div></a>
     <a href="/admin/products" class="quick-link" style="background:linear-gradient(135deg,#11998e,#38ef7d)"><div class="quick-link-icon">📋</div><div><div class="stat">{{ total_products }}</div><div><b>Products</b></div></div></a>
+    <a href="/admin/users" class="quick-link" style="background:linear-gradient(135deg,#f6d365,#fda085)"><div class="quick-link-icon">👤</div><div><div class="stat">{{ total_users }}</div><div><b>Users</b></div></div></a>
 </div>
 </div></body></html>
-""", total_orders=total_orders, total_products=total_products)
+""", total_orders=total_orders, total_products=total_products, total_users=total_users)
 
 @app.route("/admin/whatsapp-settings", methods=["GET"])
 def admin_whatsapp_settings():
@@ -302,28 +341,16 @@ def admin_whatsapp_settings():
 input{width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:5px;box-sizing:border-box}
 .btn{background:#25D366;color:white;padding:12px 24px;border:none;border-radius:5px;cursor:pointer;font-size:16px}
 label{font-weight:bold;margin-top:15px;display:block}
-.info{background:#e3f2fd;padding:15px;border-radius:5px;margin:15px 0;color:#1565c0}
 </style></head><body><div class="container">
 <a href="/admin-panel">← Admin</a>
 <h1>📱 WhatsApp Group Settings</h1>
-<div class="info">
-<b>টিম গ্রুপ:</b> AI টিম মেম্বারদের প্রশ্নের উত্তর দেবে<br>
-<b>অর্ডার গ্রুপ:</b> মেসেজ থেকে অর্ডার অটো শনাক্ত হয়ে এখানে আসবে
-</div>
 <form method="POST" action="/admin/whatsapp-settings/save">
-    <label>Team Group Name (e.g. Team Of Dhaka Exclusive)</label>
-    <input type="text" name="team_group" value="{{ s.get('team_group','') }}" placeholder="Exact group name">
-    <label>Orders Group Name (e.g. Orders)</label>
-    <input type="text" name="orders_group" value="{{ s.get('orders_group','') }}" placeholder="Exact group name">
+    <label>Team Group Name (AI answers here)</label>
+    <input type="text" name="team_group" value="{{ s.get('team_group','') }}" placeholder="e.g. Team Of Dhaka Exclusive">
+    <label>Orders Group Name (auto-extract)</label>
+    <input type="text" name="orders_group" value="{{ s.get('orders_group','') }}" placeholder="e.g. Orders">
     <button type="submit" class="btn">💾 Save</button>
 </form>
-<h3 style="margin-top:30px">🖥️ PC Bridge Setup</h3>
-<ol style="line-height:2;color:#666">
-    <li>PC তে <code>bridge-manager.js</code> রাখুন</li>
-    <li><code>npm install</code></li>
-    <li><code>set FLASK_URL=https://your-app.onrender.com</code></li>
-    <li><code>node bridge-manager.js</code> → QR Scan করুন</li>
-</ol>
 </div></body></html>
 """, s=s)
 
@@ -460,6 +487,25 @@ def admin_products_delete(product_id):
         return redirect("/admin/login")
     db_query("DELETE FROM products WHERE id = ?", (product_id,), commit=True)
     return redirect("/admin/products")
+
+@app.route("/admin/users")
+def admin_users():
+    if not session.get("admin"):
+        return redirect("/admin/login")
+    users = db_query("SELECT * FROM users ORDER BY last_active DESC LIMIT 200", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Users</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#f6d365;color:#333}
+</style></head><body><div class="container">
+<a href="/admin-panel">← Admin</a>
+<h1>👤 Users</h1>
+<table><tr><th>Phone</th><th>Name</th><th>Last Active</th></tr>
+{% for u in users %}
+<tr><td>{{ u.phone }}</td><td>{{ u.name }}</td><td>{{ u.last_active }}</td></tr>
+{% endfor %}
+</table></div></body></html>
+""", users=users)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
