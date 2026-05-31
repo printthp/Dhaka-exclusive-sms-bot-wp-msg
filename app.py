@@ -2756,6 +2756,167 @@ def api_products():
 
 
 # =====================================================================
+# ADMIN: Standalone Panel (No template file needed)
+# =====================================================================
+@app.route("/admin-panel")
+def admin_panel():
+    if not session.get("admin") and not session.get("logged_in"):
+        return redirect("/admin/login")
+    
+    # Stats
+    total_orders = db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0
+    total_revenue = db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_users = db_query("SELECT COUNT(*) as c FROM users", fetchone=True)["c"] or 0
+    team_count = db_query("SELECT COUNT(*) as c FROM team_members WHERE is_active=1", fetchone=True)["c"] or 0
+    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders WHERE status='pending'", fetchone=True)["c"] or 0
+    
+    return render_template_string("""
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dhaka Exclusive - Admin Panel</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333}
+        .sidebar{width:260px;height:100vh;background:linear-gradient(180deg,#1a1a2e 0%,#16213e 100%);position:fixed;left:0;top:0;padding:20px 0;overflow-y:auto}
+        .logo{text-align:center;padding:0 20px 30px;border-bottom:1px solid #333;margin-bottom:20px}
+        .logo h1{color:#e94560;font-size:22px;margin-bottom:5px}
+        .logo span{color:#888;font-size:12px}
+        .nav-item{display:block;padding:14px 25px;color:#b8c5d6;text-decoration:none;font-size:15px;transition:all 0.3s;border-left:3px solid transparent;margin:2px 0}
+        .nav-item:hover{background:rgba(233,69,96,0.1);color:#e94560;border-left-color:#e94560}
+        .nav-item.active{background:rgba(233,69,96,0.15);color:#e94560;border-left-color:#e94560;font-weight:600}
+        .nav-item i{margin-right:10px;font-size:18px}
+        .main{margin-left:260px;padding:30px}
+        .header{background:white;padding:20px 30px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);margin-bottom:25px;display:flex;justify-content:space-between;align-items:center}
+        .header h2{color:#1a1a2e;font-size:24px}
+        .logout-btn{background:#e94560;color:white;padding:10px 24px;border:none;border-radius:8px;cursor:pointer;text-decoration:none;font-size:14px}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:30px}
+        .stat-card{background:white;padding:25px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);transition:transform 0.2s}
+        .stat-card:hover{transform:translateY(-3px)}
+        .stat-icon{font-size:32px;margin-bottom:12px}
+        .stat-value{font-size:28px;font-weight:700;color:#1a1a2e;margin-bottom:5px}
+        .stat-label{color:#888;font-size:14px;text-transform:uppercase;letter-spacing:0.5px}
+        .stat-card.orders{border-top:4px solid #e94560}
+        .stat-card.revenue{border-top:4px solid #4CAF50}
+        .stat-card.products{border-top:4px solid #2196F3}
+        .stat-card.users{border-top:4px solid #FF9800}
+        .stat-card.team{border-top:4px solid #9C27B0}
+        .stat-card.group-orders{border-top:4px solid #00BCD4}
+        .section{background:white;padding:25px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);margin-bottom:25px}
+        .section h3{color:#1a1a2e;margin-bottom:20px;font-size:18px;border-bottom:2px solid #f0f2f5;padding-bottom:10px}
+        .quick-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px}
+        .quick-link{display:flex;align-items:center;padding:20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;text-decoration:none;border-radius:10px;transition:transform 0.2s}
+        .quick-link:hover{transform:scale(1.02)}
+        .quick-link-icon{font-size:28px;margin-right:15px}
+        .quick-link-text{font-size:16px;font-weight:600}
+        .quick-link-desc{font-size:12px;opacity:0.9;margin-top:3px}
+        .footer{text-align:center;color:#888;padding:20px;font-size:13px}
+        @media(max-width:768px){.sidebar{width:100%;height:auto;position:relative}.main{margin-left:0}}
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo">
+            <h1>🛍️ Dhaka Exclusive</h1>
+            <span>Admin Panel</span>
+        </div>
+        <a href="/admin-panel" class="nav-item active">🏠 Dashboard</a>
+        <a href="/admin/team" class="nav-item">👥 Team Members</a>
+        <a href="/admin/group-orders" class="nav-item">📦 Group Orders</a>
+        <a href="/admin?tab=inventory" class="nav-item">📋 Inventory</a>
+        <a href="/admin?tab=orders" class="nav-item">🛒 All Orders</a>
+        <a href="/admin?tab=chat" class="nav-item">💬 Chat</a>
+        <a href="/admin?tab=analytics" class="nav-item">📊 Analytics</a>
+        <a href="/admin?tab=settings" class="nav-item">⚙️ Settings</a>
+    </div>
+    
+    <div class="main">
+        <div class="header">
+            <h2>Welcome back, Admin! 👋</h2>
+            <a href="/admin/logout" class="logout-btn">Logout</a>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card orders">
+                <div class="stat-icon">🛒</div>
+                <div class="stat-value">{{ total_orders }}</div>
+                <div class="stat-label">Total Orders</div>
+            </div>
+            <div class="stat-card revenue">
+                <div class="stat-icon">💰</div>
+                <div class="stat-value">{{ total_revenue }}৳</div>
+                <div class="stat-label">Revenue</div>
+            </div>
+            <div class="stat-card products">
+                <div class="stat-icon">📦</div>
+                <div class="stat-value">{{ total_products }}</div>
+                <div class="stat-label">Products</div>
+            </div>
+            <div class="stat-card users">
+                <div class="stat-icon">👤</div>
+                <div class="stat-value">{{ total_users }}</div>
+                <div class="stat-label">Customers</div>
+            </div>
+            <div class="stat-card team">
+                <div class="stat-icon">👥</div>
+                <div class="stat-value">{{ team_count }}</div>
+                <div class="stat-label">Team Members</div>
+            </div>
+            <div class="stat-card group-orders">
+                <div class="stat-icon">📲</div>
+                <div class="stat-value">{{ group_orders_count }}</div>
+                <div class="stat-label">Pending Group Orders</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h3>⚡ Quick Access</h3>
+            <div class="quick-links">
+                <a href="/admin/team" class="quick-link">
+                    <div class="quick-link-icon">👥</div>
+                    <div>
+                        <div class="quick-link-text">Manage Team</div>
+                        <div class="quick-link-desc">Add/remove team members</div>
+                    </div>
+                </a>
+                <a href="/admin/group-orders" class="quick-link">
+                    <div class="quick-link-icon">📦</div>
+                    <div>
+                        <div class="quick-link-text">Group Orders</div>
+                        <div class="quick-link-desc">View auto-captured orders</div>
+                    </div>
+                </a>
+                <a href="/admin?tab=inventory" class="quick-link" style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%)">
+                    <div class="quick-link-icon">📋</div>
+                    <div>
+                        <div class="quick-link-text">Inventory</div>
+                        <div class="quick-link-desc">Products & stock</div>
+                    </div>
+                </a>
+                <a href="/admin?tab=orders" class="quick-link" style="background:linear-gradient(135deg,#4facfe 0%,#00f2fe 100%)">
+                    <div class="quick-link-icon">🛒</div>
+                    <div>
+                        <div class="quick-link-text">All Orders</div>
+                        <div class="quick-link-desc">Manage all orders</div>
+                    </div>
+                </a>
+            </div>
+        </div>
+        
+        <div class="footer">
+            Dhaka Exclusive Admin Panel v2.0 | Powered by Gemini AI 🤖
+        </div>
+    </div>
+</body>
+</html>
+""", total_orders=total_orders, total_revenue=total_revenue, total_products=total_products,
+    total_users=total_users, team_count=team_count, group_orders_count=group_orders_count)
+
+
+# =====================================================================
 # ADMIN: Team Members Management
 # =====================================================================
 @app.route("/admin/team", methods=["GET"])
