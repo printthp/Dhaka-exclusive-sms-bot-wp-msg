@@ -15,8 +15,8 @@
     </div>
 </div>
 
-<!-- স্ট্যাটাস কার্ডস (6 cards) -->
-<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-5 mb-10">
+<!-- স্ট্যাটাস কার্ডস (7 cards) -->
+<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-5 mb-10">
     <!-- Revenue Card -->
     <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-emerald-500/30 transition-all duration-500">
         <div class="absolute -right-4 -top-4 w-20 h-20 bg-emerald-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
@@ -45,18 +45,28 @@
         <h2 class="text-2xl font-black mt-2 text-orange-400 tracking-tighter">{{ users|length }}</h2>
     </div>
 
-    <!-- Team Members Card (NEW) -->
+    <!-- Team Members Card -->
     <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-purple-500/30 transition-all duration-500">
         <div class="absolute -right-4 -top-4 w-20 h-20 bg-purple-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
         <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">টিম মেম্বার</p>
         <h2 class="text-2xl font-black mt-2 text-purple-400 tracking-tighter">{{ team_count }}</h2>
     </div>
 
-    <!-- Group Orders Card (NEW) -->
+    <!-- Group Orders Card -->
     <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-cyan-500/30 transition-all duration-500">
         <div class="absolute -right-4 -top-4 w-20 h-20 bg-cyan-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
         <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">গ্রুপ অর্ডার</p>
         <h2 class="text-2xl font-black mt-2 text-cyan-400 tracking-tighter">{{ group_orders_count }}</h2>
+    </div>
+
+    <!-- Complain Box Card (NEW) -->
+    <div class="glass p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group border border-slate-800 hover:border-red-500/30 transition-all duration-500">
+        <div class="absolute -right-4 -top-4 w-20 h-20 bg-red-500/10 rounded-full group-hover:scale-150 transition-all duration-700"></div>
+        <p class="text-[9px] text-slate-500 uppercase font-black tracking-widest">কমপ্লেইন</p>
+        <h2 class="text-2xl font-black mt-2 text-red-400 tracking-tighter">{{ open_complains or 0 }}</h2>
+        {% if open_complains and open_complains > 0 %}
+        <div class="absolute top-2 right-2 w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+        {% endif %}
     </div>
 </div>
 
@@ -66,7 +76,7 @@
         <span class="text-xl">⚡</span>
         <h3 class="font-black text-sm uppercase tracking-widest text-slate-400">Quick Access</h3>
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <a href="/admin/team" class="group p-5 rounded-2xl bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-500 hover:to-indigo-500 transition-all duration-300 border border-purple-500/20 hover:scale-[1.02]">
             <div class="text-3xl mb-2">👥</div>
             <div class="font-bold text-white text-sm">Manage Team</div>
@@ -92,10 +102,23 @@
             <div class="font-bold text-white text-sm">Group Orders</div>
             <div class="text-[10px] text-orange-200 mt-1">View auto-captured orders</div>
         </a>
+        <a href="/admin/complains" class="group p-5 rounded-2xl bg-gradient-to-r from-red-600/80 to-rose-600/80 hover:from-red-500 hover:to-rose-500 transition-all duration-300 border border-red-500/20 hover:scale-[1.02] relative">
+            <div class="text-3xl mb-2">📮</div>
+            <div class="font-bold text-white text-sm">Complain Box</div>
+            <div class="text-[10px] text-red-200 mt-1">Team complaints & issues</div>
+            {% if open_complains and open_complains > 0 %}
+            <div class="absolute top-3 right-3 bg-white text-red-600 text-[9px] font-black px-2 py-0.5 rounded-full">{{ open_complains }} NEW</div>
+            {% endif %}
+        </a>
         <a href="/admin?tab=inventory" class="group p-5 rounded-2xl bg-gradient-to-r from-pink-600/80 to-rose-600/80 hover:from-pink-500 hover:to-rose-500 transition-all duration-300 border border-pink-500/20 hover:scale-[1.02]">
             <div class="text-3xl mb-2">📋</div>
             <div class="font-bold text-white text-sm">Inventory</div>
             <div class="text-[10px] text-pink-200 mt-1">Products & stock</div>
+        </a>
+        <a href="/admin?tab=orders" class="group p-5 rounded-2xl bg-gradient-to-r from-blue-600/80 to-indigo-600/80 hover:from-blue-500 hover:to-indigo-500 transition-all duration-300 border border-blue-500/20 hover:scale-[1.02]">
+            <div class="text-3xl mb-2">📊</div>
+            <div class="font-bold text-white text-sm">All Orders</div>
+            <div class="text-[10px] text-blue-200 mt-1">Full order history</div>
         </a>
     </div>
 </div>
