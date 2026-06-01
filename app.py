@@ -2541,6 +2541,59 @@ def business_webhook():
 
 
 # =====================================================================
+# ADMIN: Team Members
+# =====================================================================
+@app.route("/admin/team")
+def admin_team():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    members = db_query("SELECT * FROM team_members ORDER BY id DESC", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Team</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#4CAF50;color:white}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+input{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a></div>
+<h1>👥 Team Members</h1>
+<form method="POST" action="/admin/team/add">
+    <input type="text" name="name" placeholder="Name" required>
+    <input type="text" name="phone" placeholder="Phone" required>
+    <input type="text" name="wa_id" placeholder="WhatsApp ID">
+    <button type="submit" class="btn btn-green">Add</button>
+</form>
+<table><tr><th>ID</th><th>Name</th><th>Phone</th><th>Role</th><th>Action</th></tr>
+{% for m in members %}
+<tr><td>{{ m.id }}</td><td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td>
+<td><a href="/admin/team/delete/{{ m.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td></tr>
+{% endfor %}
+</table></div></body></html>
+""", members=members)
+
+@app.route("/admin/team/add", methods=["POST"])
+def admin_team_add():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    name = request.form.get("name", "").strip()
+    phone = request.form.get("phone", "").strip()
+    wa_id = request.form.get("wa_id", "").strip()
+    db_query("INSERT OR REPLACE INTO team_members (name, phone, wa_id, role, is_active) VALUES (?, ?, ?, 'moderator', 1)", (name, phone, wa_id), commit=True)
+    flash("Member added!")
+    return redirect("/admin/team")
+
+@app.route("/admin/team/delete/<int:member_id>")
+def admin_team_delete(member_id):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM team_members WHERE id = ?", (member_id,), commit=True)
+    flash("Member deleted!")
+    return redirect("/admin/team")
+
+
+# =====================================================================
 # ADMIN: WhatsApp Group Settings
 # =====================================================================
 @app.route("/admin/whatsapp-settings")
