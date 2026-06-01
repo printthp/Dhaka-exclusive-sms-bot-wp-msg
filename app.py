@@ -589,7 +589,10 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value)
+    team_count = db_query("SELECT COUNT(*) as c FROM team_members", fetchone=True)["c"] or 0
+    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders", fetchone=True)["c"] or 0
+
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value, team_count=team_count, group_orders_count=group_orders_count)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
