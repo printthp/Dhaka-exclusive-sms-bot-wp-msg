@@ -200,6 +200,23 @@ def init_db():
             c.execute("ALTER TABLE users ADD COLUMN follow_up_sent INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        # group_orders table for bridge auto-extract
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS group_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT,
+                customer_name TEXT,
+                address TEXT,
+                product_name TEXT,
+                quantity INTEGER DEFAULT 1,
+                price INTEGER,
+                total INTEGER,
+                status TEXT DEFAULT 'pending',
+                group_name TEXT,
+                raw_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -2399,6 +2416,221 @@ def messenger_webhook():
         except Exception as e:
             logger.error(f"Messenger webhook processing error: {e}")
         return "EVENT_RECEIVED", 200
+
+
+# =====================================================================
+# BRIDGE API CONFIG
+# =====================================================================
+@app.route("/api/bridge-config", methods=["GET"])
+def api_bridge_config():
+    s = get_all_settings()
+    return jsonify({
+        "configs": [{
+            "id": 1,
+            "label": "Business WhatsApp",
+            "team_group": s.get("team_group", ""),
+            "orders_group": s.get("orders_group", ""),
+            "enabled": True
+        }]
+    })
+
+# =====================================================================
+# GROUP WEBHOOK (Team + Orders groups)
+# =====================================================================
+@app.route("/group-webhook", methods=["POST"])
+def group_webhook():
+    data = request.get_json(force=True, silent=True) or {}
+    group_name = data.get("group_name", "")
+    group_type = data.get("group_type", "other")
+    sender_name = data.get("sender_name", "Member")
+    body = data.get("message", "")
+    media_data = data.get("media_data", "")
+
+    if not body:
+        return jsonify({"reply": ""})
+
+    logger.info(f"[GROUP:{group_type}] {sender_name}: {body[:50]}")
+
+    products = db_query("SELECT name, price, stock FROM products WHERE active=1 ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
+
+    if group_type == "team":
+        prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। টিম মেম্বার "{sender_name}"-এর প্রশ্নের উত্তর দাও।
+
+প্রশ্ন: "{body}"
+
+প্রোডাক্ট:
+{product_list}
+
+সংক্ষিপ্ত, সহায়ক উত্তর দাও (বাংলায়)।"""
+        reply = get_optimized_gemini_reply(body, customer_phone="group_team", image_path=media_data if media_data else None)
+        return jsonify({"reply": reply})
+
+    elif group_type == "orders":
+        prompt = f"""তুমি Dhaka Exclusive-এর অর্ডার এক্সট্রাক্টর। মেসেজ থেকে অর্ডার তথ্য বের করো।
+
+মেসেজ: "{body}"
+
+Output:
+NAME: <নাম বা Unknown>
+PHONE: <ফোন বা খালি>
+ADDRESS: <ঠিকানা বা খালি>
+PRODUCT: <প্রোডাক্ট নাম>
+QUANTITY: <সংখ্যা বা 1>
+PRICE: <দাম বা 0>
+
+যদি অর্ডার না হয়: NOT_AN_ORDER"""
+
+        ai_result = get_gemini_reply(prompt)
+        if "NOT_AN_ORDER" in ai_result:
+            return jsonify({"reply": ""})
+
+        name, phone, address, product, qty, price = "", "", "", "", 1, 0
+        for line in ai_result.split("\n"):
+            if line.startswith("NAME:"): name = line.replace("NAME:", "").strip()
+            if line.startswith("PHONE:"): phone = line.replace("PHONE:", "").strip()
+            if line.startswith("ADDRESS:"): address = line.replace("ADDRESS:", "").strip()
+            if line.startswith("PRODUCT:"): product = line.replace("PRODUCT:", "").strip()
+            if line.startswith("QUANTITY:"):
+                try: qty = int(line.replace("QUANTITY:", "").strip())
+                except: pass
+            if line.startswith("PRICE:"):
+                try: price = int(line.replace("PRICE:", "").strip())
+                except: pass
+
+        if not product:
+            return jsonify({"reply": ""})
+
+        total = price * qty
+        db_query("""INSERT INTO group_orders (phone, customer_name, address, product_name, quantity, price, total, status, group_name, raw_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (phone, name, address, product, qty, price, total, group_name, body), commit=True)
+
+        logger.info(f"[ORDER] Saved: {product} x{qty} = {total}৳")
+        return jsonify({"reply": f"✅ অর্ডার গ্রহণ হয়েছে!\n📦 {product} x{qty}\n💰 {total}৳"})
+
+    return jsonify({"reply": ""})
+
+
+# =====================================================================
+# BUSINESS WEBHOOK (Individual customer messages from bridge)
+# =====================================================================
+@app.route("/business-webhook", methods=["POST"])
+def business_webhook():
+    data = request.get_json(force=True, silent=True) or {}
+    body = data.get("message", "")
+    customer_phone = data.get("customer_phone", "")
+    customer_name = data.get("customer_name", "Customer")
+    media_data = data.get("media_data", "")
+
+    if not body:
+        return jsonify({"reply": ""})
+
+    logger.info(f"[CUSTOMER-BRIDGE] {customer_name}: {body[:50]}")
+
+    recent = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (customer_phone,), fetchall=True) or []
+    recent.reverse()
+
+    image_path = media_data if media_data else None
+    reply = get_optimized_gemini_reply(body, customer_phone=customer_phone, chat_history=recent, image_path=image_path)
+
+    if reply:
+        db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_bridge')", (customer_phone, reply), commit=True)
+
+    return jsonify({"reply": reply})
+
+
+# =====================================================================
+# ADMIN: WhatsApp Group Settings
+# =====================================================================
+@app.route("/admin/whatsapp-settings")
+def admin_whatsapp_settings():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    s = get_all_settings()
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>WhatsApp Settings</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:700px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+input{width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:5px;box-sizing:border-box}
+.btn{background:#25D366;color:white;padding:12px 24px;border:none;border-radius:5px;cursor:pointer;font-size:16px}
+label{font-weight:bold;margin-top:15px;display:block;color:#333}
+.info{background:#e3f2fd;padding:15px;border-radius:5px;margin:15px 0;color:#1565c0}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a></div>
+<h1>📱 WhatsApp Group Settings</h1>
+<div class="info">
+<b>টিম গ্রুপ:</b> AI সবার প্রশ্নের উত্তর দেবে<br>
+<b>অর্ডার গ্রুপ:</b> মেসেজ থেকে অর্ডার অটো শনাক্ত হয়ে এখানে আসবে
+</div>
+<form method="POST" action="/admin/whatsapp-settings/save">
+    <label>Team Group Name</label>
+    <input type="text" name="team_group" value="{{ s.get('team_group','') }}" placeholder="e.g. Team Of Dhaka Exclusive">
+    <label>Orders Group Name</label>
+    <input type="text" name="orders_group" value="{{ s.get('orders_group','') }}" placeholder="e.g. Orders">
+    <button type="submit" class="btn">💾 Save</button>
+</form>
+<h3 style="margin-top:30px">🖥️ PC Bridge Setup</h3>
+<ol style="line-height:2;color:#666">
+    <li>Download bridge files to PC</li>
+    <li>Edit <code>config.json</code> with your Flask URL</li>
+    <li>Run <code>setup.bat</code> → Scan QR</li>
+</ol>
+</div></body></html>
+""", s=s)
+
+@app.route("/admin/whatsapp-settings/save", methods=["POST"])
+def save_whatsapp_settings():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    for k in ["team_group", "orders_group"]:
+        v = request.form.get(k, "").strip()
+        db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
+    flash("WhatsApp settings saved!")
+    return redirect("/admin/whatsapp-settings")
+
+
+# =====================================================================
+# ADMIN: Group Orders View
+# =====================================================================
+@app.route("/admin/group-orders")
+def admin_group_orders():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    orders = db_query("SELECT * FROM group_orders ORDER BY id DESC LIMIT 200", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Group Orders</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:1100px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;text-align:left;border-bottom:1px solid #ddd}th{background:#FF9800;color:white}tr:hover{background:#f1f1f1}
+.btn{padding:6px 12px;border:none;border-radius:4px;cursor:pointer;font-size:12px;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a></div>
+<h1>📦 Group Orders (Auto-captured)</h1>
+<table>
+<tr><th>ID</th><th>Customer</th><th>Phone</th><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Group</th><th>Status</th><th>Date</th><th>Action</th></tr>
+{% for o in orders %}
+<tr>
+    <td>{{ o.id }}</td><td>{{ o.customer_name or '-' }}</td><td>{{ o.phone or '-' }}</td><td>{{ o.product_name }}</td>
+    <td>{{ o.quantity }}</td><td>{{ o.price }}</td><td>{{ o.total }}৳</td><td>{{ o.group_name }}</td>
+    <td>{{ o.status }}</td><td>{{ o.created_at }}</td>
+    <td>
+        <a href="/admin/group-orders/status/{{ o.id }}?status=confirmed" class="btn btn-green">Confirm</a>
+        <a href="/admin/group-orders/status/{{ o.id }}?status=cancelled" class="btn btn-red">Cancel</a>
+    </td>
+</tr>
+{% endfor %}
+</table></div></body></html>
+""", orders=orders)
+
+@app.route("/admin/group-orders/status/<int:order_id>")
+def admin_group_order_status(order_id):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    status = request.args.get("status", "pending")
+    db_query("UPDATE group_orders SET status = ? WHERE id = ?", (status, order_id), commit=True)
+    return redirect("/admin/group-orders")
 
 
 if __name__ == "__main__":
