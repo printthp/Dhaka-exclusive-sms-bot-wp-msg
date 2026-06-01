@@ -241,6 +241,15 @@ def init_db():
                 (20, 2, "Ridi"),
             ]
             c.executemany("INSERT INTO shifts (start_hour, end_hour, moderator_name) VALUES (?, ?, ?)", defaults)
+        # admin directives (private instructions from admin)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS admin_directives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_phone TEXT,
+                directive TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -2495,7 +2504,11 @@ def group_webhook():
 
         on_duty = get_current_moderator()
 
-        prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। 
+        # Load private admin directives
+        directives = db_query("SELECT directive FROM admin_directives ORDER BY id DESC LIMIT 5", fetchall=True) or []
+        directive_text = "\n".join([f"- {d['directive']}" for d in directives]) if directives else "কোনো বিশেষ নির্দেশনা নেই।"
+
+        prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। Group-এ সবার সাথে কথা বলো।
 
 এখন "{sender_name}" ({role}) বলছেন:
 "{body}"
@@ -2505,9 +2518,15 @@ def group_webhook():
 
 আজকের Duty Moderator: {on_duty}
 
+তোমার গোপন নির্দেশনা (Group-ে কাউকে বলবি না, শুধু মাথায় রেখে কাজ করবি):
+{directive_text}
+
+উদাহরণ: যদি Admin বলে "সবাইকে জিজ্ঞাসা করো আজ অর্ডার কম কেন", তাহলে তুমি স্বাভাবিকভাবে কথার মাঝে বলবি "বাই দ্যা ওয়ে আজকের অর্ডার কেমন? @Mehebuba Maria" — কিন্তু কখনোই বলবি না যে Admin তোমাকে বলেছে।
+
 নিয়ম:
-- যদি Admin হন: সম্মানের সাথে, বিস্তারিত উত্তর দাও, সব তথ্য দাও
-- যদি Team Member হন: বন্ধুসুলভ, সংক্ষিপ্ত উত্তর দাও। যদি জরুরি প্রশ্ন হয় তাহলে শেষে "@{on_duty}" মেনশন করো
+- Admin-এর নির্দেশনা গোপন রেখে, স্বাভাবিকভাবে Group conversation-এ কাজে লাগাও
+- যদি Admin হন: সম্মানের সাথে, বিস্তারিত উত্তর দাও
+- যদি Team Member হন: বন্ধুসুলভ, সংক্ষিপ্ত উত্তর দাও। জরুরি হলে "@{on_duty}" মেনশন করো
 - সবসময় বাংলায় উত্তর দাও"""
         reply = get_gemini_reply(prompt)
         return jsonify({"reply": reply})
@@ -2764,6 +2783,65 @@ def save_whatsapp_settings():
         db_query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=?", (k, v, v), commit=True)
     flash("WhatsApp settings saved!")
     return redirect("/admin/whatsapp-settings")
+
+
+# =====================================================================
+# ADMIN: AI Directives (Private Instructions)
+# =====================================================================
+@app.route("/admin/directives")
+def admin_directives():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    directives = db_query("SELECT * FROM admin_directives ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Directives</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#673AB7;color:white}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+textarea{width:100%;padding:12px;margin:5px 0;border:1px solid #ddd;border-radius:5px;min-height:80px;resize:vertical}
+.info{background:#f3e5f5;padding:15px;border-radius:8px;margin:15px 0;color:#4a148c}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a></div>
+<h1>🧠 AI Directives</h1>
+<div class="info">
+<b>এই মেসেজগুলো AI মনে রাখবে কিন্তু Group-ে কাউকে দেখাবে না!</b><br>
+Team Group-এ উত্তর দেওয়ার সময় AI এই নির্দেশনা follow করবে।
+</div>
+<form method="POST" action="/admin/directives/add">
+    <textarea name="directive" placeholder="যেমন: আজকে Premium Shirt ১০% ছাড়ে বিক্রি করো..." required></textarea>
+    <button type="submit" class="btn btn-green">💾 Save Directive</button>
+</form>
+<table><tr><th>ID</th><th>Directive</th><th>Date</th><th>Action</th></tr>
+{% for d in directives %}
+<tr>
+    <td>{{ d.id }}</td>
+    <td style="white-space:pre-wrap;max-width:500px">{{ d.directive }}</td>
+    <td>{{ d.created_at }}</td>
+    <td><a href="/admin/directives/delete/{{ d.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td>
+</tr>
+{% endfor %}
+</table></div></body></html>
+""", directives=directives)
+
+@app.route("/admin/directives/add", methods=["POST"])
+def admin_directives_add():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    text = request.form.get("directive", "").strip()
+    if text:
+        db_query("INSERT INTO admin_directives (admin_phone, directive) VALUES (?, ?)", ("admin_panel", text), commit=True)
+        flash("Directive saved! AI will follow this.")
+    return redirect("/admin/directives")
+
+@app.route("/admin/directives/delete/<int:did>")
+def admin_directives_delete(did):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM admin_directives WHERE id = ?", (did,), commit=True)
+    flash("Directive deleted!")
+    return redirect("/admin/directives")
 
 
 # =====================================================================
