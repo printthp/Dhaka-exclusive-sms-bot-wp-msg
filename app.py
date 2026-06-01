@@ -825,9 +825,9 @@ def cron_followup():
     for user in candidates:
         phone = user.get("phone", "")
         msg = (
-            "🛍️ প্রিয় গ্রাহক, আপনি কি Dhaka Exclusive-এর প্রোডাক্টগুলো দেখেছেন? "
+            " প্রিয় গ্রাহক, আপনি কি Dhaka Exclusive-এর প্রোডাক্টগুলো দেখেছেন? "
             "আমাদের হট কালেকশন শেষ হওয়ার আগেই অর্ডার করুন! "
-            "ক্যাটালগ দেখতে 'লিস্ট' লিখুন। COD + ফ্রি ডেলিভারি! 🚚"
+            "ক্যাটালগ দেখতে 'লিস্ট' লিখুন. COD + ফ্রি ডেলিভারি! "
         )
         if send_whatsapp_message(phone, msg):
             db_query("UPDATE users SET follow_up_sent = 1 WHERE phone = ?", (phone,), commit=True)
@@ -873,7 +873,7 @@ def _get_products_text():
             if material: extras.append(f"Material: {material}")
             if desc: extras.append(f"Details: {desc}")
             extra_str = f" ({'; '.join(extras)})" if extras else ""
-            lines.append(f"- {p['name']} — {p['price']}৳ — {stock}{extra_str}")
+            lines.append(f"- {p['name']} - {p['price']}৳ - {stock}{extra_str}")
         _AI_CACHE["products"] = "\n".join(lines) if lines else "No products available"
         _AI_CACHE["last_fetch"] = now
     return _AI_CACHE["products"]
@@ -910,17 +910,17 @@ def _get_payment_methods_text():
     ) or []
     if not methods:
         return (
-            "💳 *পেমেন্ট পদ্ধতি:*\n\n"
+            " *পেমেন্ট পদ্ধতি:*\n\n"
             "1️⃣ *ক্যাশ অন ডেলিভারি (COD)* - সবচেয়ে জনপ্রিয়\n"
             "2️⃣ *bKash:* 017XXXXXXXX (Personal)\n"
             "   - Send Money করুন\n"
             "   - রেফারেন্সে আপনার ফোন নম্বর লিখুন\n"
             "3️⃣ *Nagad:* 017XXXXXXXX\n"
             "   - Cash Out/Send Money\n\n"
-            "✅ অর্ডার কনফার্মের পর পেমেন্ট করুন।"
+            "OK অর্ডার কনফার্মের পর পেমেন্ট করুন."
         )
     
-    lines = ["💳 *পেমেন্ট পদ্ধতি:*\n"]
+    lines = [" *পেমেন্ট পদ্ধতি:*\n"]
     for i, m in enumerate(methods, 1):
         name = m.get('name', '')
         ptype = m.get('type', '')
@@ -934,11 +934,11 @@ def _get_payment_methods_text():
         if acc_name:
             lines.append(f"   👤 {acc_name}")
         if instructions:
-            lines.append(f"   📝 {instructions}")
+            lines.append(f"    {instructions}")
         lines.append("")
     
-    lines.append("✅ অর্ডার কনফার্মের পর পেমেন্ট করুন।")
-    lines.append("📸 বিকাশ/নগদে পেমেন্ট করলে স্ক্রিনশট পাঠান।")
+    lines.append("OK অর্ডার কনফার্মের পর পেমেন্ট করুন.")
+    lines.append(" বিকাশ/নগদে পেমেন্ট করলে স্ক্রিনশট পাঠান.")
     return "\n".join(lines)
 
 def _get_order_status(phone):
@@ -947,14 +947,14 @@ def _get_order_status(phone):
     orders = db_query("SELECT id, pathao_order_id, total, status, created_at FROM orders WHERE phone=? ORDER BY id DESC LIMIT 3", (phone,), fetchall=True) or []
     if not orders:
         return None
-    lines = ["📦 *আপনার অর্ডার স্ট্যাটাস:*\n"]
+    lines = [" *আপনার অর্ডার স্ট্যাটাস:*\n"]
     for o in orders:
         lines.append(f"• অর্ডার #{o.get('pathao_order_id', o['id'])}")
         lines.append(f"  স্ট্যাটাস: {o['status']}")
         lines.append(f"  মোট: {o['total']}৳")
         lines.append(f"  তারিখ: {o.get('created_at', 'N/A')[:10]}")
         lines.append("")
-    lines.append("❓ আরও তথ্যের জন্য আমাদের সাথে যোগাযোগ করুন।")
+    lines.append("? আরও তথ্যের জন্য আমাদের সাথে যোগাযোগ করুন.")
     return "\n".join(lines)
 
 def _notify_admin_new_order(order_data):
@@ -965,9 +965,9 @@ def _notify_admin_new_order(order_data):
             f"🔔 *নতুন অর্ডার!*\n\n"
             f"👤 {order_data.get('name', 'Unknown')}\n"
             f"📞 {order_data.get('phone', 'N/A')}\n"
-            f"📦 {order_data.get('product', 'N/A')} x{order_data.get('quantity', 1)}\n"
+            f" {order_data.get('product', 'N/A')} x{order_data.get('quantity', 1)}\n"
             f"📍 {order_data.get('address', 'N/A')}\n"
-            f"💰 {order_data.get('total', 0)}৳\n\n"
+            f"Tk {order_data.get('total', 0)}৳\n\n"
             f"📋 Admin Panel: dhaka-exclusive-sms-bot-wp-msg.onrender.com/admin"
         )
         send_whatsapp_message(ADMIN_PHONE, msg)
@@ -977,7 +977,7 @@ def _notify_admin_new_order(order_data):
 
 def _analyze_image_with_gemini(image_path, customer_phone=""):
     if not GEMINI_API_KEY:
-        return "📷 ছবি পেয়েছি। দুঃখিত, AI ভিশন সার্ভিস বর্তমানে অনুপলব্ধ।"
+        return " ছবি পেয়েছি. দুঃখিত, AI ভিশন সার্ভিস বর্তমানে অনুপলব্ধ."
     
     products = db_query("SELECT name, price, image_url FROM products LIMIT 50", fetchall=True) or []
     product_list = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products]) if products else "No products in catalog"
@@ -992,12 +992,12 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
         
         # Use gemini-1.5-flash which supports vision
         prompt = (
-            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। এই ছবিটি দেখো।\n"
-            "যদি এটি কোনো প্রোডাক্টের ছবি হয়, তাহলে চিনতে চেষ্টা করো।\n"
-            "কাস্টমার যদি কোনো প্রোডাক্টের ছবি পাঠিয়ে থাকে, তাহলে সেটি কিনতে সাহায্য করো।\n"
-            "যদি স্ক্রিনশট/ছবিতে কোনো প্রোডাক্ট আমাদের ক্যাটালগের মতো দেখায়, তাহলে দাম বলো।\n"
+            "তুমি Dhaka Exclusive-এর সেলস সহায়ক. এই ছবিটি দেখো.\n"
+            "যদি এটি কোনো প্রোডাক্টের ছবি হয়, তাহলে চিনতে চেষ্টা করো.\n"
+            "কাস্টমার যদি কোনো প্রোডাক্টের ছবি পাঠিয়ে থাকে, তাহলে সেটি কিনতে সাহায্য করো.\n"
+            "যদি স্ক্রিনশট/ছবিতে কোনো প্রোডাক্ট আমাদের ক্যাটালগের মতো দেখায়, তাহলে দাম বলো.\n"
             f"আমাদের ক্যাটালগ:\n{product_list}\n\n"
-            "সংক্ষিপ্ত ও বন্ধুসুলভ ভাবে বাংলায় উত্তর দাও।"
+            "সংক্ষিপ্ত ও বন্ধুসুলভ ভাবে বাংলায় উত্তর দাও."
         )
         
         # Vision requires specific model - use flash for speed
@@ -1027,10 +1027,10 @@ def _analyze_image_with_gemini(image_path, customer_phone=""):
             logger.error(f"Image analysis API error: {res.get('error')}")
         else:
             logger.error(f"Image analysis no candidates: {res}")
-        return "📷 ছবি পেয়েছি। দুঃখিত, ছবিটি এখন বিশ্লেষণ করা সম্ভব হচ্ছে না। অনুগ্রহ করে প্রোডাক্টের নাম লিখে পাঠান।"
+        return " ছবি পেয়েছি. দুঃখিত, ছবিটি এখন বিশ্লেষণ করা সম্ভব হচ্ছে না. অনুগ্রহ করে প্রোডাক্টের নাম লিখে পাঠান."
     except Exception as e:
         logger.error(f"Image analysis exception: {e}")
-        return "📷 ছবি পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
+        return " ছবি পেয়েছি. দুঃখিত, প্রযুক্তিগত সমস্যা. অনুগ্রহ করে টাইপ করে জানান."
 
 def _detect_intent(msg):
     msg_lower = msg.lower()
@@ -1122,7 +1122,7 @@ def _extract_order_from_text(text, phone):
     if GEMINI_API_KEY and has_order_intent and matched_product:
         try:
             product_lines = "\n".join([f"- {p['name']} ({p['price']}৳)" for p in products[:20]])
-            extract_prompt = f"""তুমি একটি অর্ডার এক্সট্রাকশন bot। কাস্টমারের মেসেজ থেকে অর্ডারের তথ্য বের করো।
+            extract_prompt = f"""তুমি একটি অর্ডার এক্সট্রাকশন bot. কাস্টমারের মেসেজ থেকে অর্ডারের তথ্য বের করো.
 
 প্রোডাক্ট লিস্ট:
 {product_lines}
@@ -1219,20 +1219,20 @@ def _save_order(order_data):
 
 def _analyze_voice_with_gemini(voice_path, customer_phone=""):
     if not GEMINI_API_KEY:
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস সার্ভিস বর্তমানে অনুপলব্ধ। অনুগ্রহ করে টাইপ করে জানান।"
+        return " আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, AI ভয়েস সার্ভিস বর্তমানে অনুপলব্ধ. অনুগ্রহ করে টাইপ করে জানান."
     
     # Validate file
     if not os.path.exists(voice_path):
         logger.error(f"Voice file not found: {voice_path}")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ফাইলটি পাওয়া যায়নি।"
+        return " আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, ফাইলটি পাওয়া যায়নি."
     
     file_size = os.path.getsize(voice_path)
     if file_size == 0:
         logger.error("Voice file is empty")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ফাইলটি খালি।"
+        return " আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, ফাইলটি খালি."
     if file_size > 20 * 1024 * 1024:  # 20MB limit
         logger.error(f"Voice file too large: {file_size} bytes")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি খুব বড়। অনুগ্রহ করে ছোট করে পাঠান।"
+        return " আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, ভয়েসটি খুব বড়. অনুগ্রহ করে ছোট করে পাঠান."
     
     try:
         with open(voice_path, "rb") as f:
@@ -1243,12 +1243,12 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
         product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products]) if products else "No products"
         
         prompt = (
-            "তুমি Dhaka Exclusive-এর সেলস সহায়ক। এই অডিওটি শোনো। "
-            "কাস্টমার বাংলা বা ইংরেজিতে কথা বলছে। "
-            "শুধু বাংলায় সংক্ষিপ্ত উত্তর দাও। "
-            "প্রতিটি উত্তরে 'প্রিয় গ্রাহক' বলার দরকার নেই। "
+            "তুমি Dhaka Exclusive-এর সেলস সহায়ক. এই অডিওটি শোনো. "
+            "কাস্টমার বাংলা বা ইংরেজিতে কথা বলছে. "
+            "শুধু বাংলায় সংক্ষিপ্ত উত্তর দাও. "
+            "প্রতিটি উত্তরে 'প্রিয় গ্রাহক' বলার দরকার নেই. "
             f"আমাদের প্রোডাক্ট:\n{product_list}\n\n"
-            "অর্ডার করতে চাইলে সাহায্য করো। প্রশ্নের উত্তর দাও।"
+            "অর্ডার করতে চাইলে সাহায্য করো. প্রশ্নের উত্তর দাও."
         )
         
         # Use gemini-1.5-flash which reliably supports audio
@@ -1281,31 +1281,42 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
         if "error" in res:
             err = res["error"]
             logger.error(f"Voice API error: {err}")
-            return f"🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, AI ভয়েস পড়তে পারছে না। (Error: {err.get('code', 'unknown')})"
+            return f" আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, AI ভয়েস পড়তে পারছে না. (Error: {err.get('code', 'unknown')})"
         
         logger.error(f"Voice analysis no candidates: {res}")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, ভয়েসটি স্পষ্টভাবে বোঝা যায়নি। অনুগ্রহ করে টাইপ করে জানান।"
+        return " আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, ভয়েসটি স্পষ্টভাবে বোঝা যায়নি. অনুগ্রহ করে টাইপ করে জানান."
     except Exception as e:
         logger.error(f"Voice analysis exception: {e}")
-        return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
+        return " আপনার ভয়েস মেসেজ পেয়েছি. দুঃখিত, প্রযুক্তিগত সমস্যা. অনুগ্রহ করে টাইপ করে জানান."
 
 def _get_team_reply(user_message):
-    """Dedicated team group reply — simple, natural, no sales"""
+    """Professional Team Leader reply for Dhaka Exclusive team group"""
     if not GEMINI_API_KEY:
-        return "হাই ব্রো, কি খবর?"
+        return "ভাইয়া, কি খবর? সব ঠিকঠাক?"
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
-    prompt = f"""তুমি Dhaka Exclusive-এর একজন senior টিম মেম্বার। স্বাভাবিক, friendly কথা বলো।
+    
+    prompt = f"""তুমি Dhaka Exclusive-এর ভারপ্রাপ্ত টিম লিডার. তুমি অভিজ্ঞ, পেশাদার, আর confident - কিন্তু অহংকারী নও. টিমের সবার সম্মান করো, সবাইকে উৎসাহিত করো.
 
-নিয়ম:
-- MAXIMUM ২ লাইন
-- কেউ product চাইলে "Orders group-এ যাও" বলো
-- কখনো identity reveal করবি না
-- "ভাইয়া", "ব্রো", "দোস্ত" ব্যবহার করো
+তোমার কথার স্টাইল:
+- প্রথমেই নাম ধরে ডাকো: "[নাম] ভাই", "ব্রো [নাম]"
+- MAXIMUM 2-3 লাইন
+- Professional কিন্তু warm tone
+- কেউ অর্ডার/বিজনেস নিয়ে জিজ্ঞেস করলে helpful info দাও
+- কেউ personal/random কথা বললে friendlyভাবে reply দাও
+- কখনো "আমি AI" বা "আমি robot" বলবি না
+- কখনো generic "হাই ব্রো, কি খবর" বলবি না - context অনুযায়ী reply দাও
+
+উদাহরণ:
+User: "আমি কে" -> "আপনি আমাদের valued টিম মেম্বার ভাইয়া! কি খবর?"
+User: "আজকে অর্ডারের কি অবস্থা" -> "ভাইয়া, আজকের target clear - সবাই focus দিয়ে কাজ করছে. কোনো specific issue আছে?"
+User: "কেমন আছো" -> "আলহামদুলিল্লাহ ভাইয়া! তুমি কেমন? কাজকর্ম ঠিকঠাক চলছে তো?"
+User: "হাই" -> "হাই ব্রো, কি খবর? সব ঠিকঠাক?"
 
 User: {user_message}
 
-Reply (বাংলায়, ২ লাইন):"""
+Reply (বাংলায়, context অনুযায়ী, 2-3 লাইন):
+"""
     
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -1316,14 +1327,12 @@ Reply (বাংলায়, ২ লাইন):"""
         data = resp.json()
         if "candidates" in data and data["candidates"]:
             return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        return "হাই ব্রো, কি খবর?"
+        return "ভাইয়া, কি খবর? সব ঠিকঠাক?"
     except Exception as e:
         logger.error(f"Team reply error: {e}")
-        return "হাই ব্রো, কি খবর?"
-
-
+        return "ভাইয়া, কি খবর? সব ঠিকঠাক?"
 def _get_orders_group_reply(user_message):
-    """Orders group — extract order data"""
+    """Orders group - extract order data"""
     return f"""NAME: Unknown
 PHONE: 
 ADDRESS: 
@@ -1337,7 +1346,7 @@ If NOT an order, reply: NOT_AN_ORDER"""
 def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
-        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো।"
+        return "Dhaka Exclusive এ আপনাকে স্বাগতম! আমরা শীঘ্রই আপনার সাথে যোগাযোগ করবো."
 
     if voice_path:
         return _analyze_voice_with_gemini(voice_path, customer_phone)
@@ -1345,11 +1354,11 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
     if image_path:
         return _analyze_image_with_gemini(image_path, customer_phone)
 
-    # TEAM GROUP MODE — skip all sales logic, use team prompt directly
+    # TEAM GROUP MODE - skip all sales logic, use team prompt directly
     if customer_phone == "group_team":
         return _get_team_reply(user_message)
 
-    # ORDERS GROUP MODE — extract order data only
+    # ORDERS GROUP MODE - extract order data only
     if customer_phone == "group_orders":
         return _get_orders_group_reply(user_message)
 
@@ -1359,7 +1368,7 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         status = _get_order_status(customer_phone)
         if status:
             return status
-        return "📦 আপনার কোনো অর্ডার পাওয়া যায়নি। অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!"
+        return " আপনার কোনো অর্ডার পাওয়া যায়নি. অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!"
 
     if intent == "payment":
         return _get_payment_methods_text()
@@ -1368,29 +1377,29 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
         order_data = _extract_order_from_text(user_message, customer_phone)
         if order_data and order_data.get("is_order"):
             _save_order(order_data)
-            return f"✅ অর্ডার কনফার্মড!\n\n📝 অর্ডার ডিটেইলস:\n• নাম: {order_data.get('name')}\n• প্রোডাক্ট: {order_data.get('product')} x{order_data.get('quantity', 1)}\n• ঠিকানা: {order_data.get('address')}\n• মোট: {order_data.get('total', 0)}৳\n\n📦 ডেলিভারি: ঢাকায় ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা। ক্যাশ অন ডেলিভারি। আপনার অর্ডারটি প্রসেসিং এ আছে!"
+            return f"OK অর্ডার কনফার্মড!\n\n অর্ডার ডিটেইলস:\n• নাম: {order_data.get('name')}\n• প্রোডাক্ট: {order_data.get('product')} x{order_data.get('quantity', 1)}\n• ঠিকানা: {order_data.get('address')}\n• মোট: {order_data.get('total', 0)}৳\n\n ডেলিভারি: ঢাকায় 24 ঘণ্টা, বাইরে 48-72 ঘণ্টা. ক্যাশ অন ডেলিভারি. আপনার অর্ডারটি প্রসেসিং এ আছে!"
 
     if intent == "catalog_request":
         products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 30", fetchall=True) or []
         if not products:
-            return "📦 বর্তমানে ক্যাটালগ আপডেট হচ্ছে। আমাদের নতুন কালেকশন শীঘ্রই আসছে! অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।"
+            return " বর্তমানে ক্যাটালগ আপডেট হচ্ছে. আমাদের নতুন কালেকশন শীঘ্রই আসছে! অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন."
         
-        catalog_lines = ["🛍️ *Dhaka Exclusive - প্রোডাক্ট ক্যাটালগ*\n"]
+        catalog_lines = [" *Dhaka Exclusive - প্রোডাক্ট ক্যাটালগ*\n"]
         for i, p in enumerate(products, 1):
-            stock_status = "✅ In Stock" if p.get('stock', 0) > 5 else f"⚠️ Only {p.get('stock', 0)} left!"
-            catalog_lines.append(f"{i}. {p['name']}\n   💰 {p['price']}৳ | {stock_status}")
+            stock_status = "OK In Stock" if p.get('stock', 0) > 5 else f"! Only {p.get('stock', 0)} left!"
+            catalog_lines.append(f"{i}. {p['name']}\n   Tk {p['price']}৳ | {stock_status}")
         
-        catalog_lines.append(f"\n📌 মোট {len(products)}টি প্রোডাক্ট")
-        catalog_lines.append("🚚 ডেলিভারি: ঢাকা ২৪ ঘণ্টা | বাইরে ৪৮-৭২ ঘণ্টা")
-        catalog_lines.append("💳 পেমেন্ট: ক্যাশ অন ডেলিভারি")
-        catalog_lines.append("\n✨ অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!")
+        catalog_lines.append(f"\n মোট {len(products)}টি প্রোডাক্ট")
+        catalog_lines.append(" ডেলিভারি: ঢাকা 24 ঘণ্টা | বাইরে 48-72 ঘণ্টা")
+        catalog_lines.append(" পেমেন্ট: ক্যাশ অন ডেলিভারি")
+        catalog_lines.append("\n অর্ডার করতে প্রোডাক্টের নাম ও ঠিকানা লিখুন!")
         
         return "\n".join(catalog_lines)
 
     products_text = _get_products_text()
     hot_products = _get_hot_products()
     customer_ctx = _get_customer_context(customer_phone)
-    hot_text = "\n".join([f"- {p['name']} — {p['price']}৳" for p in hot_products[:5]])
+    hot_text = "\n".join([f"- {p['name']} - {p['price']}৳" for p in hot_products[:5]])
 
     chat_ctx = ""
     if chat_history and len(chat_history) > 0:
@@ -1420,24 +1429,24 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
     # Only include greeting for first 3 messages of conversation
     greeting_rule = ""
     if not chat_history or len(chat_history) <= 3:
-        greeting_rule = 'শুরুতে সংক্ষিপ্তভাবে "প্রিয় গ্রাহক" বলে সম্বোধন করুন।'
+        greeting_rule = 'শুরুতে সংক্ষিপ্তভাবে "প্রিয় গ্রাহক" বলে সম্বোধন করুন.'
     else:
-        greeting_rule = 'প্রতিটি উত্তর সরাসরি শুরু করুন — "প্রিয় গ্রাহক" বলার প্রয়োজন নেই।'
+        greeting_rule = 'প্রতিটি উত্তর সরাসরি শুরু করুন - "প্রিয় গ্রাহক" বলার প্রয়োজন নেই.'
 
     # Simple greeting only for first message
     is_first = not chat_history or len(chat_history) <= 1
     
-    system_instruction = f"""আপনি Dhaka Exclusive-এর সেলস সহায়ক।
+    system_instruction = f"""আপনি Dhaka Exclusive-এর সেলস সহায়ক.
 
 বিজনেস তথ্য:
-- ডেলিভারি: Dhaka ২৪ ঘণ্টা, বাইরে ৪৮-৭২ ঘণ্টা
+- ডেলিভারি: Dhaka 24 ঘণ্টা, বাইরে 48-72 ঘণ্টা
 - পেমেন্ট: COD + বিকাশ/নগদ
-- রিটার্ন: ৭ দিন (ড্যামেজ হলে)
+- রিটার্ন: 7 দিন (ড্যামেজ হলে)
 
 চলতি প্রোডাক্ট:
 {products_text}
 
-🔥 হট সেলিং:
+ হট সেলিং:
 {hot_text}
 
 {customer_ctx}
@@ -1446,7 +1455,7 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
 {intent_prompts.get(intent, intent_prompts['general'])}
 
 নিয়ম:
-1. সরাসরি উত্তর দিন — "প্রিয় গ্রাহক" শুধু প্রথম মেসেজে
+1. সরাসরি উত্তর দিন - "প্রিয় গ্রাহক" শুধু প্রথম মেসেজে
 2. কখনো "আরে ভাই/আপু" বা "ভাই/আপু" বলবেন না
 3. অর্ডার করতে উৎসাহিত করুন
 4. দাম বলার সময় "মাত্র" "শুধু" ব্যবহার করুন
@@ -1510,10 +1519,10 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
                 return parts[0].get("text", "").strip()
 
         logger.error(f"Gemini unexpected response: {res}")
-        return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে।"
+        return "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনাকে সাহায্য করবে."
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
-        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।"
+        return "মাফ করবেন, সার্ভারে সমস্যা হয়েছে. পরে আবার চেষ্টা করুন."
 
 def send_whatsapp_message(to_phone, message):
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
@@ -1657,7 +1666,7 @@ def webhook():
                                 audio_url = att.get("payload", {}).get("url", "")
                                 if audio_url:
                                     voice_path = _download_messenger_media(audio_url)
-                                content = "🎤 [Voice Received]"
+                                content = " [Voice Received]"
                             else:
                                 content = f"[{att_type.upper()} Received]"
 
@@ -1706,7 +1715,7 @@ def webhook():
                         elif m_type in ["voice", "audio"]:
                             media_id = msg.get(m_type, {}).get("id", "")
                             voice_path = _download_whatsapp_media(media_id, "voice")
-                            content = "🎤 [Voice Received]"
+                            content = " [Voice Received]"
                             if voice_path:
                                 db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'inbound', 'whatsapp')", (phone, content), commit=True)
                                 db_query("INSERT OR IGNORE INTO users (phone, name) VALUES (?, ?)", (phone, sender_name), commit=True)
@@ -1826,7 +1835,7 @@ def auto_describe_product(pid):
             )
             msg = f"Auto-described: {p['name'][:30]}..."
         else:
-            msg = "Auto-describe failed — check Gemini key"
+            msg = "Auto-describe failed - check Gemini key"
         return redirect(f"/admin?tab=inventory&msg={msg}")
     except Exception as e:
         return redirect(f"/admin?tab=inventory&msg=Error: {str(e)}")
@@ -2015,7 +2024,7 @@ def clear_all_products():
     if not session.get("logged_in"):
         return redirect("/admin/login")
     db_query("DELETE FROM products", commit=True)
-    return redirect("/admin?tab=inventory&msg=All Products Cleared — Ready for Re-Sync")
+    return redirect("/admin?tab=inventory&msg=All Products Cleared - Ready for Re-Sync")
 
 
 # =====================================================================
@@ -2282,7 +2291,7 @@ def sync_facebook_trigger():
             "limit": 100
         }
         
-        # Pagination loop — fetch ALL products
+        # Pagination loop - fetch ALL products
         while next_url and total_fetched < 5000:
             r = requests.get(next_url, params=params if next_url == f"https://graph.facebook.com/v18.0/{catalog_id}/products" else None, timeout=30)
             res = r.json()
@@ -2493,7 +2502,7 @@ def messenger_webhook():
                             audio_url = att.get("payload", {}).get("url", "")
                             if audio_url:
                                 voice_path = _download_messenger_media(audio_url)
-                            content = "🎤 [Voice Received]"
+                            content = " [Voice Received]"
                         elif att_type == "video":
                             msg_type = "video"
                             content = "[Video Received]"
@@ -2577,7 +2586,7 @@ def group_webhook():
         def normalize_bd_phone(phone):
             digits = re.sub(r"\D", "", phone)
             if digits.startswith("88") and len(digits) > 10:
-                return digits[2:]  # 88017... → 017...
+                return digits[2:]  # 88017... -> 017...
             return digits
         
         norm_sender = normalize_bd_phone(sender_phone)
@@ -2610,27 +2619,24 @@ def group_webhook():
 
         # Load private admin directives
         directives = db_query("SELECT directive FROM admin_directives ORDER BY id DESC LIMIT 5", fetchall=True) or []
-        directive_text = "\n".join([f"- {d['directive']}" for d in directives]) if directives else "কোনো বিশেষ নির্দেশনা নেই।"
+        directive_text = "\n".join([f"- {d['directive']}" for d in directives]) if directives else "কোনো বিশেষ নির্দেশনা নেই."
 
-        prompt = f"""তুমি Dhaka Exclusive-এর একজন senior টিম মেম্বার। তুমি কোনো salesman নও, কোনো customer support নও — তুমি টিমের ভাই। সবার সাথে মিলে মিশে কাজ করো, স্বাভাবিকভাবে কথা বলো।
+        prompt = f"""তুমি Dhaka Exclusive-এর একজন senior টিম মেম্বার. তুমি কোনো salesman নও, কোনো customer support নও - তুমি টিমের ভাই. সবার সাথে মিলে মিশে কাজ করো, স্বাভাবিকভাবে কথা বলো.
 
 ক্রিটিক্যাল নিয়ম:
-১. কখনো নিজের identity reveal করবি না। Robot/AI/bot — এসব word ব্যবহার করবি না।
-২. Team group-এ তুমি টিমের ভাই। Customer-কে product বিক্রি করার দায়িত্ব তোমার না।
-৩. কেউ product চাইলেও তুমি সরাসরি price বা product list দিবি না — তাকে "Orders" group-এ যেতে বলবি।
-৪. Message MAXIMUM ২ লাইন। কোনো paragraph লিখবি না।
-৫. কেউ "কি খবর", "কেমন আছো", "হাই" বললে — simple, friendly reply দাও।
-৬. Admin-কে সম্মান করো: "ভাইয়া", "স্যার" — কিন্তু over-formal না।
+1. কখনো নিজের identity reveal করবি না. Robot/AI/bot - এসব word ব্যবহার করবি না.
+2. Team group-এ তুমি টিমের ভাই. Customer-কে product বিক্রি করার দায়িত্ব তোমার না.
+3. কেউ product চাইলেও তুমি সরাসরি price বা product list দিবি না - তাকে "Orders" group-এ যেতে বলবি.
+4. Message MAXIMUM 2 লাইন. কোনো paragraph লিখবি না.
+5. কেউ "কি খবর", "কেমন আছো", "হাই" বললে - simple, friendly reply দাও.
+6. Admin-কে সম্মান করো: "ভাইয়া", "স্যার" - কিন্তু over-formal না.
 
 উদাহরণ:
-✅ User: "হাই" → "হাই ব্রো, কি খবর?"
-✅ User: "আমার অনেক কিছু লাগবে" → "ব্রো, Orders group-এ চলে যাও, সেখানে সব details দিতে পারবে।"
-✅ User: "কি দাম" → "ভাইয়া, Orders group-এ check করো, আমরা এখানে general discussion করি।"
-✅ User: "কেমন আছো" → "আলহামদুলিল্লাহ ব্রো, তুমি কেমন?"
+OK User: "হাই" -> "হাই ব্রো, কি খবর?"
+OK User: "আমার অনেক কিছু লাগবে" -> "ব্রো, Orders group-এ চলে যাও, সেখানে সব details দিতে পারবে."
+OK User: "কি দাম" -> "ভাইয়া, Orders group-এ check করো, আমরা এখানে general discussion করি."
+OK User: "কেমন আছো" -> "আলহামদুলিল্লাহ ব্রো, তুমি কেমন?"
 
-❌ Random product list দেওয়া
-❌ "আমি Group Leader", "আমি AI" বলা
-❌ বড় paragraph লেখা
 
 এখন "{sender_name}" ({role}) বলছেন:
 "{body}"
@@ -2641,16 +2647,16 @@ Admin Directive (শুধু মনে রেখো):
 {directive_text}
 
 নিয়ম:
-- উত্তর MAXIMUM ২ লাইন।
-- Product query এলে Orders group-এ redirect করো।
-- {sender_name} এর নাম ব্যবহার করো।
-- Admin হলে সম্মান দেখাও।
-- জরুরি বিষয়ে "@{on_duty}" মেনশন করো।"""
+- উত্তর MAXIMUM 2 লাইন.
+- Product query এলে Orders group-এ redirect করো.
+- {sender_name} এর নাম ব্যবহার করো.
+- Admin হলে সম্মান দেখাও.
+- জরুরি বিষয়ে "@{on_duty}" মেনশন করো."""
         reply = get_optimized_gemini_reply(user_message=prompt, customer_phone="group_team")
         return jsonify({"reply": reply})
 
     elif group_type == "orders":
-        prompt = f"""তুমি Dhaka Exclusive-এর অর্ডার এক্সট্রাক্টর। মেসেজ থেকে অর্ডার তথ্য বের করো।
+        prompt = f"""তুমি Dhaka Exclusive-এর অর্ডার এক্সট্রাক্টর. মেসেজ থেকে অর্ডার তথ্য বের করো.
 
 মেসেজ: "{body}"
 
@@ -2690,7 +2696,7 @@ PRICE: <দাম বা 0>
             (phone, name, address, product, qty, price, total, group_name, body), commit=True)
 
         logger.info(f"[ORDER] Saved: {product} x{qty} = {total}৳")
-        return jsonify({"reply": f"✅ অর্ডার গ্রহণ হয়েছে!\n📦 {product} x{qty}\n💰 {total}৳"})
+        return jsonify({"reply": f"OK অর্ডার গ্রহণ হয়েছে!\n {product} x{qty}\nTk {total}৳"})
 
     return jsonify({"reply": ""})
 
@@ -2727,7 +2733,7 @@ def business_webhook():
 # SHIFT / MODERATOR ON-DUTY
 # =====================================================================
 def get_current_moderator():
-    """Returns who's on duty right now based on Bangladesh time (UTC+6)"""
+    # Returns who is on duty right now
     now = datetime.utcnow() + timedelta(hours=6)
     current_hour = now.hour
     shifts = db_query("SELECT * FROM shifts WHERE is_active=1", fetchall=True) or []
@@ -2896,7 +2902,7 @@ label{font-weight:bold;margin-top:15px;display:block;color:#333}
 <ol style="line-height:2;color:#666">
     <li>Download bridge files to PC</li>
     <li>Edit <code>config.json</code> with your Flask URL</li>
-    <li>Run <code>setup.bat</code> → Scan QR</li>
+    <li>Run <code>setup.bat</code> -> Scan QR</li>
 </ol>
 </div></body></html>
 """, s=s)
@@ -2951,10 +2957,10 @@ tr:hover{background:#fafafa}
 <div class="card">
 <h1>🧠 AI Directives</h1>
 <div class="info">
-<b>AI মনে রাখবে, Group-ে কাউকে দেখাবে না!</b> Team Group-এ উত্তর দেওয়ার সময় AI follow করবে।
+<b>AI মনে রাখবে, Group-ে কাউকে দেখাবে না!</b> Team Group-এ উত্তর দেওয়ার সময় AI follow করবে.
 </div>
 <form method="POST" action="/admin/directives/add">
-    <textarea name="directive" placeholder="যেমন: আজকে Premium Shirt ১০% ছাড়ে বিক্রি করো..." required></textarea>
+    <textarea name="directive" placeholder="যেমন: আজকে Premium Shirt 10% ছাড়ে বিক্রি করো..." required></textarea>
     <button type="submit" class="btn btn-green">💾 Save</button>
 </form>
 
@@ -3013,7 +3019,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;text
 .nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
 </style></head><body><div class="container">
 <div class="nav"><a href="/admin">← Dashboard</a></div>
-<h1>📦 Group Orders (Auto-captured)</h1>
+<h1> Group Orders (Auto-captured)</h1>
 <table>
 <tr><th>ID</th><th>Customer</th><th>Phone</th><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Group</th><th>Status</th><th>Date</th><th>Action</th></tr>
 {% for o in orders %}
