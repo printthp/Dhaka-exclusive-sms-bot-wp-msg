@@ -2868,6 +2868,7 @@ def admin_directives():
         return redirect("/admin/login")
     directives = db_query("SELECT * FROM admin_directives ORDER BY id DESC LIMIT 50", fetchall=True) or []
     broadcasts = db_query("SELECT * FROM group_broadcasts ORDER BY id DESC LIMIT 20", fetchall=True) or []
+    directives = db_query("SELECT * FROM admin_directives ORDER BY id DESC", fetchall=True) or []
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Directives</title>
 <style>
@@ -2912,7 +2913,6 @@ tr:hover{background:#fafafa}
     <td class="msg-cell">{{ d.directive }}</td>
     <td style="font-size:11px;color:#666">{{ d.created_at }}</td>
     <td class="actions">
-        <a href="/admin/directives/send/{{ d.id }}" class="btn btn-blue btn-sm">📢 Send</a>
         <a href="/admin/directives/delete/{{ d.id }}" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a>
     </td>
 </tr>
@@ -2922,30 +2922,8 @@ tr:hover{background:#fafafa}
 </table>
 </div>
 
-<div class="card">
-<h2>📢 Group Messages</h2>
-<table>
-<tr><th style="width:30px">ID</th><th>Message</th><th style="width:70px">Status</th><th style="width:90px">Date</th><th style="width:50px">Act</th></tr>
-{% for b in broadcasts %}
-<tr>
-    <td>{{ b.id }}</td>
-    <td class="msg-cell">{{ b.message }}</td>
-    <td class="{% if b.status == 'sent' %}status-sent{% else %}status-pending{% endif %}">{{ b.status }}</td>
-    <td style="font-size:11px;color:#666">{{ b.created_at }}</td>
-    <td>
-        {% if b.status == 'pending' %}
-        <a href="/admin/broadcast/cancel/{{ b.id }}" class="btn btn-gray btn-sm" onclick="return confirm('Cancel?')">✕</a>
-        {% endif %}
-    </td>
-</tr>
-{% else %}
-<tr><td colspan="5" class="empty">No messages yet</td></tr>
-{% endfor %}
-</table>
-</div>
-
 </div></body></html>
-""", directives=directives, broadcasts=broadcasts)
+""", directives=directives)
 
 @app.route("/admin/directives/add", methods=["POST"])
 def admin_directives_add():
@@ -2964,41 +2942,6 @@ def admin_directives_delete(did):
     db_query("DELETE FROM admin_directives WHERE id = ?", (did,), commit=True)
     flash("Directive deleted!")
     return redirect("/admin/directives")
-
-@app.route("/admin/directives/send/<int:did>")
-def admin_directives_send(did):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    d = db_query("SELECT * FROM admin_directives WHERE id = ?", (did,), fetchone=True)
-    if d:
-        # Save to broadcast table
-        db_query("INSERT INTO group_broadcasts (directive_id, message, status) VALUES (?, ?, 'pending')", (did, d["directive"]), commit=True)
-        flash("Message queued! Bridge will send to Team Group.")
-    return redirect("/admin/directives")
-
-@app.route("/pending-broadcasts")
-def pending_broadcasts():
-    """Bridge calls this to get pending messages to send to group"""
-    rows = db_query("SELECT * FROM group_broadcasts WHERE status = 'pending' ORDER BY id ASC LIMIT 10", fetchall=True) or []
-    messages = []
-    for r in rows:
-        messages.append({"id": r["id"], "message": r["message"]})
-    return jsonify({"messages": messages})
-
-@app.route("/broadcast-sent/<int:bid>", methods=["POST"])
-def broadcast_sent(bid):
-    """Bridge confirms message was sent"""
-    db_query("UPDATE group_broadcasts SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?", (bid,), commit=True)
-    return jsonify({"ok": True})
-
-@app.route("/admin/broadcast/cancel/<int:bid>")
-def admin_broadcast_cancel(bid):
-    if not session.get("logged_in"):
-        return redirect("/admin/login")
-    db_query("DELETE FROM group_broadcasts WHERE id = ? AND status = 'pending'", (bid,), commit=True)
-    flash("Pending message cancelled!")
-    return redirect("/admin/directives")
-
 
 # =====================================================================
 # ADMIN: Group Orders View
