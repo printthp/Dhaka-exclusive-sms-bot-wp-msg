@@ -261,6 +261,19 @@ def init_db():
                 sent_at TIMESTAMP
             )
         """)
+        # team complains (moderators/members report issues)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS team_complains (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_name TEXT,
+                sender_phone TEXT,
+                complain TEXT,
+                status TEXT DEFAULT 'open',
+                admin_reply TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -602,8 +615,9 @@ def admin_portal():
     template_name = template_map.get(tab, tab)
     team_count = db_query("SELECT COUNT(*) as c FROM team_members", fetchone=True)["c"] or 0
     group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders", fetchone=True)["c"] or 0
+    open_complains = db_query("SELECT COUNT(*) as c FROM team_complains WHERE status='open'", fetchone=True)["c"] or 0
 
-    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value, team_count=team_count, group_orders_count=group_orders_count)
+    return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value, team_count=team_count, group_orders_count=group_orders_count, open_complains=open_complains)
 
 @app.route("/admin/sync-pathao-status")
 def sync_pathao_status():
@@ -2533,6 +2547,14 @@ def group_webhook():
 
         on_duty = get_current_moderator()
 
+        # Detect complain keywords
+        complain_keywords = ['complain', 'problem', 'issue', 'problem ase', 'samossa', 'সমস্যা', 'অভিযোগ', 'problem ache', 'issue ache']
+        is_complain = any(k in body.lower() for k in complain_keywords)
+        if is_complain and role != 'Admin':
+            db_query("INSERT INTO team_complains (sender_name, sender_phone, complain) VALUES (?, ?, ?)", (sender_name, norm_sender, body), commit=True)
+            log_msg = f"[COMPLAIN] {sender_name}: {body[:60]}..."
+            logger.info(log_msg)
+
         # Load private admin directives
         directives = db_query("SELECT directive FROM admin_directives ORDER BY id DESC LIMIT 5", fetchall=True) or []
         directive_text = "\n".join([f"- {d['directive']}" for d in directives]) if directives else "কোনো বিশেষ নির্দেশনা নেই।"
@@ -3012,6 +3034,78 @@ def admin_group_order_status(order_id):
     status = request.args.get("status", "pending")
     db_query("UPDATE group_orders SET status = ? WHERE id = ?", (status, order_id), commit=True)
     return redirect("/admin/group-orders")
+
+
+# =====================================================================
+# ADMIN: Team Complain Box
+# =====================================================================
+@app.route("/admin/complains")
+def admin_complains():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    complains = db_query("SELECT * FROM team_complains ORDER BY id DESC LIMIT 100", fetchall=True) or []
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Complain Box</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;margin:20px;background:#f8f9fa;font-size:14px}
+.container{max-width:800px;margin:0 auto}
+.card{background:white;padding:20px;border-radius:8px;margin-bottom:15px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.card h1{font-size:20px;margin-bottom:15px;color:#333}
+.nav{margin-bottom:15px}.nav a{color:#666;text-decoration:none;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:10px 8px;border-bottom:1px solid #eee;text-align:left}
+th{background:#E53935;color:white;font-weight:600;font-size:11px}
+tr:hover{background:#fafafa}
+.btn{padding:5px 12px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none;font-size:11px;display:inline-block;margin:2px}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}.btn-blue{background:#2196F3}
+.status-open{color:#E53935;font-weight:bold;font-size:11px}
+.status-resolved{color:#4CAF50;font-weight:bold;font-size:11px}
+.complain-cell{max-width:350px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
+.reply-box{width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;font-size:12px;margin-top:5px}
+.empty{text-align:center;color:#999;padding:30px;font-style:italic}
+.badge{background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a></div>
+<div class="card">
+<h1>📮 Team Complain Box <span class="badge">{{ complains|selectattr('status','equalto','open')|list|length }} Open</span></h1>
+<table>
+<tr><th style="width:30px">ID</th><th>From</th><th>Phone</th><th>Complain</th><th style="width:70px">Status</th><th style="width:140px">Date</th><th style="width:180px">Action</th></tr>
+{% for c in complains %}
+<tr>
+    <td>{{ c.id }}</td>
+    <td style="font-weight:600">{{ c.sender_name }}</td>
+    <td style="font-size:11px;color:#666">{{ c.sender_phone }}</td>
+    <td class="complain-cell">{{ c.complain }}</td>
+    <td class="{% if c.status == 'open' %}status-open{% else %}status-resolved{% endif %}">{{ c.status }}</td>
+    <td style="font-size:11px;color:#666">{{ c.created_at }}</td>
+    <td>
+        {% if c.status == 'open' %}
+        <form method="POST" action="/admin/complains/reply/{{ c.id }}" style="display:inline">
+            <input type="text" name="reply" placeholder="Admin reply..." class="reply-box" required>
+            <button type="submit" class="btn btn-green">Reply</button>
+        </form>
+        {% else %}
+        <span style="font-size:11px;color:#666">{{ c.admin_reply or '-' }}</span>
+        {% endif %}
+    </td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="empty">No complains yet! Team is happy 😊</td></tr>
+{% endfor %}
+</table>
+</div>
+</div></body></html>
+""", complains=complains)
+
+@app.route("/admin/complains/reply/<int:cid>", methods=["POST"])
+def admin_complain_reply(cid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    reply = request.form.get("reply", "").strip()
+    if reply:
+        db_query("UPDATE team_complains SET admin_reply=?, status='resolved', resolved_at=CURRENT_TIMESTAMP WHERE id=?", (reply, cid), commit=True)
+        flash("Reply saved! Complain resolved.")
+    return redirect("/admin/complains")
 
 
 if __name__ == "__main__":
