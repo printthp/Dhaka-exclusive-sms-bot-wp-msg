@@ -217,6 +217,11 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Add active column to products if missing
+        try:
+            c.execute("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
         conn.close()
 
@@ -2451,19 +2456,37 @@ def group_webhook():
 
     logger.info(f"[GROUP:{group_type}] {sender_name}: {body[:50]}")
 
-    products = db_query("SELECT name, price, stock FROM products WHERE active=1 ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    products = db_query("SELECT name, price, stock FROM products ORDER BY id DESC LIMIT 50", fetchall=True) or []
     product_list = "\n".join([f"- {p['name']}: {p['price']}৳" for p in products[:20]])
 
     if group_type == "team":
-        prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। টিম মেম্বার "{sender_name}"-এর প্রশ্নের উত্তর দাও।
+        # Detect if sender is admin by phone number
+        sender_id = data.get("sender_id", "").replace("@c.us", "").replace("@lid", "")
+        sender_phone = re.sub(r"\D", "", sender_id)
+        
+        # Check team_members table for role
+        member = db_query("SELECT role FROM team_members WHERE phone=? OR wa_id=?", (sender_phone, sender_id), fetchone=True)
+        role = "Admin" if (member and member.get("role") == "admin") else "Team Member"
+        
+        # Also check settings for admin_phones
+        s = get_all_settings()
+        admin_phones = [p.strip() for p in s.get("admin_phones", "").split(",") if p.strip()]
+        if sender_phone in admin_phones or sender_id in admin_phones:
+            role = "Admin"
 
-প্রশ্ন: "{body}"
+        prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। 
+
+এখন "{sender_name}" ({role}) বলছেন:
+"{body}"
 
 প্রোডাক্ট:
 {product_list}
 
-সংক্ষিপ্ত, সহায়ক উত্তর দাও (বাংলায়)।"""
-        reply = get_optimized_gemini_reply(body, customer_phone="group_team", image_path=media_data if media_data else None)
+নিয়ম:
+- যদি Admin হন: সম্মানের সাথে, বিস্তারিত উত্তর দাও, সব তথ্য দাও
+- যদি Team Member হন: বন্ধুসুলভ, সংক্ষিপ্ত উত্তর দাও
+- সবসময় বাংলায় উত্তর দাও"""
+        reply = get_gemini_reply(prompt)
         return jsonify({"reply": reply})
 
     elif group_type == "orders":
