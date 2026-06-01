@@ -1289,6 +1289,51 @@ def _analyze_voice_with_gemini(voice_path, customer_phone=""):
         logger.error(f"Voice analysis exception: {e}")
         return "🎤 আপনার ভয়েস মেসেজ পেয়েছি। দুঃখিত, প্রযুক্তিগত সমস্যা। অনুগ্রহ করে টাইপ করে জানান।"
 
+def _get_team_reply(user_message):
+    """Dedicated team group reply — simple, natural, no sales"""
+    if not GEMINI_API_KEY:
+        return "হাই ব্রো, কি খবর?"
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    prompt = f"""তুমি Dhaka Exclusive-এর একজন senior টিম মেম্বার। স্বাভাবিক, friendly কথা বলো।
+
+নিয়ম:
+- MAXIMUM ২ লাইন
+- কেউ product চাইলে "Orders group-এ যাও" বলো
+- কখনো identity reveal করবি না
+- "ভাইয়া", "ব্রো", "দোস্ত" ব্যবহার করো
+
+User: {user_message}
+
+Reply (বাংলায়, ২ লাইন):"""
+    
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 200}
+    }
+    try:
+        resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+        data = resp.json()
+        if "candidates" in data and data["candidates"]:
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return "হাই ব্রো, কি খবর?"
+    except Exception as e:
+        logger.error(f"Team reply error: {e}")
+        return "হাই ব্রো, কি খবর?"
+
+
+def _get_orders_group_reply(user_message):
+    """Orders group — extract order data"""
+    return f"""NAME: Unknown
+PHONE: 
+ADDRESS: 
+PRODUCT: {user_message}
+QUANTITY: 1
+PRICE: 0
+
+If NOT an order, reply: NOT_AN_ORDER"""
+
+
 def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
@@ -1299,6 +1344,14 @@ def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=Non
 
     if image_path:
         return _analyze_image_with_gemini(image_path, customer_phone)
+
+    # TEAM GROUP MODE — skip all sales logic, use team prompt directly
+    if customer_phone == "group_team":
+        return _get_team_reply(user_message)
+
+    # ORDERS GROUP MODE — extract order data only
+    if customer_phone == "group_orders":
+        return _get_orders_group_reply(user_message)
 
     intent = _detect_intent(user_message)
 
