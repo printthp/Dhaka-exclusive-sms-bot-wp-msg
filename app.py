@@ -2495,14 +2495,29 @@ def group_webhook():
         sender_id = data.get("sender_id", "").replace("@c.us", "").replace("@lid", "")
         sender_phone = re.sub(r"\D", "", sender_id)
         
-        # Check team_members table for role
-        member = db_query("SELECT role FROM team_members WHERE phone=? OR wa_id=?", (sender_phone, sender_id), fetchone=True)
-        role = "Admin" if (member and member.get("role") == "admin") else "Team Member"
+        # Normalize Bangladesh phone for matching (handle 0171..., 880171..., +880171...)
+        def normalize_bd_phone(phone):
+            digits = re.sub(r"\D", "", phone)
+            if digits.startswith("88") and len(digits) > 10:
+                return digits[2:]  # 88017... → 017...
+            return digits
+        
+        norm_sender = normalize_bd_phone(sender_phone)
+        
+        # Check team_members table - compare normalized phones
+        members = db_query("SELECT phone, role, wa_id FROM team_members", fetchall=True) or []
+        role = "Team Member"
+        for m in members:
+            if normalize_bd_phone(m.get("phone", "")) == norm_sender or m.get("wa_id", "") == sender_id:
+                if m.get("role") == "admin":
+                    role = "Admin"
+                break
         
         # Also check settings for admin_phones
         s = get_all_settings()
-        admin_phones = [p.strip() for p in s.get("admin_phones", "").split(",") if p.strip()]
-        if sender_phone in admin_phones or sender_id in admin_phones:
+        admin_phones_raw = [p.strip() for p in s.get("admin_phones", "").split(",") if p.strip()]
+        admin_phones_norm = [normalize_bd_phone(p) for p in admin_phones_raw]
+        if norm_sender in admin_phones_norm or sender_id in admin_phones_raw:
             role = "Admin"
 
         on_duty = get_current_moderator()
