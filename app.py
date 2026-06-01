@@ -2841,51 +2841,80 @@ def admin_directives():
     broadcasts = db_query("SELECT * FROM group_broadcasts ORDER BY id DESC LIMIT 20", fetchall=True) or []
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Directives</title>
-<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
-table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#673AB7;color:white}
-.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
-.btn-green{background:#4CAF50}.btn-red{background:#f44336}.btn-blue{background:#2196F3}
-textarea{width:100%;padding:12px;margin:5px 0;border:1px solid #ddd;border-radius:5px;min-height:80px;resize:vertical}
-.info{background:#f3e5f5;padding:15px;border-radius:8px;margin:15px 0;color:#4a148c}
-.info2{background:#e3f2fd;padding:15px;border-radius:8px;margin:15px 0;color:#1565c0}
-.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
-.status-pending{color:#FF9800}.status-sent{color:#4CAF50;font-weight:bold}
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;margin:20px;background:#f8f9fa;font-size:14px}
+.container{max-width:700px;margin:0 auto}
+.card{background:white;padding:20px;border-radius:8px;margin-bottom:15px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.card h1{font-size:20px;margin-bottom:15px;color:#333}
+.card h2{font-size:16px;margin:20px 0 12px;color:#333}
+.nav{margin-bottom:15px}.nav a{color:#666;text-decoration:none;font-size:13px}
+.info{background:#f3e5f5;padding:12px;border-radius:6px;margin-bottom:12px;color:#4a148c;font-size:12px;line-height:1.5}
+textarea{width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;min-height:60px;resize:vertical;font-size:13px;margin-bottom:8px}
+.btn{padding:6px 14px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none;font-size:12px;display:inline-block;margin:2px}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}.btn-blue{background:#2196F3}.btn-gray{background:#9e9e9e}
+.btn-sm{padding:4px 10px;font-size:11px}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
+th{background:#673AB7;color:white;font-weight:600;font-size:11px}
+tr:hover{background:#fafafa}
+.status-pending{color:#FF9800;font-size:11px;font-weight:bold}
+.status-sent{color:#4CAF50;font-size:11px;font-weight:bold}
+.msg-cell{max-width:350px;white-space:pre-wrap;word-break:break-word;line-height:1.4}
+.actions{white-space:nowrap}
+.empty{text-align:center;color:#999;padding:30px;font-style:italic}
 </style></head><body><div class="container">
 <div class="nav"><a href="/admin">← Dashboard</a></div>
+
+<div class="card">
 <h1>🧠 AI Directives</h1>
 <div class="info">
-<b>এই মেসেজগুলো AI মনে রাখবে কিন্তু Group-ে কাউকে দেখাবে না!</b><br>
-Team Group-এ উত্তর দেওয়ার সময় AI এই নির্দেশনা follow করবে।
+<b>AI মনে রাখবে, Group-ে কাউকে দেখাবে না!</b> Team Group-এ উত্তর দেওয়ার সময় AI follow করবে।
 </div>
 <form method="POST" action="/admin/directives/add">
     <textarea name="directive" placeholder="যেমন: আজকে Premium Shirt ১০% ছাড়ে বিক্রি করো..." required></textarea>
-    <button type="submit" class="btn btn-green">💾 Save Directive</button>
+    <button type="submit" class="btn btn-green">💾 Save</button>
 </form>
-<table><tr><th>ID</th><th>Directive</th><th>Date</th><th>Action</th></tr>
+
+<table>
+<tr><th style="width:30px">ID</th><th>Directive</th><th style="width:100px">Date</th><th style="width:160px">Action</th></tr>
 {% for d in directives %}
 <tr>
     <td>{{ d.id }}</td>
-    <td style="white-space:pre-wrap;max-width:500px">{{ d.directive }}</td>
-    <td>{{ d.created_at }}</td>
-    <td>
-        <a href="/admin/directives/send/{{ d.id }}" class="btn btn-blue" onclick="return confirm('Group-এ পাঠাবো?')">📢 Send to Group</a>
-        <a href="/admin/directives/delete/{{ d.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a>
+    <td class="msg-cell">{{ d.directive }}</td>
+    <td style="font-size:11px;color:#666">{{ d.created_at }}</td>
+    <td class="actions">
+        <a href="/admin/directives/send/{{ d.id }}" class="btn btn-blue btn-sm">📢 Send</a>
+        <a href="/admin/directives/delete/{{ d.id }}" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a>
     </td>
 </tr>
+{% else %}
+<tr><td colspan="4" class="empty">No directives yet</td></tr>
 {% endfor %}
 </table>
+</div>
 
-<h2 style="margin-top:40px">📢 Sent Messages</h2>
-<table><tr><th>ID</th><th>Message</th><th>Status</th><th>Date</th></tr>
+<div class="card">
+<h2>📢 Group Messages</h2>
+<table>
+<tr><th style="width:30px">ID</th><th>Message</th><th style="width:70px">Status</th><th style="width:90px">Date</th><th style="width:50px">Act</th></tr>
 {% for b in broadcasts %}
 <tr>
     <td>{{ b.id }}</td>
-    <td style="white-space:pre-wrap;max-width:500px">{{ b.message }}</td>
+    <td class="msg-cell">{{ b.message }}</td>
     <td class="{% if b.status == 'sent' %}status-sent{% else %}status-pending{% endif %}">{{ b.status }}</td>
-    <td>{{ b.created_at }}</td>
+    <td style="font-size:11px;color:#666">{{ b.created_at }}</td>
+    <td>
+        {% if b.status == 'pending' %}
+        <a href="/admin/broadcast/cancel/{{ b.id }}" class="btn btn-gray btn-sm" onclick="return confirm('Cancel?')">✕</a>
+        {% endif %}
+    </td>
 </tr>
+{% else %}
+<tr><td colspan="5" class="empty">No messages yet</td></tr>
 {% endfor %}
 </table>
+</div>
+
 </div></body></html>
 """, directives=directives, broadcasts=broadcasts)
 
@@ -2932,6 +2961,14 @@ def broadcast_sent(bid):
     """Bridge confirms message was sent"""
     db_query("UPDATE group_broadcasts SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?", (bid,), commit=True)
     return jsonify({"ok": True})
+
+@app.route("/admin/broadcast/cancel/<int:bid>")
+def admin_broadcast_cancel(bid):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM group_broadcasts WHERE id = ? AND status = 'pending'", (bid,), commit=True)
+    flash("Pending message cancelled!")
+    return redirect("/admin/directives")
 
 
 # =====================================================================
