@@ -222,6 +222,25 @@ def init_db():
             c.execute("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1")
         except sqlite3.OperationalError:
             pass
+        # shifts table for moderator schedule
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS shifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start_hour INTEGER,
+                end_hour INTEGER,
+                moderator_name TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+        # Insert default shifts if empty
+        c.execute("SELECT COUNT(*) FROM shifts")
+        if c.fetchone()[0] == 0:
+            defaults = [
+                (8, 14, "Mehebuba Maria"),
+                (14, 20, "Aliza"),
+                (20, 2, "Ridi"),
+            ]
+            c.executemany("INSERT INTO shifts (start_hour, end_hour, moderator_name) VALUES (?, ?, ?)", defaults)
         conn.commit()
         conn.close()
 
@@ -2474,6 +2493,8 @@ def group_webhook():
         if sender_phone in admin_phones or sender_id in admin_phones:
             role = "Admin"
 
+        on_duty = get_current_moderator()
+
         prompt = f"""তুমি Dhaka Exclusive-এর AI সহকারী। 
 
 এখন "{sender_name}" ({role}) বলছেন:
@@ -2482,9 +2503,11 @@ def group_webhook():
 প্রোডাক্ট:
 {product_list}
 
+আজকের Duty Moderator: {on_duty}
+
 নিয়ম:
 - যদি Admin হন: সম্মানের সাথে, বিস্তারিত উত্তর দাও, সব তথ্য দাও
-- যদি Team Member হন: বন্ধুসুলভ, সংক্ষিপ্ত উত্তর দাও
+- যদি Team Member হন: বন্ধুসুলভ, সংক্ষিপ্ত উত্তর দাও। যদি জরুরি প্রশ্ন হয় তাহলে শেষে "@{on_duty}" মেনশন করো
 - সবসময় বাংলায় উত্তর দাও"""
         reply = get_gemini_reply(prompt)
         return jsonify({"reply": reply})
@@ -2561,6 +2584,83 @@ def business_webhook():
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_bridge')", (customer_phone, reply), commit=True)
 
     return jsonify({"reply": reply})
+
+
+# =====================================================================
+# SHIFT / MODERATOR ON-DUTY
+# =====================================================================
+def get_current_moderator():
+    """Returns who's on duty right now based on Bangladesh time (UTC+6)"""
+    now = datetime.utcnow() + timedelta(hours=6)
+    current_hour = now.hour
+    shifts = db_query("SELECT * FROM shifts WHERE is_active=1", fetchall=True) or []
+    for s in shifts:
+        start = s["start_hour"]
+        end = s["end_hour"]
+        if start > end:  # overnight shift like 20:00 -> 02:00
+            if current_hour >= start or current_hour < end:
+                return s["moderator_name"]
+        else:
+            if start <= current_hour < end:
+                return s["moderator_name"]
+    return "Dhaka Exclusive Team"
+
+
+# =====================================================================
+# ADMIN: Shifts / Moderator Schedule
+# =====================================================================
+@app.route("/admin/shifts")
+def admin_shifts():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    shifts = db_query("SELECT * FROM shifts ORDER BY id", fetchall=True) or []
+    current = get_current_moderator()
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Shifts</title>
+<style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#9C27B0;color:white}
+.btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px;width:150px}
+.current{background:#e8f5e9;padding:15px;border-radius:8px;margin:15px 0;color:#2e7d32;font-size:18px;font-weight:bold}
+.nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a></div>
+<h1>⏰ Moderator Shifts</h1>
+<div class="current">🟢 On Duty Now: {{ current }}</div>
+<form method="POST" action="/admin/shifts/add">
+    <input type="number" name="start_hour" placeholder="Start (0-23)" min="0" max="23" required>
+    <input type="number" name="end_hour" placeholder="End (0-23)" min="0" max="23" required>
+    <input type="text" name="moderator_name" placeholder="Moderator Name" required>
+    <button type="submit" class="btn btn-green">Add Shift</button>
+</form>
+<table><tr><th>ID</th><th>Start</th><th>End</th><th>Moderator</th><th>Status</th><th>Action</th></tr>
+{% for sh in shifts %}
+<tr><td>{{ sh.id }}</td><td>{{ '%02d:00' % sh.start_hour }}</td><td>{{ '%02d:00' % sh.end_hour }}</td>
+<td>{{ sh.moderator_name }}</td><td>{{ 'Active' if sh.is_active else 'Off' }}</td>
+<td><a href="/admin/shifts/delete/{{ sh.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td></tr>
+{% endfor %}
+</table></div></body></html>
+""", shifts=shifts, current=current)
+
+@app.route("/admin/shifts/add", methods=["POST"])
+def admin_shifts_add():
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    start = int(request.form.get("start_hour", 0))
+    end = int(request.form.get("end_hour", 0))
+    name = request.form.get("moderator_name", "").strip()
+    db_query("INSERT INTO shifts (start_hour, end_hour, moderator_name, is_active) VALUES (?, ?, ?, 1)", (start, end, name), commit=True)
+    flash("Shift added!")
+    return redirect("/admin/shifts")
+
+@app.route("/admin/shifts/delete/<int:shift_id>")
+def admin_shifts_delete(shift_id):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    db_query("DELETE FROM shifts WHERE id = ?", (shift_id,), commit=True)
+    flash("Shift deleted!")
+    return redirect("/admin/shifts")
 
 
 # =====================================================================
