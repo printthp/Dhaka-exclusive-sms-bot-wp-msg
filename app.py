@@ -250,6 +250,17 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # group broadcasts (admin messages to send to team group instantly)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS group_broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                directive_id INTEGER,
+                message TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent_at TIMESTAMP
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -2820,22 +2831,25 @@ def save_whatsapp_settings():
 
 
 # =====================================================================
-# ADMIN: AI Directives (Private Instructions)
+# ADMIN: AI Directives + Group Broadcast
 # =====================================================================
 @app.route("/admin/directives")
 def admin_directives():
     if not session.get("logged_in"):
         return redirect("/admin/login")
     directives = db_query("SELECT * FROM admin_directives ORDER BY id DESC LIMIT 50", fetchall=True) or []
+    broadcasts = db_query("SELECT * FROM group_broadcasts ORDER BY id DESC LIMIT 20", fetchall=True) or []
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Directives</title>
 <style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
 table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#673AB7;color:white}
 .btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
-.btn-green{background:#4CAF50}.btn-red{background:#f44336}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}.btn-blue{background:#2196F3}
 textarea{width:100%;padding:12px;margin:5px 0;border:1px solid #ddd;border-radius:5px;min-height:80px;resize:vertical}
 .info{background:#f3e5f5;padding:15px;border-radius:8px;margin:15px 0;color:#4a148c}
+.info2{background:#e3f2fd;padding:15px;border-radius:8px;margin:15px 0;color:#1565c0}
 .nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+.status-pending{color:#FF9800}.status-sent{color:#4CAF50;font-weight:bold}
 </style></head><body><div class="container">
 <div class="nav"><a href="/admin">← Dashboard</a></div>
 <h1>🧠 AI Directives</h1>
@@ -2853,11 +2867,27 @@ Team Group-এ উত্তর দেওয়ার সময় AI এই ন�
     <td>{{ d.id }}</td>
     <td style="white-space:pre-wrap;max-width:500px">{{ d.directive }}</td>
     <td>{{ d.created_at }}</td>
-    <td><a href="/admin/directives/delete/{{ d.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td>
+    <td>
+        <a href="/admin/directives/send/{{ d.id }}" class="btn btn-blue" onclick="return confirm('Group-এ পাঠাবো?')">📢 Send to Group</a>
+        <a href="/admin/directives/delete/{{ d.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a>
+    </td>
 </tr>
 {% endfor %}
-</table></div></body></html>
-""", directives=directives)
+</table>
+
+<h2 style="margin-top:40px">📢 Sent Messages</h2>
+<table><tr><th>ID</th><th>Message</th><th>Status</th><th>Date</th></tr>
+{% for b in broadcasts %}
+<tr>
+    <td>{{ b.id }}</td>
+    <td style="white-space:pre-wrap;max-width:500px">{{ b.message }}</td>
+    <td class="{% if b.status == 'sent' %}status-sent{% else %}status-pending{% endif %}">{{ b.status }}</td>
+    <td>{{ b.created_at }}</td>
+</tr>
+{% endfor %}
+</table>
+</div></body></html>
+""", directives=directives, broadcasts=broadcasts)
 
 @app.route("/admin/directives/add", methods=["POST"])
 def admin_directives_add():
@@ -2876,6 +2906,32 @@ def admin_directives_delete(did):
     db_query("DELETE FROM admin_directives WHERE id = ?", (did,), commit=True)
     flash("Directive deleted!")
     return redirect("/admin/directives")
+
+@app.route("/admin/directives/send/<int:did>")
+def admin_directives_send(did):
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    d = db_query("SELECT * FROM admin_directives WHERE id = ?", (did,), fetchone=True)
+    if d:
+        # Save to broadcast table
+        db_query("INSERT INTO group_broadcasts (directive_id, message, status) VALUES (?, ?, 'pending')", (did, d["directive"]), commit=True)
+        flash("Message queued! Bridge will send to Team Group.")
+    return redirect("/admin/directives")
+
+@app.route("/pending-broadcasts")
+def pending_broadcasts():
+    """Bridge calls this to get pending messages to send to group"""
+    rows = db_query("SELECT * FROM group_broadcasts WHERE status = 'pending' ORDER BY id ASC LIMIT 10", fetchall=True) or []
+    messages = []
+    for r in rows:
+        messages.append({"id": r["id"], "message": r["message"]})
+    return jsonify({"messages": messages})
+
+@app.route("/broadcast-sent/<int:bid>", methods=["POST"])
+def broadcast_sent(bid):
+    """Bridge confirms message was sent"""
+    db_query("UPDATE group_broadcasts SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?", (bid,), commit=True)
+    return jsonify({"ok": True})
 
 
 # =====================================================================
