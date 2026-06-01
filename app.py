@@ -2531,7 +2531,7 @@ def group_webhook():
 - যদি Admin হন: সম্মানের সাথে, বিস্তারিত উত্তর দাও
 - যদি Team Member হন: বন্ধুসুলভ, সংক্ষিপ্ত উত্তর দাও। জরুরি হলে "@{on_duty}" মেনশন করো
 - সবসময় বাংলায় উত্তর দাও"""
-        reply = get_gemini_reply(prompt)
+        reply = get_optimized_gemini_reply(user_message=prompt, customer_phone="group_team")
         return jsonify({"reply": reply})
 
     elif group_type == "orders":
@@ -2549,7 +2549,7 @@ PRICE: <দাম বা 0>
 
 যদি অর্ডার না হয়: NOT_AN_ORDER"""
 
-        ai_result = get_gemini_reply(prompt)
+        ai_result = get_optimized_gemini_reply(user_message=prompt, customer_phone="group_orders")
         if "NOT_AN_ORDER" in ai_result:
             return jsonify({"reply": ""})
 
