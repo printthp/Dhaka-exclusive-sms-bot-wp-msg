@@ -2718,9 +2718,10 @@ def admin_team():
 <style>body{font-family:Arial;margin:40px;background:#f5f5f5}.container{max-width:900px;margin:0 auto;background:white;padding:30px;border-radius:10px}
 table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#4CAF50;color:white}
 .btn{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;color:white;text-decoration:none}
-.btn-green{background:#4CAF50}.btn-red{background:#f44336}
-input{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px}
+.btn-green{background:#4CAF50}.btn-red{background:#f44336}.btn-blue{background:#2196F3}
+input,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px}
 .nav{margin-bottom:20px}.nav a{margin-right:15px;color:#666;text-decoration:none}
+.role-admin{color:#d32f2f;font-weight:bold}.role-mod{color:#1976d2}
 </style></head><body><div class="container">
 <div class="nav"><a href="/admin">← Dashboard</a></div>
 <h1>👥 Team Members</h1>
@@ -2728,11 +2729,16 @@ input{padding:10px;margin:5px;border:1px solid #ddd;border-radius:5px}
     <input type="text" name="name" placeholder="Name" required>
     <input type="text" name="phone" placeholder="Phone" required>
     <input type="text" name="wa_id" placeholder="WhatsApp ID">
+    <select name="role" required>
+        <option value="moderator">Moderator</option>
+        <option value="admin">Admin</option>
+    </select>
     <button type="submit" class="btn btn-green">Add</button>
 </form>
 <table><tr><th>ID</th><th>Name</th><th>Phone</th><th>Role</th><th>Action</th></tr>
 {% for m in members %}
-<tr><td>{{ m.id }}</td><td>{{ m.name }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td>
+<tr><td>{{ m.id }}</td><td>{{ m.name }}</td><td>{{ m.phone }}</td>
+<td class="{% if m.role == 'admin' %}role-admin{% else %}role-mod{% endif %}">{{ m.role }}</td>
 <td><a href="/admin/team/delete/{{ m.id }}" class="btn btn-red" onclick="return confirm('Delete?')">Delete</a></td></tr>
 {% endfor %}
 </table></div></body></html>
@@ -2745,8 +2751,11 @@ def admin_team_add():
     name = request.form.get("name", "").strip()
     phone = request.form.get("phone", "").strip()
     wa_id = request.form.get("wa_id", "").strip()
-    db_query("INSERT OR REPLACE INTO team_members (name, phone, wa_id, role, is_active) VALUES (?, ?, ?, 'moderator', 1)", (name, phone, wa_id), commit=True)
-    flash("Member added!")
+    role = request.form.get("role", "moderator").strip()
+    if role not in ["admin", "moderator"]:
+        role = "moderator"
+    db_query("INSERT OR REPLACE INTO team_members (name, phone, wa_id, role, is_active) VALUES (?, ?, ?, ?, 1)", (name, phone, wa_id, role), commit=True)
+    flash(f"Member added as {role}!")
     return redirect("/admin/team")
 
 @app.route("/admin/team/delete/<int:member_id>")
