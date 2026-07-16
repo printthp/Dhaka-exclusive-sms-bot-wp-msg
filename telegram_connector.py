@@ -512,6 +512,9 @@ class TrainingCommandHandler:
 # ============================================================================
 
 class TelegramBot:
+
+    def __init__(self, token: str = "", get_ai_reply_fn=None, db_query_fn=None):
+        self._known_admin_chats: set = set()
     """Telegram Bot that bridges to existing AI pipeline"""
     
     def __init__(self, token: str = "", get_ai_reply_fn=None, db_query_fn=None):
@@ -599,10 +602,41 @@ class TelegramBot:
         
         if not text or not chat_id:
             return None
-        
+
         sender_name = username or first_name or str(user_id)
         is_admin = self._is_admin_tg(user_id)
         logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: {text[:80]}")
+
+        # ── UNIVERSAL: /start welcome (works for anyone) ──
+        if text in ("/start", "/start@ArshibyabidBot"):
+            if is_admin:
+                welcome = (
+                    f"🟢 *স্বাগতম {first_name or 'অ্যাডমিন'}!*\n\n"
+                    f"*Dhaka Exclusive Bot* সচল আছে।\n\n"
+                    f"📚 *কমান্ডসমূহ:*\n"
+                    f"• `!help` — সব কমান্ড দেখুন\n"
+                    f"• `!teach <প্রশ্ন> | <উত্তর>` — বটকে শেখান\n"
+                    f"• `!stats` — পরিসংখ্যান\n"
+                    f"• `!patterns` — শেখা প্যাটার্ন\n"
+                    f"• `!faq` — অটো-জেনারেটেড FAQ\n"
+                    f"• `!ping` — বট সচল কিনা\n\n"
+                    f"আমাকে যেকোনো প্রশ্ন করুন — AI reply দেবো।\n"
+                    f"অথবা `!teach` দিয়ে নতুন তথ্য শেখান।"
+                )
+            else:
+                welcome = (
+                    f"👋 *স্বাগতম {first_name or 'ভাইয়া'}!*\n\n"
+                    f"এই বট শুধুমাত্র অ্যাডমিন ব্যবহারের জন্য।\n\n"
+                    f"🛒 *অর্ডার বা সাহায্যের জন্য:*\n"
+                    f"📱 WhatsApp/SMS করুন: *01717121068*\n\n"
+                    f"ধন্যবাদ! 🙏"
+                )
+            self.send_message(chat_id, welcome)
+            return welcome
+
+        # Track chat_id for admin (so we can send them updates later)
+        if is_admin:
+            self._known_admin_chats.add(int(chat_id))
         
         # ── ADMIN: Full access (training commands + AI pipeline) ──
         if is_admin:
@@ -636,11 +670,16 @@ class TelegramBot:
             return fallback
         
         # ── NON-ADMIN: Redirect to SMS/WhatsApp ──
+        admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+        # Format for display: 8801717121068 → 01717121068
+        display_phone = admin_phone
+        if display_phone.startswith("880"):
+            display_phone = "0" + display_phone[3:]
         redirect_msg = (
             f"👋 *স্বাগতম {first_name or 'ভাইয়া'}!*\n\n"
             f"এই বট শুধুমাত্র অ্যাডমিন ব্যবহারের জন্য।\n"
             f"অর্ডার বা সাহায্যের জন্য দয়া করে নিচের নাম্বারে SMS/WhatsApp করুন:\n\n"
-            f"📱 *হোয়াটসঅ্যাপ:* 018801234567\n"
+            f"📱 *হোয়াটসঅ্যাপ:* {display_phone}\n"
             f"💬 অথবা সরাসরি SMS করুন এই নাম্বারে\n\n"
             f"ধন্যবাদ! 🙏"
         )
