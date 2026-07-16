@@ -624,6 +624,7 @@ class TelegramBot:
     def process_message(self, msg: dict) -> Optional[str]:
         """Process an incoming Telegram message — ADMIN ONLY for AI, rest redirected to SMS"""
         try:
+            print(f"PROCESS_MSG called: {str(msg)[:200]}", flush=True)
             if "message" not in msg:
                 return None
             # High-priority log: always shows what's incoming
