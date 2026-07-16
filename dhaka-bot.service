@@ -1,0 +1,16 @@
+[Unit]
+Description=Dhaka Exclusive WhatsApp Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/dhaka-bot
+Environment="PATH=/home/ubuntu/dhaka-bot/.venv/bin:/usr/bin:/bin"
+EnvironmentFile=/home/ubuntu/dhaka-bot/.env
+ExecStart=/home/ubuntu/dhaka-bot/.venv/bin/gunicorn -w 3 -b 0.0.0.0:5000 --timeout 120 --log-level info app:application
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

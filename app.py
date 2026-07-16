@@ -17,6 +17,17 @@ from flask import Flask, request, jsonify, render_template, render_template_stri
 from xhtml2pdf import pisa
 from werkzeug.utils import secure_filename
 
+# Advanced AI Engine (Hermes-Agent inspired)
+try:
+    from ai_agent import get_advanced_ai_reply, get_sales_agent as _get_ai_agent
+    _AI_ENGINE_LOADED = True
+    logger.info("Advanced AI Engine (ai_core + ai_agent) loaded successfully")
+except Exception as _ai_load_err:
+    _AI_ENGINE_LOADED = False
+    logger.warning(f"Advanced AI Engine not loaded, using fallback: {_ai_load_err}")
+    def get_advanced_ai_reply(*args, **kwargs):
+        return None  # Will trigger fallback to original
+
 # =====================================================================
 # SYSTEM & STORAGE SETUP (Render Persistence)
 # =====================================================================
@@ -1343,6 +1354,41 @@ PRICE: 0
 If NOT an order, reply: NOT_AN_ORDER"""
 
 
+def _ai_reply_with_fallback(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
+    """Unified AI reply with auto-fallback to advanced engine then original Gemini"""
+    
+    # ── SMS TRAINING MODE INTERCEPT ──
+    try:
+        from telegram_connector import get_sms_trainer
+        trainer = get_sms_trainer(db_query_fn=db_query)
+        training_reply = trainer.intercept_sms(user_message, customer_phone)
+        if training_reply:
+            logger.info(f"SMS Training command handled for {customer_phone}")
+            return training_reply
+    except Exception as e:
+        logger.debug(f"SMS trainer intercept: {e}")
+    
+    # ── TRAINED QA SEARCH (fallback before AI) ──
+    try:
+        from telegram_connector import TrainingCommandHandler
+        qa = TrainingCommandHandler(db_query_fn=db_query)
+        qa_match = qa.search_trained_qa(user_message)
+        if qa_match:
+            logger.info(f"Trained QA matched for: {user_message[:50]}...")
+            return qa_match
+    except Exception as e:
+        logger.debug(f"QA search: {e}")
+    
+    if _AI_ENGINE_LOADED:
+        try:
+            reply = get_advanced_ai_reply(user_message, customer_phone, chat_history, image_path, voice_path)
+            if reply and len(reply) > 2:
+                return reply
+        except Exception as e:
+            logger.error(f"Advanced AI engine error, falling back to Gemini: {e}")
+    return get_optimized_gemini_reply(user_message, customer_phone, chat_history, image_path, voice_path)
+
+
 def get_optimized_gemini_reply(user_message, customer_phone="", chat_history=None, image_path=None, voice_path=None):
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY missing")
@@ -1677,7 +1723,7 @@ def webhook():
                         recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (sender_id,), fetchall=True) or []
                         recent_msgs.reverse()
 
-                        reply = get_optimized_gemini_reply(content, customer_phone=sender_id, chat_history=recent_msgs, image_path=image_path, voice_path=voice_path)
+                        reply = _ai_reply_with_fallback(content, customer_phone=sender_id, chat_history=recent_msgs, image_path=image_path, voice_path=voice_path)
                         if reply:
                             sent = send_messenger_message(sender_id, reply)
                             if sent:
@@ -1724,7 +1770,7 @@ def webhook():
                                 recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
                                 recent_msgs.reverse()
                                 
-                                reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, voice_path=voice_path)
+                                reply = _ai_reply_with_fallback(content, customer_phone=phone, chat_history=recent_msgs, voice_path=voice_path)
                                 if reply:
                                     sent = send_whatsapp_message(phone, reply)
                                     if sent:
@@ -1743,7 +1789,7 @@ def webhook():
                         recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (phone,), fetchall=True) or []
                         recent_msgs.reverse()
 
-                        reply = get_optimized_gemini_reply(content, customer_phone=phone, chat_history=recent_msgs, image_path=image_path)
+                        reply = _ai_reply_with_fallback(content, customer_phone=phone, chat_history=recent_msgs, image_path=image_path)
 
                         if reply:
                             sent = send_whatsapp_message(phone, reply)
@@ -2518,8 +2564,8 @@ def messenger_webhook():
                     recent_msgs = db_query("SELECT * FROM messages WHERE from_number=? ORDER BY id DESC LIMIT 6", (sender_id,), fetchall=True) or []
                     recent_msgs.reverse()
 
-                    # Generate AI reply
-                    reply = get_optimized_gemini_reply(
+                    # Generate AI reply (advanced engine with fallback)
+                    reply = _ai_reply_with_fallback(
                         content,
                         customer_phone=sender_id,
                         chat_history=recent_msgs,
@@ -2652,7 +2698,7 @@ Admin Directive (শুধু মনে রেখো):
 - {sender_name} এর নাম ব্যবহার করো.
 - Admin হলে সম্মান দেখাও.
 - জরুরি বিষয়ে "@{on_duty}" মেনশন করো."""
-        reply = get_optimized_gemini_reply(user_message=prompt, customer_phone="group_team")
+        reply = _ai_reply_with_fallback(user_message=prompt, customer_phone="group_team")
         return jsonify({"reply": reply})
 
     elif group_type == "orders":
@@ -2670,7 +2716,7 @@ PRICE: <দাম বা 0>
 
 যদি অর্ডার না হয়: NOT_AN_ORDER"""
 
-        ai_result = get_optimized_gemini_reply(user_message=prompt, customer_phone="group_orders")
+        ai_result = _ai_reply_with_fallback(user_message=prompt, customer_phone="group_orders")
         if "NOT_AN_ORDER" in ai_result:
             return jsonify({"reply": ""})
 
@@ -2721,7 +2767,7 @@ def business_webhook():
     recent.reverse()
 
     image_path = media_data if media_data else None
-    reply = get_optimized_gemini_reply(body, customer_phone=customer_phone, chat_history=recent, image_path=image_path)
+    reply = _ai_reply_with_fallback(body, customer_phone=customer_phone, chat_history=recent, image_path=image_path)
 
     if reply:
         db_query("INSERT INTO messages (from_number, content, direction, agent_id) VALUES (?, ?, 'outbound', 'gemini_bridge')", (customer_phone, reply), commit=True)
@@ -3117,5 +3163,386 @@ def admin_complain_reply(cid):
     return redirect("/admin/complains")
 
 
+
+# =====================================================================
+# ADVANCED AI ENGINE ENDPOINTS (Hermes-Agent Inspired)
+# =====================================================================
+
+@app.route("/admin/ai-engine")
+def admin_ai_engine():
+    """AI Engine dashboard - shows provider stats and configuration"""
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    
+    ai_status = {
+        "loaded": _AI_ENGINE_LOADED,
+        "providers": [],
+        "tools": 0,
+        "version": "v3.0-hermes"
+    }
+    
+    if _AI_ENGINE_LOADED:
+        try:
+            from ai_core import get_llm_engine, tool_registry
+            engine = get_llm_engine()
+            ai_status["providers"] = engine.get_available_providers()
+            ai_status["stats"] = engine.get_stats()
+            ai_status["tools"] = len(tool_registry._tools)
+            ai_status["tool_list"] = list(tool_registry._tools.keys())
+        except Exception as e:
+            ai_status["error"] = str(e)
+    
+    env_keys = {
+        "GEMINI_KEY": bool(os.environ.get("GEMINI_KEY", "")),
+        "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY", "")),
+        "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY", "")),
+        "DEEPSEEK_API_KEY": bool(os.environ.get("DEEPSEEK_API_KEY", "")),
+        "GROQ_API_KEY": bool(os.environ.get("GROQ_API_KEY", "")),
+    }
+    
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Engine Status</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial;background:#0f172a;color:#e2e8f0;font-size:14px;min-height:100vh}
+.container{max-width:900px;margin:0 auto;padding:30px}
+.card{background:#1e293b;padding:25px;border-radius:12px;margin-bottom:20px;border:1px solid #334155}
+h1{font-size:24px;margin-bottom:5px;color:#818cf8}
+h2{font-size:18px;margin-bottom:15px;color:#cbd5e1}
+.status-ok{color:#4ade80;font-weight:bold}
+.status-error{color:#f87171;font-weight:bold}
+.status-warn{color:#fbbf24;font-weight:bold}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px}
+.stat-box{background:#0f172a;padding:15px;border-radius:8px;text-align:center}
+.stat-box h3{font-size:12px;color:#94a3b8;text-transform:uppercase;margin-bottom:5px}
+.stat-box .value{font-size:28px;font-weight:bold;color:#818cf8}
+.stat-box .sub{font-size:11px;color:#64748b;margin-top:3px}
+.provider-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #334155}
+.provider-name{font-weight:600;color:#818cf8}
+.provider-stats{font-size:12px;color:#94a3b8}
+.badge{padding:3px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+.badge-active{background:#065f46;color:#4ade80}
+.badge-inactive{background:#451a1a;color:#f87171}
+.tool-tag{display:inline-block;padding:4px 10px;margin:3px;background:#1e3a5f;color:#60a5fa;border-radius:15px;font-size:12px}
+.nav{margin-bottom:20px}.nav a{color:#64748b;text-decoration:none;font-size:13px;margin-right:15px}
+.nav a:hover{color:#818cf8}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:10px;text-align:left;border-bottom:1px solid #334155}
+th{color:#94a3b8;font-size:11px;text-transform:uppercase}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a> | <a href="/admin/ai-engine">🔄 Refresh</a></div>
+<h1>🧠 AI Engine Status</h1>
+<p style="color:#94a3b8;margin-bottom:25px">Multi-LLM Provider Engine (Hermes-Agent inspired v3.0)</p>
+
+<div class="grid">
+    <div class="stat-box">
+        <h3>Engine Status</h3>
+        <div class="value"><span class="{{ 'status-ok' if status.loaded else 'status-error' }}">{{ '✅ Active' if status.loaded else '❌ Fallback' }}</span></div>
+        <div class="sub">{{ status.version }}</div>
+    </div>
+    <div class="stat-box">
+        <h3>Providers</h3>
+        <div class="value">{{ status.providers|length }}</div>
+        <div class="sub">Available LLM backends</div>
+    </div>
+    <div class="stat-box">
+        <h3>AI Tools</h3>
+        <div class="value">{{ status.tools }}</div>
+        <div class="sub">Function-calling tools</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🔌 API Keys Configured</h2>
+    {% for key, val in env_keys.items() %}
+    <div class="provider-row">
+        <span class="provider-name">{{ key }}</span>
+        <span class="badge {{ 'badge-active' if val else 'badge-inactive' }}">{{ 'Configured' if val else 'Missing' }}</span>
+    </div>
+    {% endfor %}
+</div>
+
+{% if status.stats %}
+<div class="card">
+    <h2>📊 Provider Performance</h2>
+    <table>
+        <tr><th>Provider</th><th>Calls</th><th>Success</th><th>Failures</th><th>Avg Latency</th><th>Success Rate</th></tr>
+        {% for pname, pstats in status.stats.items() %}
+        <tr>
+            <td class="provider-name">{{ pname }}</td>
+            <td>{{ pstats.calls }}</td>
+            <td>{{ pstats.successes }}</td>
+            <td>{{ pstats.failures }}</td>
+            <td>{{ pstats.avg_latency_ms }}ms</td>
+            <td><span class="{{ 'status-ok' if pstats.success_rate > 80 else 'status-warn' }}">{{ pstats.success_rate }}%</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+{% if status.tool_list %}
+<div class="card">
+    <h2>🛠️ Registered AI Tools</h2>
+    {% for tool in status.tool_list %}
+    <span class="tool-tag">{{ tool }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if status.error %}
+<div class="card" style="border-color:#f87171">
+    <h2 style="color:#f87171">⚠️ Error</h2>
+    <p>{{ status.error }}</p>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>📝 Configuration Guide</h2>
+    <p style="color:#94a3b8;line-height:1.8">
+        Set these environment variables to enable multi-provider AI:<br><br>
+        <code style="background:#0f172a;padding:2px 6px;border-radius:4px">GEMINI_KEY=...</code> — Google Gemini (Primary)<br>
+        <code style="background:#0f172a;padding:2px 6px;border-radius:4px">OPENAI_API_KEY=sk-...</code> — OpenAI GPT-4o/GPT-4o-mini<br>
+        <code style="background:#0f172a;padding:2px 6px;border-radius:4px">ANTHROPIC_API_KEY=sk-ant-...</code> — Claude 3.5 Haiku/Sonnet<br>
+        <code style="background:#0f172a;padding:2px 6px;border-radius:4px">DEEPSEEK_API_KEY=sk-...</code> — DeepSeek Chat<br>
+        <code style="background:#0f172a;padding:2px 6px;border-radius:4px">GROQ_API_KEY=gsk_...</code> — Groq (fast Llama/Mixtral)<br><br>
+        The engine auto-detects available providers and fails over automatically if the primary fails.
+    </p>
+</div>
+
+</div></body></html>
+""", status=ai_status, env_keys=env_keys)
+
+
+@app.route("/api/ai-stats")
+def api_ai_stats():
+    """API endpoint for AI engine statistics"""
+    if not _AI_ENGINE_LOADED:
+        return jsonify({"loaded": False, "error": "AI engine not loaded"})
+    try:
+        from ai_core import get_llm_engine, tool_registry
+        engine = get_llm_engine()
+        return jsonify({
+            "loaded": True,
+            "providers": engine.get_available_providers(),
+            "stats": engine.get_stats(),
+            "tools": len(tool_registry._tools),
+            "tool_names": list(tool_registry._tools.keys())
+        })
+    except Exception as e:
+        return jsonify({"loaded": False, "error": str(e)})
+
+
+# ─── GitHub Auto-Deploy Webhook ───
+# Alternative to GitHub Actions — just add this URL as a GitHub webhook
+# Settings → Webhooks → Payload URL: https://your-domain.com/deploy-webhook
+# Content type: application/json, Secret: (set DEPLOY_WEBHOOK_SECRET env var)
+
+DEPLOY_WEBHOOK_SECRET = os.environ.get("DEPLOY_WEBHOOK_SECRET", "dhaka-deploy-2026")
+
+@app.route("/deploy-webhook", methods=["POST"])
+def deploy_webhook():
+    """GitHub webhook receiver — auto-deploys on push to main"""
+    import hmac, hashlib, subprocess
+    
+    # Verify signature
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if DEPLOY_WEBHOOK_SECRET:
+        raw_body = request.get_data()
+        expected = "sha256=" + hmac.new(
+            DEPLOY_WEBHOOK_SECRET.encode(), raw_body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            logger.warning("Deploy webhook: invalid signature")
+            return jsonify({"error": "Invalid signature"}), 403
+    
+    # Parse the event
+    event = request.headers.get("X-GitHub-Event", "")
+    data = request.get_json(silent=True) or {}
+    
+    if event != "push":
+        return jsonify({"message": f"Ignored event: {event}"}), 200
+    
+    # Check branch
+    ref = data.get("ref", "")
+    if "main" not in ref and "master" not in ref:
+        return jsonify({"message": f"Ignored branch: {ref}"}), 200
+    
+    # Trigger deploy in background
+    logger.info(f"🚀 Deploy webhook triggered by push to {ref}")
+    
+    try:
+        deploy_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deploy.sh")
+        if os.path.exists(deploy_script):
+            subprocess.Popen(
+                ["bash", deploy_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            return jsonify({"message": "✅ Deploy triggered! Check Telegram for status."}), 200
+        else:
+            return jsonify({"error": "deploy.sh not found"}), 500
+    except Exception as e:
+        logger.error(f"Deploy trigger failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ─── Telegram Webhook ───
+@app.route("/tg-webhook", methods=["POST"])
+def tg_webhook():
+    """Handle Telegram webhook updates"""
+    try:
+        from telegram_connector import get_telegram_bot
+        data = request.get_json(force=True)
+        bot = get_telegram_bot()
+        result = bot.handle_webhook_update(data)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"TG webhook error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/telegram-status")
+def api_telegram_status():
+    """Check Telegram bot status"""
+    try:
+        from telegram_connector import TELEGRAM_TOKEN, _telegram_bot
+        return jsonify({
+            "configured": bool(TELEGRAM_TOKEN),
+            "token_prefix": TELEGRAM_TOKEN[:8] + "..." if TELEGRAM_TOKEN else "",
+            "bot_loaded": _telegram_bot is not None,
+            "polling_active": _telegram_bot._running if _telegram_bot else False,
+            "webhook_url": os.environ.get("TELEGRAM_WEBHOOK_URL", ""),
+            "admin_tg_ids": os.environ.get("ADMIN_TELEGRAM_IDS", ""),
+            "admin_phones": os.environ.get("ADMIN_PHONES", "")
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/api/improvement-stats")
+def api_improvement_stats():
+    """Self-improvement engine statistics and report"""
+    try:
+        from self_improve import get_improvement_engine
+        engine = get_improvement_engine(db_query_fn=db_query)
+        
+        metrics = engine.generate_prompt_improvements()
+        gaps = engine.detect_knowledge_gaps()
+        patterns = engine.get_best_patterns(limit=10, min_success=1)
+        pending_faqs = engine.get_pending_faqs(min_frequency=1)
+        
+        return jsonify({
+            "loaded": True,
+            "conversation_count": engine.conversation_count,
+            "total_outcomes": engine.total_convos,
+            "sales_from_convos": engine.sales_from_convos,
+            "patterns_learned": len(engine.patterns),
+            "auto_faqs_generated": len(engine.auto_faqs),
+            "unknown_queries": len(engine.unknown_queries),
+            "metrics": metrics.get("metrics", {}),
+            "knowledge_gaps": gaps,
+            "top_patterns": patterns,
+            "pending_faqs": pending_faqs,
+            "suggested_actions": metrics.get("suggested_actions", []),
+            "suggested_prompt": metrics.get("suggested_prompt_additions", "")
+        })
+    except Exception as e:
+        return jsonify({"loaded": False, "error": str(e)})
+
+
+@app.route("/admin/ai-test", methods=["GET", "POST"])
+def admin_ai_test():
+    """Test the AI engine directly"""
+    if not session.get("logged_in"):
+        return redirect("/admin/login")
+    
+    result = None
+    if request.method == "POST":
+        test_msg = request.form.get("message", "").strip()
+        provider = request.form.get("provider", "auto")
+        if test_msg:
+            try:
+                if _AI_ENGINE_LOADED:
+                    reply = _ai_reply_with_fallback(test_msg, customer_phone="test_user")
+                    result = {"message": test_msg, "reply": reply, "provider": "advanced"}
+                else:
+                    reply = get_optimized_gemini_reply(test_msg, customer_phone="test_user")
+                    result = {"message": test_msg, "reply": reply, "provider": "gemini-fallback"}
+            except Exception as e:
+                result = {"message": test_msg, "reply": f"Error: {str(e)}", "provider": "error"}
+    
+    providers = []
+    if _AI_ENGINE_LOADED:
+        try:
+            from ai_core import get_llm_engine
+            engine = get_llm_engine()
+            providers = engine.get_available_providers()
+        except:
+            pass
+    
+    return render_template_string("""
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Test Console</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial;background:#0f172a;color:#e2e8f0;font-size:14px}
+.container{max-width:700px;margin:30px auto;padding:20px}
+.card{background:#1e293b;padding:20px;border-radius:12px;margin-bottom:15px;border:1px solid #334155}
+h1{font-size:20px;color:#818cf8;margin-bottom:20px}
+label{display:block;margin-bottom:5px;color:#94a3b8;font-size:12px}
+textarea,input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:13px;margin-bottom:10px}
+button{padding:10px 20px;background:#818cf8;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:bold}
+button:hover{background:#6366f1}
+.result-box{background:#0f172a;padding:15px;border-radius:8px;margin-top:10px;white-space:pre-wrap;line-height:1.6}
+.result-label{color:#94a3b8;font-size:11px;margin-bottom:8px}
+.nav{margin-bottom:15px}.nav a{color:#64748b;text-decoration:none;font-size:13px}
+</style></head><body><div class="container">
+<div class="nav"><a href="/admin">← Dashboard</a> | <a href="/admin/ai-engine">AI Engine</a></div>
+<div class="card">
+<h1>🧪 AI Test Console</h1>
+<form method="POST">
+    <label>Test Message (in Bangla)</label>
+    <textarea name="message" rows="3" placeholder="যেমন: লিস্ট দেখাও, অথবা: একটা পাঞ্জাবি লাগবে">{{ result.message if result else '' }}</textarea>
+    <label>Provider (auto = all available with failover)</label>
+    <select name="provider">
+        <option value="auto">Auto (Best Available)</option>
+        {% for p in providers %}
+        <option value="{{ p }}">{{ p }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit">🚀 Test AI</button>
+</form>
+{% if result %}
+<div class="result-box">
+    <div class="result-label">📥 Input: {{ result.message }}</div>
+    <div class="result-label">🧠 Engine: {{ result.provider }}</div>
+    <div style="margin-top:10px;color:#818cf8">🤖 AI Reply:</div>
+    <div style="margin-top:5px">{{ result.reply }}</div>
+</div>
+{% endif %}
+</div>
+</div></body></html>
+""", result=result, providers=providers)
+
+
+# ─── Telegram Auto-Start ───
+def _start_telegram():
+    """Start Telegram bot in background if configured"""
+    try:
+        from telegram_connector import start_telegram_if_configured
+        started = start_telegram_if_configured(
+            get_ai_reply_fn=_ai_reply_with_fallback,
+            db_query_fn=db_query
+        )
+        if started:
+            logger.info("✅ Telegram bot auto-started on app launch")
+        return started
+    except Exception as e:
+        logger.warning(f"Telegram auto-start failed: {e}")
+        return False
+
+
 if __name__ == "__main__":
+    _start_telegram()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
