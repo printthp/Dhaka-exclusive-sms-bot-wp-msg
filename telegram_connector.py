@@ -588,168 +588,189 @@ class TelegramBot:
     
     def process_message(self, msg: dict) -> Optional[str]:
         """Process an incoming Telegram message — ADMIN ONLY for AI, rest redirected to SMS"""
-        if "message" not in msg:
-            return None
-        
-        message = msg["message"]
-        chat_id = message.get("chat", {}).get("id")
-        user_id = message.get("from", {}).get("id")
-        text = message.get("text", "").strip()
-        username = message.get("from", {}).get("username", "")
-        first_name = message.get("from", {}).get("first_name", "")
-        
-        if not chat_id:
-            return None
-        
-        # ── PHOTO HANDLING: Use Gemini Vision ──
-        photo = message.get("photo")
-        document = message.get("document")
-        if (photo or document) and not text:
-            # Get largest photo
-            if photo:
-                file_id = photo[-1].get("file_id")
-            else:
-                file_id = document.get("file_id")
+        try:
+            if "message" not in msg:
+                return None
             
-            logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: [PHOTO]")
+            message = msg["message"]
+            chat_id = message.get("chat", {}).get("id")
+            user_id = message.get("from", {}).get("id")
+            text = message.get("text", "").strip()
+            username = message.get("from", {}).get("username", "")
+            first_name = message.get("from", {}).get("first_name", "")
             
-            # Only admins can get vision analysis (per security)
-            if is_admin:
-                # Get file from Telegram
-                file_info = self._api("getFile", {"file_id": file_id})
-                if file_info.get("ok"):
-                    file_path = file_info["result"]["file_path"]
-                    file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
-                    try:
-                        img_data = requests.get(file_url, timeout=30).content
-                        # Use AI agent's vision
-                        from ai_agent import ai_agent_singleton
-                        if ai_agent_singleton and hasattr(ai_agent_singleton, 'analyze_image'):
-                            analysis = ai_agent_singleton.analyze_image(img_data)
-                            reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
+            if not chat_id:
+                return None
+            
+            sender_name = username or first_name or str(user_id)
+            # Calculate is_admin ONCE at the top so it's available everywhere below
+            is_admin = self._is_admin_tg(user_id)
+            logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: {text[:80] if text else '[non-text]'}")
+            
+            # ── PHOTO HANDLING: Use Gemini Vision (admin only for analysis) ──
+            photo = message.get("photo")
+            document = message.get("document")
+            if (photo or document) and not text:
+                file_id = None
+                if photo:
+                    file_id = photo[-1].get("file_id")
+                elif document:
+                    file_id = document.get("file_id")
+                
+                if file_id:
+                    if is_admin:
+                        # Admin: full vision analysis
+                        file_info = self._api("getFile", {"file_id": file_id})
+                        if file_info.get("ok"):
+                            file_path = file_info["result"]["file_path"]
+                            file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+                            try:
+                                img_data = requests.get(file_url, timeout=30).content
+                                # Inline Gemini Vision call
+                                from app import GEMINI_API_KEY
+                                import base64 as _b64
+                                img_b64 = _b64.b64encode(img_data).decode('utf-8')
+                                for model in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest']:
+                                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+                                    payload = {"contents": [{"parts": [
+                                        {"text": "এই ছবিটি বিশ্লেষণ করুন। পণ্য হলে নাম, ধরন, আনুমানিক দাম বলুন। সংক্ষেপে বাংলায়।"},
+                                        {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+                                    ]}]}
+                                    r = requests.post(url, json=payload, timeout=30)
+                                    if r.status_code == 200:
+                                        result = r.json()
+                                        if result.get("candidates"):
+                                            analysis = result["candidates"][0]["content"]["parts"][0]["text"]
+                                            reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
+                                            self.send_message(chat_id, reply)
+                                            return reply
+                                self.send_message(chat_id, "❌ Vision API-তে সমস্যা হচ্ছে।")
+                                return None
+                            except Exception as e:
+                                logger.error(f"Photo analysis error: {e}")
+                                self.send_message(chat_id, f"❌ ছবি প্রসেস করতে সমস্যা: {str(e)[:200]}")
+                                return None
                         else:
-                            # Inline call
-                            from ai_agent import AI_Image
-                            analysis = AI_Image(img_data).analyze()
-                            reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
-                        self.send_message(chat_id, reply)
-                        return reply
-                    except Exception as e:
-                        logger.error(f"Photo analysis error: {e}")
-                        self.send_message(chat_id, f"❌ ছবি প্রসেস করতে সমস্যা: {str(e)}")
-                        return None
+                            self.send_message(chat_id, "❌ ছবি আনতে সমস্যা।")
+                            return None
+                    else:
+                        # Non-admin photo: redirect
+                        admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+                        if admin_phone.startswith("880"):
+                            admin_phone = "0" + admin_phone[3:]
+                        self.send_message(chat_id, 
+                            f"📸 ছবি পেয়েছি! অর্ডারের জন্য যোগাযোগ করুন:\n"
+                            f"📱 *{admin_phone}*")
+                        return "photo_redirect"
+                return None
+            
+            if not text:
+                return None
+            
+            # Track chat_id for admin (so we can send them updates later)
+            if is_admin:
+                self._known_admin_chats.add(int(chat_id))
+            
+            # ── UNIVERSAL: /start welcome (works for anyone) ──
+            if text in ("/start", "/start@ArshibyabidBot"):
+                if is_admin:
+                    welcome = (
+                        f"🟢 আসসালামু আলাইকুম *{first_name or 'অ্যাডমিন'} সাহেব!*\n\n"
+                        f"আমি *ArShi* — আপনার *Dhaka Exclusive* বটের AI assistant। 😊\n\n"
+                        f"📚 *আমার কমান্ডসমূহ:*\n"
+                        f"• `!help` — সব কমান্ড দেখুন\n"
+                        f"• `!teach <প্রশ্ন> | <উত্তর>` — আমাকে শেখান\n"
+                        f"• `!stats` — কত শিখেছি দেখুন\n"
+                        f"• `!patterns` — শেখা প্যাটার্ন\n"
+                        f"• `!faq` — অটো FAQ\n"
+                        f"• `!ping` — আমি সচল কিনা\n\n"
+                        f"আমাকে যেকোনো প্রশ্ন করুন, আমি উত্তর দেবো! 🚀"
+                    )
                 else:
-                    self.send_message(chat_id, "❌ ছবি আনতে সমস্যা হয়েছে।")
-                    return None
-            else:
-                # Non-admin: redirect
-                self.send_message(chat_id, "📸 ছবি পেয়েছি! অর্ডারের জন্য 8801717121068 নম্বরে SMS করুন।")
-                return "photo_redirect"
-        
-        if not text:
+                    # CUSTOMER gets the ArShi intro
+                    admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+                    if admin_phone.startswith("880"):
+                        admin_phone = "0" + admin_phone[3:]
+                    welcome = (
+                        f"👋 আসসালামু আলাইকুম! *আমি ArShi* 😊\n\n"
+                        f"আমি *Dhaka Exclusive*-র AI assistant।\n"
+                        f"আপনাকে কীভাবে সাহায্য করতে পারি?\n\n"
+                        f"🛍️ পণ্য সম্পর্কে জানতে\n"
+                        f"💰 দাম জানতে\n"
+                        f"📦 অর্ডার করতে\n"
+                        f"🚚 ডেলিভারি সম্পর্কে\n\n"
+                        f"আমার সাথে কথা বলুন বা অর্ডারের জন্য SMS করুন:\n"
+                        f"📱 *{admin_phone}*\n\n"
+                        f"ধন্যবাদ! 🙏"
+                    )
+                self.send_message(chat_id, welcome)
+                return welcome
+            
+            # ── ADMIN: Full access (training commands + AI pipeline) ──
+            if is_admin:
+                # Check for training commands first
+                cmd_reply = self.trainer.handle_command(
+                    text, str(chat_id), 
+                    get_ai_reply_fn=self.get_ai_reply,
+                    is_telegram=True
+                )
+                if cmd_reply:
+                    self.send_message(chat_id, cmd_reply)
+                    return cmd_reply
+                
+                # Route to AI pipeline
+                if self.get_ai_reply:
+                    try:
+                        ai_reply = self.get_ai_reply(
+                            user_message=text,
+                            customer_phone=f"tg_{chat_id}",
+                            chat_history=None
+                        )
+                        if ai_reply:
+                            clean_reply = self._clean_for_telegram(ai_reply)
+                            self.send_message(chat_id, clean_reply)
+                            return ai_reply
+                    except Exception as e:
+                        logger.error(f"AI pipeline error: {e}")
+                
+                fallback = "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনার সাথে যোগাযোগ করবে। 🙏"
+                self.send_message(chat_id, fallback)
+                return fallback
+            
+            # ── NON-ADMIN: Redirect to SMS/WhatsApp ──
+            admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+            display_phone = admin_phone
+            if display_phone.startswith("880"):
+                display_phone = "0" + display_phone[3:]
+            redirect_msg = (
+                f"👋 আসসালামু আলাইকুম! আমি *ArShi* 😊\n\n"
+                f"আমি *Dhaka Exclusive*-র AI assistant।\n"
+                f"আপনার পণ্য, দাম, অর্ডার বা ডেলিভারি সংক্রান্ত যেকোনো প্রশ্নে\n"
+                f"আমি সাহায্য করতে পারি!\n\n"
+                f"অর্ডার বা বিশেষ সাহায্যের জন্য যোগাযোগ করুন:\n"
+                f"📱 *WhatsApp/SMS:* {display_phone}\n\n"
+                f"আমার সাথে কথা বলতে থাকুন! 🙏"
+            )
+            # Also accept !help/!ping from anyone (public commands)
+            if text in ("!ping", "!পিং"):
+                self.send_message(chat_id, "🏓 *Pong!* বট সচল আছে ✅\n\nঅর্ডারের জন্য SMS করুন।")
+                return "pong"
+            if text in ("!help", "!হেল্প", "!সাহায্য"):
+                self.send_message(chat_id, redirect_msg)
+                return "help"
+            
+            self.send_message(chat_id, redirect_msg)
+            logger.info(f"TG non-admin {user_id} redirected to SMS")
+            return redirect_msg
+        except Exception as e:
+            logger.error(f"process_message top-level error: {e}\n  msg: {str(msg)[:200]}")
+            try:
+                if 'chat_id' in locals() and chat_id:
+                    self.send_message(chat_id, "❌ দুঃখিত, মেসেজ প্রসেস করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।")
+            except:
+                pass
             return None
 
-        sender_name = username or first_name or str(user_id)
-        is_admin = self._is_admin_tg(user_id)
-        logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: {text[:80]}")
-
-        # ── UNIVERSAL: /start welcome (works for anyone) ──
-        if text in ("/start", "/start@ArshibyabidBot"):
-            if is_admin:
-                welcome = (
-                    f"🟢 আসসালামু আলাইকুম *{first_name or 'অ্যাডমিন'} সাহেব!*\n\n"
-                    f"আমি *ArShi* — আপনার *Dhaka Exclusive* বটের AI assistant। 😊\n\n"
-                    f"📚 *আমার কমান্ডসমূহ:*\n"
-                    f"• `!help` — সব কমান্ড দেখুন\n"
-                    f"• `!teach <প্রশ্ন> | <উত্তর>` — আমাকে শেখান\n"
-                    f"• `!stats` — কত শিখেছি দেখুন\n"
-                    f"• `!patterns` — শেখা প্যাটার্ন\n"
-                    f"• `!faq` — অটো FAQ\n"
-                    f"• `!ping` — আমি সচল কিনা\n\n"
-                    f"আমাকে যেকোনো প্রশ্ন করুন, আমি উত্তর দেবো! 🚀"
-                )
-            else:
-                # CUSTOMER gets the ArShi intro
-                admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
-                if admin_phone.startswith("880"):
-                    admin_phone = "0" + admin_phone[3:]
-                welcome = (
-                    f"👋 আসসালামু আলাইকুম! *আমি ArShi* 😊\n\n"
-                    f"আমি *Dhaka Exclusive*-র AI assistant।\n"
-                    f"আপনাকে কীভাবে সাহায্য করতে পারি?\n\n"
-                    f"🛍️ পণ্য সম্পর্কে জানতে\n"
-                    f"💰 দাম জানতে\n"
-                    f"📦 অর্ডার করতে\n"
-                    f"🚚 ডেলিভারি সম্পর্কে\n\n"
-                    f"আমার সাথে কথা বলুন বা অর্ডারের জন্য SMS করুন:\n"
-                    f"📱 *{admin_phone}*\n\n"
-                    f"ধন্যবাদ! 🙏"
-                )
-            self.send_message(chat_id, welcome)
-            return welcome
-
-        # Track chat_id for admin (so we can send them updates later)
-        if is_admin:
-            self._known_admin_chats.add(int(chat_id))
-        
-        # ── ADMIN: Full access (training commands + AI pipeline) ──
-        if is_admin:
-            # Check for training commands first
-            cmd_reply = self.trainer.handle_command(
-                text, str(chat_id), 
-                get_ai_reply_fn=self.get_ai_reply,
-                is_telegram=True
-            )
-            if cmd_reply:
-                self.send_message(chat_id, cmd_reply)
-                return cmd_reply
-            
-            # Route to AI pipeline
-            if self.get_ai_reply:
-                try:
-                    ai_reply = self.get_ai_reply(
-                        user_message=text,
-                        customer_phone=f"tg_{chat_id}",
-                        chat_history=None
-                    )
-                    if ai_reply:
-                        clean_reply = self._clean_for_telegram(ai_reply)
-                        self.send_message(chat_id, clean_reply)
-                        return ai_reply
-                except Exception as e:
-                    logger.error(f"AI pipeline error: {e}")
-            
-            fallback = "ধন্যবাদ! আমাদের টিম শীঘ্রই আপনার সাথে যোগাযোগ করবে। 🙏"
-            self.send_message(chat_id, fallback)
-            return fallback
-        
-        # ── NON-ADMIN: Redirect to SMS/WhatsApp ──
-        admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
-        # Format for display: 8801717121068 → 01717121068
-        display_phone = admin_phone
-        if display_phone.startswith("880"):
-            display_phone = "0" + display_phone[3:]
-        redirect_msg = (
-            f"👋 আসসালামু আলাইকুম! আমি *ArShi* 😊\n\n"
-            f"আমি *Dhaka Exclusive*-র AI assistant।\n"
-            f"আপনার পণ্য, দাম, অর্ডার বা ডেলিভারি সংক্রান্ত যেকোনো প্রশ্নে\n"
-            f"আমি সাহায্য করতে পারি!\n\n"
-            f"অর্ডার বা বিশেষ সাহায্যের জন্য যোগাযোগ করুন:\n"
-            f"📱 *WhatsApp/SMS:* {display_phone}\n\n"
-            f"আমার সাথে কথা বলতে থাকুন! 🙏"
-        )
-        # Also accept !help/!ping from anyone (public commands)
-        if text in ("!ping", "!পিং"):
-            self.send_message(chat_id, "🏓 *Pong!* বট সচল আছে ✅\n\nঅর্ডারের জন্য SMS করুন।")
-            return "pong"
-        if text in ("!help", "!হেল্প", "!সাহায্য"):
-            self.send_message(chat_id, redirect_msg)
-            return "help"
-        
-        self.send_message(chat_id, redirect_msg)
-        logger.info(f"TG non-admin {user_id} redirected to SMS")
-        return redirect_msg
-    
     def _clean_for_telegram(self, text: str) -> str:
         """Clean markdown for Telegram compatibility"""
         # Remove WhatsApp-specific formatting
