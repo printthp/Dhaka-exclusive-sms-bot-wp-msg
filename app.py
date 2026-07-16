@@ -3081,7 +3081,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px;text
 <tr><th>ID</th><th>Customer</th><th>Phone</th><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th>Group</th><th>Status</th><th>Date</th><th>Action</th></tr>
 {% for o in orders %}
 <tr>
-    <td>{{ o.id }}</td><td>{{ o.customer_name or '-' }}</td><td>{{ o.phone or '-' }}</td><td>{{ o.product_name }}</td>
+    <td>{{ o.id }}</td><td>{{ o.customer_name or '-' }}</td><td>{{ o.phone or '-' }}</td><td>{{ o.name }}</td>
     <td>{{ o.quantity }}</td><td>{{ o.price }}</td><td>{{ o.total }}৳</td><td>{{ o.group_name }}</td>
     <td>{{ o.status }}</td><td>{{ o.created_at }}</td>
     <td>

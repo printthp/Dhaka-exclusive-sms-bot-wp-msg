@@ -47,6 +47,14 @@ retry_strategy = Retry(
 adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
 REQUESTS_SESSION.mount("https://", adapter)
 REQUESTS_SESSION.mount("http://", adapter)
+# Force IPv4 only (Hostinger VPS has IPv6 routing issues)
+import socket
+_orig_getaddrinfo = socket.getaddrinfo
+def _ipv4_getaddrinfo(host, *args, **kwargs):
+    res = _orig_getaddrinfo(host, *args, **kwargs)
+    return [r for r in res if r[0] == socket.AF_INET]
+socket.getaddrinfo = _ipv4_getaddrinfo
+
 
 # ============================================================================
 # CONFIGURATION
