@@ -17,6 +17,12 @@ from flask import Flask, request, jsonify, render_template, render_template_stri
 from xhtml2pdf import pisa
 from werkzeug.utils import secure_filename
 
+# =====================================================================
+# LOGGING SETUP (must be before any logger usage)
+# =====================================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
+logger = logging.getLogger(__name__)
+
 # Advanced AI Engine (Hermes-Agent inspired)
 try:
     from ai_agent import get_advanced_ai_reply, get_sales_agent as _get_ai_agent
@@ -31,8 +37,6 @@ except Exception as _ai_load_err:
 # =====================================================================
 # SYSTEM & STORAGE SETUP (Render Persistence)
 # =====================================================================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
-logger = logging.getLogger(__name__)
 
 if os.path.exists("/opt/render/project/src/data"):
     DB_PATH = "/opt/render/project/src/data/bot_v7_ultimate.db"
