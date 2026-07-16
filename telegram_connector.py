@@ -34,6 +34,20 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# Reusable session with connection pooling + retry
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+REQUESTS_SESSION = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=0.5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "POST", "OPTIONS"]
+)
+adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
+REQUESTS_SESSION.mount("https://", adapter)
+REQUESTS_SESSION.mount("http://", adapter)
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -551,7 +565,7 @@ class TelegramBot:
             if files:
                 r = requests.post(url, data=data or {}, files=files, timeout=30)
             else:
-                r = requests.post(url, json=data or {}, timeout=15)
+                r = requests.post(url, json=data or {}, timeout=30)
             return r.json()
         except Exception as e:
             logger.error(f"Telegram API error ({method}): {e}")
