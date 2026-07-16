@@ -686,26 +686,27 @@ class TelegramBot:
                             self.send_message(chat_id, "❌ ছবি ডাউনলোড করা যাচ্ছে না।")
                             return None
 
-                        # Inline Gemini Vision call
                         from app import GEMINI_API_KEY
                         import base64 as _b64
                         img_b64 = _b64.b64encode(img_data).decode('utf-8')
 
-                        # Use caption as the question, default if no caption
-                        user_q = text or "এই ছবিটি বিশ্লেষণ করুন।"
-                        prompt = (
-                            f"আপনি ArShi, Dhaka Exclusive হাউজওয়্যার শপের AI sales assistant।\n"
-                            f"Customer প্রশ্ন: {user_q}\n\n"
-                            f"ছবিটি বিশ্লেষণ করে বাংলায় সংক্ষেপে উত্তর দিন।\n"
-                            f"পণ্য হলে: নাম, ধরন, বৈশিষ্ট্য, আনুমানিক দাম (BDT) বলুন।\n"
-                            f"অর্ডার বা বিস্তারিত জানতে admin এ পাঠান।"
+                        # ── STAGE 1: Gemini Vision → product keywords + Bengali description ──
+                        kw_prompt = (
+                            "Look at this product image carefully.\n\n"
+                            "Return a JSON object with exactly these fields:\n"
+                            "{\n"
+                            '  "english_name": "short product name in English (3-6 words)",\n'
+                            '  "keywords": "comma-separated 5-8 English keywords for catalog search",\n'
+                            '  "bengali_description": "1-2 sentence description in Bengali for the customer"\n'
+                            "}\n\n"
+                            "Return ONLY the JSON object, no other text."
                         )
-
-                        analysis = None
+                        _bt = chr(96) * 3
+                        kw_data = None
                         for model in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest']:
                             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
                             payload = {"contents": [{"parts": [
-                                {"text": prompt},
+                                {"text": kw_prompt},
                                 {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
                             ]}]}
                             try:
@@ -713,33 +714,174 @@ class TelegramBot:
                                 if r.status_code == 200:
                                     result = r.json()
                                     if result.get("candidates"):
-                                        analysis = result["candidates"][0]["content"]["parts"][0]["text"]
-                                        break
+                                        _txt = result["candidates"][0]["content"]["parts"][0]["text"]
+                                        # Strip markdown fences
+                                        _txt = _txt.strip()
+                                        if _txt.startswith(_bt):
+                                            _txt = _txt[3:]
+                                        if _txt.endswith(_bt):
+                                            _txt = _txt[:-3]
+                                        _txt = _txt.strip()
+                                        if _txt.lower().startswith("json"):
+                                            _txt = _txt[4:].strip()
+                                        try:
+                                            kw_data = json.loads(_txt)
+                                            break
+                                        except Exception:
+                                            m = re.search(r'\{.*?\}', _txt, re.DOTALL)
+                                            if m:
+                                                try:
+                                                    kw_data = json.loads(m.group(0))
+                                                    break
+                                                except Exception:
+                                                    pass
                             except Exception as e:
-                                logger.warning(f"Gemini model {model} failed: {e}")
+                                logger.warning(f"Gemini keyword extract ({model}) failed: {e}")
                                 continue
 
-                        if analysis:
-                            admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
-                            if admin_phone.startswith("880"):
-                                admin_phone = "0" + admin_phone[3:]
+                        # ── STAGE 2: Search the 827-product catalog by keywords ──
+                        candidates = []
+                        if kw_data and self.db:
+                            eng_name = (kw_data.get("english_name") or "").lower()
+                            keywords = [k.strip().lower() for k in (kw_data.get("keywords") or "").split(",") if k.strip()]
+                            search_terms = list(dict.fromkeys(
+                                [w for w in re.findall(r'\w+', eng_name) if len(w) > 2] +
+                                [k for k in keywords if len(k) > 2]
+                            ))[:8]
+                            if search_terms:
+                                like_clauses = " OR ".join(
+                                    ["(LOWER(name) LIKE ? OR LOWER(IFNULL(description,'')) LIKE ? OR LOWER(IFNULL(category,'')) LIKE ?)"] * len(search_terms)
+                                )
+                                params = []
+                                for t in search_terms:
+                                    params.extend([f"%{t}%", f"%{t}%", f"%{t}%"])
+                                try:
+                                    rows = self.db(
+                                        f"SELECT id, name, price, discount_price, image_url, category "
+                                        f"FROM products WHERE image_url IS NOT NULL AND image_url != '' "
+                                        f"AND ({like_clauses}) ORDER BY id ASC LIMIT 10",
+                                        tuple(params), fetchall=True
+                                    ) or []
+                                    candidates = [r for r in rows if r.get("image_url")]
+                                except Exception as e:
+                                    logger.error(f"Catalog search error: {e}")
+
+                        # ── STAGE 3: Vision ranking — pick best visual match among candidates ──
+                        best_match = None
+                        best_confidence = 0
+                        if candidates:
+                            top_n = candidates[:5]
+                            cand_parts = []
+                            for idx, c in enumerate(top_n):
+                                try:
+                                    cimg = self._download_telegram_file(c["image_url"])
+                                    if cimg:
+                                        cb64 = _b64.b64encode(cimg).decode('utf-8')
+                                        cand_parts.append({"text": f"CANDIDATE_{idx+1}: id={c['id']} name={c['name']}"})
+                                        cand_parts.append({"inline_data": {"mime_type": "image/jpeg", "data": cb64}})
+                                except Exception as e:
+                                    logger.warning(f"Candidate {c.get('id')} download failed: {e}")
+                            if cand_parts:
+                                rank_prompt = (
+                                    "The FIRST image is the customer photo. The remaining images are catalog candidates. "
+                                    "Which candidate shows the SAME product as the customer image? "
+                                    "Compare shape, color, design, size, material carefully. "
+                                    "Return ONLY JSON: "
+                                    '{"best_candidate": <1-5 or 0 if no match>, "confidence": <0-100>}\n'
+                                    "Use 0 with confidence<70 if nothing clearly matches."
+                                )
+                                parts = [{"text": rank_prompt}, {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}]
+                                parts.extend(cand_parts)
+                                for model in ['gemini-2.5-flash', 'gemini-1.5-flash']:
+                                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+                                    try:
+                                        r = REQUESTS_SESSION.post(url, json={"contents": [{"parts": parts}]}, timeout=45)
+                                        if r.status_code == 200:
+                                            result = r.json()
+                                            if result.get("candidates"):
+                                                _rtxt = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+                                                if _rtxt.startswith(_bt):
+                                                    _rtxt = _rtxt[3:]
+                                                if _rtxt.endswith(_bt):
+                                                    _rtxt = _rtxt[:-3]
+                                                _rtxt = _rtxt.strip()
+                                                m = re.search(r'\{.*?\}', _rtxt, re.DOTALL)
+                                                if m:
+                                                    rank = json.loads(m.group(0))
+                                                    bidx = int(rank.get("best_candidate", 0))
+                                                    conf = int(rank.get("confidence", 0))
+                                                    if 1 <= bidx <= len(top_n) and conf >= 70:
+                                                        best_match = top_n[bidx - 1]
+                                                        best_confidence = conf
+                                                    break
+                                    except Exception as e:
+                                        logger.warning(f"Gemini ranking ({model}) failed: {e}")
+                                        continue
+
+                        # ── STAGE 4: Build the reply ──
+                        admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+                        if admin_phone.startswith("880"):
+                            admin_phone = "0" + admin_phone[3:]
+
+                        bengali_desc = (kw_data.get("bengali_description") or "").strip() if kw_data else ""
+                        if bengali_desc and not bengali_desc.endswith(("।", ".", "!")):
+                            bengali_desc += "।"
+
+                        if best_match:
+                            price = best_match.get("discount_price") or best_match.get("price") or 0
+                            orig_price = best_match.get("price") or 0
+                            has_discount = best_match.get("discount_price") and best_match["discount_price"] < orig_price
+                            price_str = f"৳{int(price):,}"
+                            orig_str = f" ~~৳{int(orig_price):,}~~" if has_discount else ""
+
+                            catalog_section = (
+                                "✅ *ক্যাটালগে পাওয়া গেছে!*\n"
+                                "━━━━━━━━━━━━━━━\n"
+                                f"🏷️ *{best_match['name']}*\n"
+                                f"💰 দাম: *{price_str}*{orig_str}\n"
+                            )
+                            if best_match.get("category"):
+                                catalog_section += f"📂 ক্যাটাগরি: {best_match['category']}\n"
+                            catalog_section += f"🔍 মিল: {best_confidence}%\n"
 
                             if is_admin:
-                                reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
+                                reply = (
+                                    f"📸 *ছবি বিশ্লেষণ:*\n\n{bengali_desc}\n\n"
+                                    f"{catalog_section}\n"
+                                    f"🆔 Product ID: `{best_match['id']}`"
+                                )
                             else:
                                 reply = (
-                                    f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}\n\n"
-                                    f"---\n"
-                                    f"অর্ডার বা বিস্তারিত জানতে যোগাযোগ করুন:\n"
+                                    f"📸 *ছবি বিশ্লেষণ:*\n\n{bengali_desc}\n\n"
+                                    f"{catalog_section}\n"
+                                    "---\n"
+                                    "অর্ডার করতে যোগাযোগ করুন:\n"
                                     f"📱 *{admin_phone}*"
                                 )
-                            self.send_message(chat_id, reply)
-                            return reply
                         else:
-                            self.send_message(chat_id, "❌ Vision API-তে সমস্যা হচ্ছে, পরে আবার চেষ্টা করুন।")
-                            return None
+                            if is_admin:
+                                _kw_label = kw_data.get("english_name", "N/A") if kw_data else "N/A"
+                                reply = (
+                                    f"📸 *ছবি বিশ্লেষণ:*\n\n"
+                                    f"{bengali_desc or 'ছবি পেয়েছি কিন্তু বিশ্লেষণ সম্ভব হয়নি।'}\n\n"
+                                    f"⚠️ ক্যাটালগে মেলেনি (খোঁজা হয়েছে: {_kw_label})\n"
+                                    f"ক্যাটালগ candidates: {len(candidates)}টি"
+                                )
+                            else:
+                                reply = (
+                                    f"📸 *ছবি বিশ্লেষণ:*\n\n"
+                                    f"{bengali_desc or 'আপনার ছবিটি পেয়েছি।'}\n\n"
+                                    "⚠️ এই পণ্যটি এখনো ক্যাটালগে যোগ হয়নি।\n"
+                                    "বিস্তারিত জানতে admin এ যোগাযোগ করুন:\n"
+                                    f"📱 *{admin_phone}*"
+                                )
+
+                        self.send_message(chat_id, reply)
+                        return reply
                     except Exception as e:
                         logger.error(f"Photo analysis error: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
                         self.send_message(chat_id, f"❌ ছবি প্রসেস করতে সমস্যা: {str(e)[:200]}")
                         return None
                 return None
