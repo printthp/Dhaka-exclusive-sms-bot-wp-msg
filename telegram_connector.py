@@ -598,7 +598,55 @@ class TelegramBot:
         username = message.get("from", {}).get("username", "")
         first_name = message.get("from", {}).get("first_name", "")
         
-        if not text or not chat_id:
+        if not chat_id:
+            return None
+        
+        # ── PHOTO HANDLING: Use Gemini Vision ──
+        photo = message.get("photo")
+        document = message.get("document")
+        if (photo or document) and not text:
+            # Get largest photo
+            if photo:
+                file_id = photo[-1].get("file_id")
+            else:
+                file_id = document.get("file_id")
+            
+            logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: [PHOTO]")
+            
+            # Only admins can get vision analysis (per security)
+            if is_admin:
+                # Get file from Telegram
+                file_info = self._api("getFile", {"file_id": file_id})
+                if file_info.get("ok"):
+                    file_path = file_info["result"]["file_path"]
+                    file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+                    try:
+                        img_data = requests.get(file_url, timeout=30).content
+                        # Use AI agent's vision
+                        from ai_agent import ai_agent_singleton
+                        if ai_agent_singleton and hasattr(ai_agent_singleton, 'analyze_image'):
+                            analysis = ai_agent_singleton.analyze_image(img_data)
+                            reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
+                        else:
+                            # Inline call
+                            from ai_agent import AI_Image
+                            analysis = AI_Image(img_data).analyze()
+                            reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
+                        self.send_message(chat_id, reply)
+                        return reply
+                    except Exception as e:
+                        logger.error(f"Photo analysis error: {e}")
+                        self.send_message(chat_id, f"❌ ছবি প্রসেস করতে সমস্যা: {str(e)}")
+                        return None
+                else:
+                    self.send_message(chat_id, "❌ ছবি আনতে সমস্যা হয়েছে।")
+                    return None
+            else:
+                # Non-admin: redirect
+                self.send_message(chat_id, "📸 ছবি পেয়েছি! অর্ডারের জন্য 8801717121068 নম্বরে SMS করুন।")
+                return "photo_redirect"
+        
+        if not text:
             return None
 
         sender_name = username or first_name or str(user_id)
