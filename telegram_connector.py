@@ -626,6 +626,14 @@ class TelegramBot:
         try:
             if "message" not in msg:
                 return None
+            # High-priority log: always shows what's incoming
+            _m = msg.get("message", {})
+            _has_photo = bool(_m.get("photo"))
+            _has_doc = bool(_m.get("document"))
+            _text_preview = (_m.get("text") or _m.get("caption") or "")[:60]
+            _chat_id = _m.get("chat", {}).get("id")
+            _user = _m.get("from", {}).get("id")
+            logger.info(f"TG msg from={_user} chat={_chat_id} photo={_has_photo} doc={_has_doc} text={_text_preview!r}")
             
             message = msg["message"]
             chat_id = message.get("chat", {}).get("id")
@@ -643,6 +651,7 @@ class TelegramBot:
             logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: {text[:80] if text else '[non-text]'}")
             
             # ── PHOTO HANDLING: Use Gemini Vision (works for BOTH admin and customer) ──
+            logger.info(f"TG [{user_id}]: photo handler entered, is_admin={is_admin}, text={text[:50]!r}")
             photo = message.get("photo")
             document = message.get("document")
             if photo or document:
