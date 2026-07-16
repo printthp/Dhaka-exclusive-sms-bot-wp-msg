@@ -306,7 +306,7 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
                 return True
             if fetchone:
                 row = c.fetchone()
-                return dict(row) if row else None
+                return dict(row) if row else {}
             if fetchall:
                 rows = c.fetchall()
                 return [dict(r) for r in rows]
@@ -572,8 +572,8 @@ def admin_portal():
     s = get_all_settings()
 
     analytics = {
-        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True).get("c", 0) or 0,
+        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True).get("s", 0) or 0,
         "chart_data": get_chart_data()
     }
 
@@ -594,7 +594,7 @@ def admin_portal():
     per_page = 20
     offset = (page - 1) * per_page
     
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True).get("c", 0) or 0
     total_pages = (total_products + per_page - 1) // per_page
     
     products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
@@ -628,9 +628,9 @@ def admin_portal():
 
     template_map = {"products": "inventory"}
     template_name = template_map.get(tab, tab)
-    team_count = db_query("SELECT COUNT(*) as c FROM team_members", fetchone=True)["c"] or 0
-    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders", fetchone=True)["c"] or 0
-    open_complains = db_query("SELECT COUNT(*) as c FROM team_complains WHERE status='open'", fetchone=True)["c"] or 0
+    team_count = db_query("SELECT COUNT(*) as c FROM team_members", fetchone=True).get("c", 0) or 0
+    group_orders_count = db_query("SELECT COUNT(*) as c FROM group_orders", fetchone=True).get("c", 0) or 0
+    open_complains = db_query("SELECT COUNT(*) as c FROM team_complains WHERE status='open'", fetchone=True).get("c", 0) or 0
 
     return render_template(f"{template_name}.html", settings=s, analytics=analytics, orders=orders, users=users, products=products, agent_logs=agent_logs, payment_methods=payment_methods, chat_history=chat_history, active_chat=chat_with, msg=msg, page=page, total_pages=total_pages, total_products=total_products, per_page=per_page, sort_by=sort_param, low_stock_count=low_stock_count, out_stock_count=out_stock_count, discount_count=discount_count, total_value=total_value, team_count=team_count, group_orders_count=group_orders_count, open_complains=open_complains)
 
@@ -1963,8 +1963,8 @@ def search_products():
 
     s = get_all_settings()
     analytics = {
-        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True)["c"] or 0,
-        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True)["s"] or 0,
+        "total_orders": db_query("SELECT COUNT(*) as c FROM orders", fetchone=True).get("c", 0) or 0,
+        "total_revenue": db_query("SELECT SUM(total) as s FROM orders", fetchone=True).get("s", 0) or 0,
         "chart_data": get_chart_data()
     }
     orders = db_query("SELECT * FROM orders ORDER BY id DESC LIMIT 100", fetchall=True) or []
@@ -2155,7 +2155,7 @@ def export_excel():
     per_page = 20
     offset = (page - 1) * per_page
     
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True).get("c", 0) or 0
     total_pages = (total_products + per_page - 1) // per_page
     
     products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
@@ -2215,7 +2215,7 @@ def export_pdf():
     per_page = 20
     offset = (page - 1) * per_page
     
-    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True)["c"] or 0
+    total_products = db_query("SELECT COUNT(*) as c FROM products", fetchone=True).get("c", 0) or 0
     total_pages = (total_products + per_page - 1) // per_page
     
     products = db_query(f"SELECT * FROM products ORDER BY {products_order} LIMIT ? OFFSET ?", (per_page, offset), fetchall=True) or []
