@@ -512,17 +512,15 @@ class TrainingCommandHandler:
 # ============================================================================
 
 class TelegramBot:
-
-    def __init__(self, token: str = "", get_ai_reply_fn=None, db_query_fn=None):
-        self._known_admin_chats: set = set()
     """Telegram Bot that bridges to existing AI pipeline"""
-    
+
     def __init__(self, token: str = "", get_ai_reply_fn=None, db_query_fn=None):
         self.token = token or TELEGRAM_TOKEN
         self.get_ai_reply = get_ai_reply_fn
         self.db = db_query_fn
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.last_update_id = 0
+        self._known_admin_chats: set = set()
         self._running = False
         self._thread = None
         
