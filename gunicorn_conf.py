@@ -1,8 +1,7 @@
 """Gunicorn config for Dhaka Exclusive Bot.
 
-Hooks into the worker lifecycle to start the Telegram bot polling
-on the first worker boot (only once across all workers, using a
-file lock so the other 2 workers skip the start).
+Uses gthread worker class so the Telegram polling background thread
+can run concurrently with HTTP request handling in the same worker.
 """
 import os
 import sys
@@ -18,6 +17,14 @@ logger = logging.getLogger("gunicorn.error")
 
 LOCK_PATH = os.path.join(tempfile.gettempdir(), "dhaka_bot_telegram.lock")
 _lock_fd = None
+
+# Worker settings
+worker_class = "gthread"
+threads = 2  # Allow 2 threads per worker: 1 for HTTP, 1 for polling
+workers = 1  # Just 1 worker since polling needs to be in the same process
+bind = "0.0.0.0:5000"
+timeout = 120
+loglevel = "info"
 
 
 def _acquire_lock():
@@ -57,8 +64,7 @@ def post_worker_init(worker):
     """Called just after a worker has initialized.
 
     Uses a file lock to ensure only ONE worker across all gunicorn
-    worker processes starts Telegram long-polling. The other workers
-    skip — they just serve HTTP.
+    worker processes starts Telegram long-polling.
     """
     if not _acquire_lock():
         logger.info("Telegram polling already owned by another worker — skipping in worker %s", worker.pid)
