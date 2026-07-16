@@ -647,7 +647,7 @@ class TelegramBot:
                             file_path = file_info["result"]["file_path"]
                             file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
                             try:
-                                img_data = REQUESTS_SESSION.get(file_url, timeout=30).content
+                                img_data = self._download_telegram_file(file_url)
                                 # Inline Gemini Vision call
                                 from app import GEMINI_API_KEY
                                 import base64 as _b64
@@ -839,6 +839,23 @@ class TelegramBot:
             self._thread.join(timeout=5)
         logger.info("Telegram polling stopped.")
     
+
+    def _download_telegram_file(self, file_url: str, max_retries: int = 3) -> bytes:
+        """Download a file from Telegram with retry logic"""
+        import time
+        for attempt in range(max_retries):
+            try:
+                # Use stream for large files, longer timeout
+                r = REQUESTS_SESSION.get(file_url, timeout=60, stream=True)
+                if r.status_code == 200:
+                    return r.content
+                logger.warning(f"Download attempt {attempt+1}: status {r.status_code}")
+            except Exception as e:
+                logger.warning(f"Download attempt {attempt+1} failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)  # exponential backoff
+        return b""
+
     def _polling_loop(self):
         """Background long-polling loop"""
         retry_delay = 2
