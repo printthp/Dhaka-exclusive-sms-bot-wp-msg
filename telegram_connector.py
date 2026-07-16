@@ -633,7 +633,8 @@ class TelegramBot:
             _text_preview = (_m.get("text") or _m.get("caption") or "")[:60]
             _chat_id = _m.get("chat", {}).get("id")
             _user = _m.get("from", {}).get("id")
-            logger.info(f"TG msg from={_user} chat={_chat_id} photo={_has_photo} doc={_has_doc} text={_text_preview!r}")
+            print(f"TG_MSG from={_user} chat={_chat_id} photo={_has_photo} doc={_has_doc} text={_text_preview!r}", flush=True)
+            sys.stdout.flush()
             
             message = msg["message"]
             chat_id = message.get("chat", {}).get("id")
@@ -926,6 +927,7 @@ class TelegramBot:
                 })
 
                 if updates.get("ok") and updates.get("result"):
+                    print(f"TG_UPDATES: got {len(updates['result'])} updates", flush=True)
                     for update in updates["result"]:
                         self.last_update_id = max(self.last_update_id, update["update_id"])
                         try:
