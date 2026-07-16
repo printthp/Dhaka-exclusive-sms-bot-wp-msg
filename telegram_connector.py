@@ -567,13 +567,13 @@ class TelegramBot:
     # ─── Telegram API Helpers ───
     
     def _api(self, method: str, data: dict = None, files: dict = None) -> dict:
-        """Call Telegram Bot API"""
+        """Call Telegram Bot API using persistent session for connection reuse"""
         url = f"{self.base_url}/{method}"
         try:
             if files:
-                r = requests.post(url, data=data or {}, files=files, timeout=30)
+                r = REQUESTS_SESSION.post(url, data=data or {}, files=files, timeout=30)
             else:
-                r = requests.post(url, json=data or {}, timeout=30)
+                r = REQUESTS_SESSION.post(url, json=data or {}, timeout=30)
             return r.json()
         except Exception as e:
             logger.error(f"Telegram API error ({method}): {e}")
@@ -647,7 +647,7 @@ class TelegramBot:
                             file_path = file_info["result"]["file_path"]
                             file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
                             try:
-                                img_data = requests.get(file_url, timeout=30).content
+                                img_data = REQUESTS_SESSION.get(file_url, timeout=30).content
                                 # Inline Gemini Vision call
                                 from app import GEMINI_API_KEY
                                 import base64 as _b64
@@ -658,7 +658,7 @@ class TelegramBot:
                                         {"text": "এই ছবিটি বিশ্লেষণ করুন। পণ্য হলে নাম, ধরন, আনুমানিক দাম বলুন। সংক্ষেপে বাংলায়।"},
                                         {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
                                     ]}]}
-                                    r = requests.post(url, json=payload, timeout=30)
+                                    r = REQUESTS_SESSION.post(url, json=payload, timeout=30)
                                     if r.status_code == 200:
                                         result = r.json()
                                         if result.get("candidates"):
