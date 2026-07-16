@@ -566,15 +566,24 @@ class TelegramBot:
     
     # ─── Telegram API Helpers ───
     
-    def _api(self, method: str, data: dict = None, files: dict = None) -> dict:
-        """Call Telegram Bot API using persistent session for connection reuse"""
+    def _api(self, method: str, data: dict = None, files: dict = None, timeout: int = 10) -> dict:
+        """Call Telegram Bot API using persistent session for connection reuse.
+
+        Short timeout (10s) so a stuck request doesn't block the poller for 30s+.
+        """
         url = f"{self.base_url}/{method}"
         try:
             if files:
-                r = REQUESTS_SESSION.post(url, data=data or {}, files=files, timeout=30)
+                r = REQUESTS_SESSION.post(url, data=data or {}, files=files, timeout=timeout)
             else:
-                r = REQUESTS_SESSION.post(url, json=data or {}, timeout=30)
+                r = REQUESTS_SESSION.post(url, json=data or {}, timeout=timeout)
             return r.json()
+        except requests.exceptions.ReadTimeout:
+            logger.debug(f"Telegram {method}: read timeout (network slow)")
+            return {"ok": False, "error": "timeout"}
+        except requests.exceptions.ConnectionError as e:
+            logger.warning(f"Telegram {method}: connection error: {e}")
+            return {"ok": False, "error": str(e)}
         except Exception as e:
             logger.error(f"Telegram API error ({method}): {e}")
             return {"ok": False, "error": str(e)}
@@ -601,6 +610,10 @@ class TelegramBot:
             "photo": photo_url,
             "caption": caption[:1000]
         })
+
+    def send_chat_action(self, chat_id: int, action: str = "typing") -> dict:
+        """Send chat action (typing, upload_photo, etc.) — short timeout"""
+        return self._api("sendChatAction", {"chat_id": chat_id, "action": action}, timeout=5)
     
     # ─── Message Processing ───
     
@@ -629,61 +642,94 @@ class TelegramBot:
             is_admin = self._is_admin_tg(user_id)
             logger.info(f"TG [{'ADMIN' if is_admin else 'USER'} {sender_name}]: {text[:80] if text else '[non-text]'}")
             
-            # ── PHOTO HANDLING: Use Gemini Vision (admin only for analysis) ──
+            # ── PHOTO HANDLING: Use Gemini Vision (works for BOTH admin and customer) ──
             photo = message.get("photo")
             document = message.get("document")
-            if (photo or document) and not text:
+            if photo or document:
                 file_id = None
                 if photo:
                     file_id = photo[-1].get("file_id")
                 elif document:
                     file_id = document.get("file_id")
-                
+
                 if file_id:
-                    if is_admin:
-                        # Admin: full vision analysis
-                        file_info = self._api("getFile", {"file_id": file_id})
-                        if file_info.get("ok"):
-                            file_path = file_info["result"]["file_path"]
-                            file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
-                            try:
-                                img_data = self._download_telegram_file(file_url)
-                                # Inline Gemini Vision call
-                                from app import GEMINI_API_KEY
-                                import base64 as _b64
-                                img_b64 = _b64.b64encode(img_data).decode('utf-8')
-                                for model in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest']:
-                                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-                                    payload = {"contents": [{"parts": [
-                                        {"text": "এই ছবিটি বিশ্লেষণ করুন। পণ্য হলে নাম, ধরন, আনুমানিক দাম বলুন। সংক্ষেপে বাংলায়।"},
-                                        {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
-                                    ]}]}
-                                    r = REQUESTS_SESSION.post(url, json=payload, timeout=30)
-                                    if r.status_code == 200:
-                                        result = r.json()
-                                        if result.get("candidates"):
-                                            analysis = result["candidates"][0]["content"]["parts"][0]["text"]
-                                            reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
-                                            self.send_message(chat_id, reply)
-                                            return reply
-                                self.send_message(chat_id, "❌ Vision API-তে সমস্যা হচ্ছে।")
-                                return None
-                            except Exception as e:
-                                logger.error(f"Photo analysis error: {e}")
-                                self.send_message(chat_id, f"❌ ছবি প্রসেস করতে সমস্যা: {str(e)[:200]}")
-                                return None
-                        else:
-                            self.send_message(chat_id, "❌ ছবি আনতে সমস্যা।")
+                    # Acknowledge receipt immediately so user knows we got the photo
+                    try:
+                        self.send_chat_action(chat_id, "typing")
+                    except Exception:
+                        pass
+
+                    file_info = self._api("getFile", {"file_id": file_id})
+                    if not file_info.get("ok"):
+                        logger.error(f"getFile failed: {file_info}")
+                        self.send_message(chat_id, "❌ দুঃখিত, ছবিটি আনতে সমস্যা হচ্ছে। আবার পাঠান।")
+                        return None
+
+                    file_path = file_info["result"]["file_path"]
+                    file_url = f"https://api.telegram.org/file/bot{self.token}/{file_path}"
+
+                    try:
+                        img_data = self._download_telegram_file(file_url)
+                        if not img_data:
+                            self.send_message(chat_id, "❌ ছবি ডাউনলোড করা যাচ্ছে না।")
                             return None
-                    else:
-                        # Non-admin photo: redirect
-                        admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
-                        if admin_phone.startswith("880"):
-                            admin_phone = "0" + admin_phone[3:]
-                        self.send_message(chat_id, 
-                            f"📸 ছবি পেয়েছি! অর্ডারের জন্য যোগাযোগ করুন:\n"
-                            f"📱 *{admin_phone}*")
-                        return "photo_redirect"
+
+                        # Inline Gemini Vision call
+                        from app import GEMINI_API_KEY
+                        import base64 as _b64
+                        img_b64 = _b64.b64encode(img_data).decode('utf-8')
+
+                        # Use caption as the question, default if no caption
+                        user_q = text or "এই ছবিটি বিশ্লেষণ করুন।"
+                        prompt = (
+                            f"আপনি ArShi, Dhaka Exclusive হাউজওয়্যার শপের AI sales assistant।\n"
+                            f"Customer প্রশ্ন: {user_q}\n\n"
+                            f"ছবিটি বিশ্লেষণ করে বাংলায় সংক্ষেপে উত্তর দিন।\n"
+                            f"পণ্য হলে: নাম, ধরন, বৈশিষ্ট্য, আনুমানিক দাম (BDT) বলুন।\n"
+                            f"অর্ডার বা বিস্তারিত জানতে admin এ পাঠান।"
+                        )
+
+                        analysis = None
+                        for model in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest']:
+                            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+                            payload = {"contents": [{"parts": [
+                                {"text": prompt},
+                                {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+                            ]}]}
+                            try:
+                                r = REQUESTS_SESSION.post(url, json=payload, timeout=30)
+                                if r.status_code == 200:
+                                    result = r.json()
+                                    if result.get("candidates"):
+                                        analysis = result["candidates"][0]["content"]["parts"][0]["text"]
+                                        break
+                            except Exception as e:
+                                logger.warning(f"Gemini model {model} failed: {e}")
+                                continue
+
+                        if analysis:
+                            admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+                            if admin_phone.startswith("880"):
+                                admin_phone = "0" + admin_phone[3:]
+
+                            if is_admin:
+                                reply = f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}"
+                            else:
+                                reply = (
+                                    f"📸 *ছবি বিশ্লেষণ:*\n\n{analysis}\n\n"
+                                    f"---\n"
+                                    f"অর্ডার বা বিস্তারিত জানতে যোগাযোগ করুন:\n"
+                                    f"📱 *{admin_phone}*"
+                                )
+                            self.send_message(chat_id, reply)
+                            return reply
+                        else:
+                            self.send_message(chat_id, "❌ Vision API-তে সমস্যা হচ্ছে, পরে আবার চেষ্টা করুন।")
+                            return None
+                    except Exception as e:
+                        logger.error(f"Photo analysis error: {e}")
+                        self.send_message(chat_id, f"❌ ছবি প্রসেস করতে সমস্যা: {str(e)[:200]}")
+                        return None
                 return None
             
             if not text:
@@ -857,17 +903,19 @@ class TelegramBot:
         return b""
 
     def _polling_loop(self):
-        """Background long-polling loop"""
-        retry_delay = 2
-        
+        """Background long-polling loop with adaptive timeouts"""
+        retry_delay = 1
+
         while self._running:
             try:
+                # Use short timeout for getUpdates to avoid blocking on slow networks.
+                # Telegram long-polling ignores server-side timeout on broken connections.
                 updates = self._api("getUpdates", {
                     "offset": self.last_update_id + 1,
-                    "timeout": 30,
+                    "timeout": 5,
                     "allowed_updates": ["message"]
                 })
-                
+
                 if updates.get("ok") and updates.get("result"):
                     for update in updates["result"]:
                         self.last_update_id = max(self.last_update_id, update["update_id"])
@@ -875,18 +923,26 @@ class TelegramBot:
                             self.process_message(update)
                         except Exception as e:
                             logger.error(f"Process message error: {e}")
-                    
-                    retry_delay = 0.5  # Fast poll when messages arrive
+
+                    retry_delay = 0.2  # Fast poll when messages arrive
                 else:
-                    retry_delay = min(retry_delay * 1.5, 10)
-                
+                    retry_delay = min(retry_delay * 1.2, 3)
+
                 time.sleep(retry_delay)
-                
+
             except requests.Timeout:
-                time.sleep(1)
+                # Network is slow — Telegram will return empty if no updates, that's fine
+                time.sleep(0.5)
+            except requests.exceptions.ReadTimeout:
+                # Read timeout — restart connection quickly
+                logger.debug("getUpdates read timeout, retrying...")
+                time.sleep(0.5)
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"Telegram connection error: {e}, sleeping 2s")
+                time.sleep(2)
             except Exception as e:
                 logger.error(f"Polling error: {e}")
-                time.sleep(5)
+                time.sleep(2)
     
     # ─── Webhook Mode (for production) ───
     
