@@ -929,7 +929,7 @@ class TelegramBot:
 
                 if updates.get("ok") and updates.get("result"):
                     with open("/tmp/tg_debug.log", "a") as f:
-                        f.write(f"TG_UPDATES: got {len(updates[\'result\'])} updates\n")
+                        f.write(f"TG_UPDATES: got {len(updates['result'])} updates\n")
                         f.flush()
                     for update in updates["result"]:
                         self.last_update_id = max(self.last_update_id, update["update_id"])
