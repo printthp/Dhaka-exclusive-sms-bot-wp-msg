@@ -50,6 +50,13 @@ MEDIA_FOLDER = os.path.join(os.path.dirname(DB_PATH), "media")
 if not os.path.exists(MEDIA_FOLDER):
     os.makedirs(MEDIA_FOLDER)
 
+# === ArShi Bot Persona ===
+ARSHI_PERSONA = """তোমার নাম ArShi (আরশি)। তুমি Dhaka Exclusive-র AI assistant।
+তুমি সবসময় বাংলায় (Banglish-friendly) কথা বলো, বন্ধুসুলভ, professional ও সহায়ক।
+তোমাকে কেউ জিজ্ঞেস করলে 'তুমি কে?' — তুমি উত্তর দেবে: 'আমি ArShi, Dhaka Exclusive-র AI assistant'।
+তুমি কখনো অন্য কোনো নাম ধরে নিজেকে পরিচয় দেবে না।"""
+# === End ArShi Persona ===
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dhaka-exclusive-master-ultra-v2026-final")
 application = app

@@ -657,24 +657,32 @@ class TelegramBot:
         if text in ("/start", "/start@ArshibyabidBot"):
             if is_admin:
                 welcome = (
-                    f"🟢 *স্বাগতম {first_name or 'অ্যাডমিন'}!*\n\n"
-                    f"*Dhaka Exclusive Bot* সচল আছে।\n\n"
-                    f"📚 *কমান্ডসমূহ:*\n"
+                    f"🟢 আসসালামু আলাইকুম *{first_name or 'অ্যাডমিন'} সাহেব!*\n\n"
+                    f"আমি *ArShi* — আপনার *Dhaka Exclusive* বটের AI assistant। 😊\n\n"
+                    f"📚 *আমার কমান্ডসমূহ:*\n"
                     f"• `!help` — সব কমান্ড দেখুন\n"
-                    f"• `!teach <প্রশ্ন> | <উত্তর>` — বটকে শেখান\n"
-                    f"• `!stats` — পরিসংখ্যান\n"
+                    f"• `!teach <প্রশ্ন> | <উত্তর>` — আমাকে শেখান\n"
+                    f"• `!stats` — কত শিখেছি দেখুন\n"
                     f"• `!patterns` — শেখা প্যাটার্ন\n"
-                    f"• `!faq` — অটো-জেনারেটেড FAQ\n"
-                    f"• `!ping` — বট সচল কিনা\n\n"
-                    f"আমাকে যেকোনো প্রশ্ন করুন — AI reply দেবো।\n"
-                    f"অথবা `!teach` দিয়ে নতুন তথ্য শেখান।"
+                    f"• `!faq` — অটো FAQ\n"
+                    f"• `!ping` — আমি সচল কিনা\n\n"
+                    f"আমাকে যেকোনো প্রশ্ন করুন, আমি উত্তর দেবো! 🚀"
                 )
             else:
+                # CUSTOMER gets the ArShi intro
+                admin_phone = ADMIN_PHONES[0].strip() if ADMIN_PHONES and ADMIN_PHONES[0].strip() else "01717121068"
+                if admin_phone.startswith("880"):
+                    admin_phone = "0" + admin_phone[3:]
                 welcome = (
-                    f"👋 *স্বাগতম {first_name or 'ভাইয়া'}!*\n\n"
-                    f"এই বট শুধুমাত্র অ্যাডমিন ব্যবহারের জন্য।\n\n"
-                    f"🛒 *অর্ডার বা সাহায্যের জন্য:*\n"
-                    f"📱 WhatsApp/SMS করুন: *01717121068*\n\n"
+                    f"👋 আসসালামু আলাইকুম! *আমি ArShi* 😊\n\n"
+                    f"আমি *Dhaka Exclusive*-র AI assistant।\n"
+                    f"আপনাকে কীভাবে সাহায্য করতে পারি?\n\n"
+                    f"🛍️ পণ্য সম্পর্কে জানতে\n"
+                    f"💰 দাম জানতে\n"
+                    f"📦 অর্ডার করতে\n"
+                    f"🚚 ডেলিভারি সম্পর্কে\n\n"
+                    f"আমার সাথে কথা বলুন বা অর্ডারের জন্য SMS করুন:\n"
+                    f"📱 *{admin_phone}*\n\n"
                     f"ধন্যবাদ! 🙏"
                 )
             self.send_message(chat_id, welcome)
@@ -722,12 +730,13 @@ class TelegramBot:
         if display_phone.startswith("880"):
             display_phone = "0" + display_phone[3:]
         redirect_msg = (
-            f"👋 *স্বাগতম {first_name or 'ভাইয়া'}!*\n\n"
-            f"এই বট শুধুমাত্র অ্যাডমিন ব্যবহারের জন্য।\n"
-            f"অর্ডার বা সাহায্যের জন্য দয়া করে নিচের নাম্বারে SMS/WhatsApp করুন:\n\n"
-            f"📱 *হোয়াটসঅ্যাপ:* {display_phone}\n"
-            f"💬 অথবা সরাসরি SMS করুন এই নাম্বারে\n\n"
-            f"ধন্যবাদ! 🙏"
+            f"👋 আসসালামু আলাইকুম! আমি *ArShi* 😊\n\n"
+            f"আমি *Dhaka Exclusive*-র AI assistant।\n"
+            f"আপনার পণ্য, দাম, অর্ডার বা ডেলিভারি সংক্রান্ত যেকোনো প্রশ্নে\n"
+            f"আমি সাহায্য করতে পারি!\n\n"
+            f"অর্ডার বা বিশেষ সাহায্যের জন্য যোগাযোগ করুন:\n"
+            f"📱 *WhatsApp/SMS:* {display_phone}\n\n"
+            f"আমার সাথে কথা বলতে থাকুন! 🙏"
         )
         # Also accept !help/!ping from anyone (public commands)
         if text in ("!ping", "!পিং"):
